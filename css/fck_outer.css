@@ -1,0 +1,14 @@
+/* przygotowac na koncu */
+
+body, h1, h2, h3, h4, h5, h6,form,p,hr{
+	margin: 0;
+	padding: 0;
+	color: #173248;
+	font-family: Verdana,Tahoma;
+}
+
+div{
+	line-height: 150%;
+	font-size: 12px;
+}
+

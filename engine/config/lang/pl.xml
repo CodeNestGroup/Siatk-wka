@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<langXML lang="pl" defaultMessage="Brak tłumaczenia">
+	<msg label="access_denied" value="Niepoprawny token" />
+</langXML>

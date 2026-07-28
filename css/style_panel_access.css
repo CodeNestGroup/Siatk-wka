@@ -1,0 +1,53 @@
+﻿html, body{
+    font-family: Verdana,Tahoma;
+    background-color: #d8d4d3;
+}
+
+body{
+    padding: 0px;
+    width: 1188px;
+    overflow: hidden;
+    margin: auto;
+    background-repeat: no-repeat;
+}
+
+#outer{
+    min-height:1012px;
+    height: auto !important;
+    height:1012px;
+    height: 100%;
+    background-image: url('../images/panel_access.jpg');
+}
+
+body #inputs{
+   position: absolute;
+   margin-top: 420px;
+   margin-left: 480px;
+}
+#error_message{
+    color: red;
+    margin-left: -25px;
+    height: 18px;
+}
+
+body #inputs .input{
+    height: 36px;
+    width: 260px;
+    border: 0;
+    font-size: 24px;
+}
+
+#login_input{
+    margin-top: 57px;
+}
+#password_input{
+    margin-top: 32px;
+}
+#login_button{
+    margin-top: 30px;
+    margin-left: 75px;
+    cursor: pointer;
+}
+input{
+    color: #838383;
+}

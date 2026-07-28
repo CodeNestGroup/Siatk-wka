@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<langXML lang="pl" defaultMessage="Brak tłumaczenia">
+	<msg label="brak" value="Bark komunikatow w module system" />
+	<msg label="access_denied" value="Dostęp zabroniony" />
+	<msg label="update_successfull" value="Dane zakutulizowano pomyślnie" />
+	<msg label="update_error" value="Błąd aktualizacji dancych" />
+</langXML>

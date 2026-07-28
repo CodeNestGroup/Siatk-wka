@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<langXML lang="pl" defaultMessage="Brak tłumaczenia">
+	<!-- SCOOBY -->
+	<msg label="companyhasimages" value="Aby usunąc firmę usuń najpierw zdjęcia." />
+	<msg label="companyhaspdf" value="Aby usunąć firmę usuń najpier plki." />
+	<msg label="imegeupdated" value="Zdjęcie zostało zaktualizowane." />
+	<msg label="galleryadded" value="Dodano nową galerię." />
+	<msg label="newimageadded" value="Zdjęcie zostało dodane." />
+        <msg label="update_succesfull" value="Galeria została zaktualizowana." />
+	<msg label="imgdeleted" value="Zdjęcie zostało usunięte." />
+	<msg label="galleryhasimages" value="Nie można usunąć galerii zawierającej zdjęcia." />
+</langXML>

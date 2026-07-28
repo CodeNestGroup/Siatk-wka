@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<langXML lang="pl" defaultMessage="Brak tłumaczenia">
+	<msg label="brak" value="Brak Artykulu, plik z xml z modulu articles" />
+	<msg label="comentdeleted" value="Usunięto komentarz." />
+	<msg label="comentaccepted" value="Zaakceptowano komentarz." />
+	
+</langXML>

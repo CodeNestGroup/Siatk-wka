@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<langXML lang="en" defaultMessage="Brak tłumaczenia">
+	<msg label="administracja" value="Login to admin interface" />
+	<msg label="uzytkownik" value="User" />
+	<msg label="haslo" value="Password" />
+	<msg label="cmstextpath" value="images/admin/tyt_1.jpg" />
+	<msg label="copyright" value="All rights reserved" />
+	<msg label="loginbutton" value="Log In" />
+	<msg label="loginerror" value="Login failed, invalid login or password, try again." />
+	<msg label="juzzalogowany" value="You are already logged in" />
+	<msg label="bledne_stare_haslo" value="The old password is incorrect" />
+	<msg label="inne_nowe_hasla" value="The value of 'new password' and 'repeat new password' are different" />
+	<msg label="haslo_zostalo_zmienione" value="The new password has been written" />
+	<msg label="blad_zmiany_hasla" value="The new password hasn't been written because an error occured." />
+	<msg label="haslo_niepuste" value="Form can't be empty!" />
+	<msg label="login_can_not_be_empty" value="Login can't be empty." />
+	<msg label="login_exist" value="Given login already exist." />
+	<msg label="wrong_password" value="Wrong password." />
+	<msg label="email_can_not_be_empty" value="Email can't be empty." />
+	<msg label="bad_format_of_email" value="Given emial adress is incorrect" />
+	<msg label="too_short_password" value="Given password is to short. 5 markers required." />
+	<msg label="save_succesfull" value="User save succefull" />
+	<msg label="save_error" value="User save error" />
+	<msg label="update_succesfull" value="User has been succefully updated" />
+	<msg label="update_error" value="An error occured - update user" />
+	<msg label="delete_succesfull" value="User has been succefully deleted" />
+	<msg label="delete_error" value="An error occured - delete user" />
+	<msg label="cant_delete_yourself" value="The can't delete yourself." />
+	<msg label="choose_user_role" value="The user role hasn't been choosen" />
+	<msg label="change_error" value="Some error occured. Please try again." />
+</langXML>
