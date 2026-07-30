@@ -1,219 +1,79 @@
-"use client"
+import { Calendar, MapPin, Users, ChevronRight, CheckCircle2 } from "lucide-react"
+import { type Match, mainRoster, waitlist, collected } from "@/lib/data"
+import { Badge } from "@/components/dashboard/ui-bits"
 
-import { MapPin, Bell, Trash2, Eye, Clock } from "lucide-react"
-import { Badge, StarRating, ProgressBar } from "./ui-bits"
-import {
-  type Match,
-  mainRoster,
-  waitlist,
-  paidCount,
-  collected,
-  expected,
-  formatDate,
-} from "@/lib/data"
-
-function CapacityBadge({ match }: { match: Match }) {
-  const enrolled = mainRoster(match).length
-  const full = enrolled >= match.capacity
-  const nearFull = enrolled >= match.capacity - 2
-  return (
-    <Badge tone={full ? "danger" : nearFull ? "warning" : "success"}>
-      {enrolled}/{match.capacity}
-      {full ? " · Full" : ""}
-    </Badge>
-  )
-}
-
-function FinancialCell({ match }: { match: Match }) {
-  const paid = paidCount(match)
-  const total = mainRoster(match).length
-  const tone = paid === total ? "success" : paid >= total / 2 ? "warning" : "danger"
-  return (
-    <div className="w-40">
-      <div className="mb-1 flex items-center justify-between text-xs font-medium">
-        <span className="text-foreground">
-          {paid}/{total} Paid
-        </span>
-        <span className="text-muted-foreground">
-          {collected(match)}/{expected(match)} PLN
-        </span>
-      </div>
-      <ProgressBar value={paid} max={total} tone={tone} />
-    </div>
-  )
-}
-
-function ActionButtons({
-  match,
-  onSelect,
-  onNotify,
-  onDelete,
-}: {
-  match: Match
-  onSelect: (m: Match) => void
-  onNotify: (m: Match) => void
-  onDelete: (m: Match) => void
-}) {
-  return (
-    <div className="flex items-center gap-1">
-      <button
-        onClick={() => onSelect(match)}
-        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-        aria-label="View roster"
-      >
-        <Eye className="h-[18px] w-[18px]" />
-      </button>
-      <button
-        onClick={() => onNotify(match)}
-        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-        aria-label="Send push notification"
-      >
-        <Bell className="h-[18px] w-[18px]" />
-      </button>
-      <button
-        onClick={() => onDelete(match)}
-        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-        aria-label="Delete match"
-      >
-        <Trash2 className="h-[18px] w-[18px]" />
-      </button>
-    </div>
-  )
-}
-
-export function MatchList({
-  matches,
-  onSelect,
-  onNotify,
-  onDelete,
-}: {
+type MatchListProps = {
   matches: Match[]
-  onSelect: (m: Match) => void
-  onNotify: (m: Match) => void
-  onDelete: (m: Match) => void
-}) {
-  return (
-    <div className="rounded-2xl border border-border bg-card shadow-sm">
-      {/* Desktop table */}
-      <div className="hidden overflow-x-auto lg:block">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
-              <th className="px-5 py-4 font-medium">Date &amp; Time</th>
-              <th className="px-5 py-4 font-medium">Location</th>
-              <th className="px-5 py-4 font-medium">Enrolled</th>
-              <th className="px-5 py-4 font-medium">Waitlist</th>
-              <th className="px-5 py-4 font-medium">Financials</th>
-              <th className="px-5 py-4 font-medium">Rating</th>
-              <th className="px-5 py-4 text-right font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {matches.map((match) => {
-              const wl = waitlist(match).length
-              return (
-                <tr
-                  key={match.id}
-                  className="group transition-colors hover:bg-secondary/60"
-                >
-                  <td className="px-5 py-4">
-                    <button
-                      onClick={() => onSelect(match)}
-                      className="text-left font-semibold text-foreground hover:text-primary"
-                    >
-                      {formatDate(match.date)}
-                    </button>
-                    <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      {match.startTime} – {match.endTime}
-                    </p>
-                  </td>
-                  <td className="px-5 py-4">
-                    <span className="flex items-center gap-1.5 text-foreground">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
-                      {match.location}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4">
-                    <CapacityBadge match={match} />
-                  </td>
-                  <td className="px-5 py-4">
-                    {wl > 0 ? (
-                      <Badge tone="warning">+{wl} on waitlist</Badge>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-4">
-                    <FinancialCell match={match} />
-                  </td>
-                  <td className="px-5 py-4">
-                    <StarRating value={match.rating} />
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex justify-end">
-                      <ActionButtons
-                        match={match}
-                        onSelect={onSelect}
-                        onNotify={onNotify}
-                        onDelete={onDelete}
-                      />
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+  onSelect: (match: Match) => void
+  onNotify: (match: Match) => void
+  onDelete?: (match: Match) => void
+}
 
-      {/* Mobile cards */}
-      <div className="divide-y divide-border lg:hidden">
-        {matches.map((match) => {
-          const wl = waitlist(match).length
-          return (
-            <div key={match.id} className="p-4">
-              <div className="flex items-start justify-between gap-3">
+export function MatchList({ matches, onSelect }: MatchListProps) {
+  return (
+    <div className="grid grid-cols-1 gap-4">
+      {matches.map((match) => {
+        const rosterCount = mainRoster(match).length
+        const waitlistCount = waitlist(match).length
+        const totalCollected = collected(match)
+        const isUpcoming = match.status === "upcoming"
+
+        return (
+          <div
+            key={match.id}
+            onClick={() => onSelect(match)}
+            className="group relative overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-sm transition-all duration-300 hover:border-primary/40 hover:shadow-md cursor-pointer"
+          >
+            {/* Subtelny gradient w tle po najechaniu */}
+            <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none" />
+
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border shadow-inner transition-transform group-hover:scale-105 ${
+                  isUpcoming ? "bg-amber-500/10 text-amber-500 border-amber-500/20" : "bg-blue-500/10 text-blue-500 border-blue-500/20"
+                }`}>
+                  <Calendar className="h-6 w-6" />
+                </div>
                 <div>
-                  <button
-                    onClick={() => onSelect(match)}
-                    className="text-left font-semibold text-foreground"
-                  >
-                    {formatDate(match.date)}
-                  </button>
-                  <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                    <Clock className="h-3 w-3" />
-                    {match.startTime} – {match.endTime}
-                  </p>
-                  <p className="mt-1 flex items-center gap-1.5 text-sm text-foreground">
-                    <MapPin className="h-4 w-4 text-muted-foreground" />
-                    {match.location}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-bold text-foreground text-base group-hover:text-primary transition-colors">
+                      {match.date}
+                    </h3>
+                    <Badge tone={isUpcoming ? "warning" : "neutral"}>
+                      {isUpcoming ? "Nadchodzący" : "Zakończony"}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1">
+                    <MapPin className="h-3.5 w-3.5 text-primary" />
+                    {match.location} • <span className="font-medium text-foreground">{match.price_per_player} PLN</span> / os.
                   </p>
                 </div>
-                <StarRating value={match.rating} />
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <CapacityBadge match={match} />
-                {wl > 0 && <Badge tone="warning">+{wl} waitlist</Badge>}
-              </div>
+              <div className="flex items-center justify-between md:justify-end gap-6 border-t md:border-t-0 pt-3 md:pt-0 border-border/60">
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1.5 bg-secondary/40 px-3 py-1.5 rounded-lg border border-border/40">
+                    <Users className="h-4 w-4 text-primary" />
+                    <span>Skład: <strong className="text-foreground">{rosterCount}/{match.capacity}</strong></span>
+                  </div>
+                  {waitlistCount > 0 && (
+                    <div className="hidden sm:flex items-center gap-1.5 bg-amber-500/10 text-amber-500 px-3 py-1.5 rounded-lg border border-amber-500/20">
+                      <span>Rezerwa: <strong>+{waitlistCount}</strong></span>
+                    </div>
+                  )}
+                  <div className="hidden lg:block">
+                    <span>Wpłaty: <strong className="text-emerald-500">{totalCollected} PLN</strong></span>
+                  </div>
+                </div>
 
-              <div className="mt-3">
-                <FinancialCell match={match} />
-              </div>
-
-              <div className="mt-3 flex items-center justify-end">
-                <ActionButtons
-                  match={match}
-                  onSelect={onSelect}
-                  onNotify={onNotify}
-                  onDelete={onDelete}
-                />
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-secondary text-muted-foreground transition-all group-hover:bg-primary group-hover:text-primary-foreground shadow-sm">
+                  <ChevronRight className="h-4 w-4" />
+                </div>
               </div>
             </div>
-          )
-        })}
-      </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
