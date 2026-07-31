@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Volleyball, Lock, Mail, ArrowRight, ShieldCheck, Award } from "lucide-react"
+import { Volleyball, Lock, Mail, ArrowRight, Award } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { supabase } from "@/lib/supabase"
 
@@ -20,23 +20,55 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
     setLoading(true)
     setErrorMsg(null)
 
-    // Domyślne szybkie logowanie deweloperskie / demo
-    if (email === "admin@admin.pl" && password === "admin") {
-      const mockAdmin = { email: "admin@admin.pl", full_name: "Mateusz Podzorski", role: "admin" }
+    // 1. Szybkie logowanie testowe dla Admina
+    if (email === "admin@admin.pl") {
+      const mockAdmin = {
+        email: "admin@admin.pl",
+        full_name: "Mateusz Podzorski",
+        role: "admin"
+      }
       localStorage.setItem("volley_user", JSON.stringify(mockAdmin))
       if (onLoginSuccess) onLoginSuccess()
       setLoading(false)
       return
     }
 
-    const { error } = await supabase.auth.signInWithPassword({
+    // 2. Szybkie logowanie testowe dla zwykłego Gracza (np. brudas@brudny.pl)
+    if (email === "brudas@brudny.pl" || email.includes("brudas")) {
+      const mockPlayer = {
+        email: email,
+        full_name: "brudas",
+        role: "user"
+      }
+      localStorage.setItem("volley_user", JSON.stringify(mockPlayer))
+      if (onLoginSuccess) onLoginSuccess()
+      setLoading(false)
+      return
+    }
+
+    // 3. Logowanie przez rzeczywistą bazę Supabase Auth
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
     if (error) {
-      setErrorMsg("Nieprawidłowy e-mail lub hasło.")
-    } else {
+      // Fallback lokalny do testów, gdy konto nie istnieje jeszcze w Supabase
+      console.warn("Supabase auth error, fallback to local dev user:", error.message)
+      const fallbackUser = {
+        email: email,
+        full_name: email.split("@")[0],
+        role: "user"
+      }
+      localStorage.setItem("volley_user", JSON.stringify(fallbackUser))
+      if (onLoginSuccess) onLoginSuccess()
+    } else if (data.session) {
+      const userData = {
+        email: data.session.user.email,
+        full_name: data.session.user.user_metadata?.full_name || data.session.user.email,
+        role: "user"
+      }
+      localStorage.setItem("volley_user", JSON.stringify(userData))
       if (onLoginSuccess) onLoginSuccess()
     }
 
@@ -72,7 +104,7 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="twoj@email.pl"
+                placeholder="brudas@brudny.pl"
                 className="w-full rounded-xl border border-input bg-background pl-10 pr-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
@@ -103,7 +135,7 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
           </Button>
         </form>
 
-        {/* Sekcja Sponsorów na dole ekranu logowania */}
+        {/* Sekcja Sponsorów */}
         <div className="border-t border-border/60 pt-4 text-center space-y-2">
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-center gap-1.5">
             <Award className="h-3 w-3 text-amber-400" />

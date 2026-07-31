@@ -1,7 +1,10 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useEffect } from "react"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
 import {
+  Volleyball,
   Calendar,
   Users,
   Wallet,
@@ -9,58 +12,58 @@ import {
   Megaphone,
   Settings,
   LogOut,
-  ChevronUp,
+  X,
+  ChevronDown,
   User,
-  CreditCard,
-  ShieldAlert,
   Sun,
   Moon
 } from "lucide-react"
-import Link from "next/link"
-import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 
-const navigation = [
-  { name: "Mecze", href: "/", icon: Calendar },
-  { name: "Zawodnicy / Skład", href: "/players", icon: Users },
-  { name: "Finanse", href: "/finances", icon: Wallet, badge: "NOWOŚĆ" },
-  { name: "Statystyki", href: "/stats", icon: BarChart3 },
-  { name: "Ogłoszenia", href: "/announcements", icon: Megaphone },
-  { name: "Ustawienia", href: "/settings", icon: Settings },
+
+type SidebarProps = {
+  open?: boolean
+  onClose?: () => void
+  user?: any
+  onLogout?: () => void
+}
+
+const navItems = [
+  { href: "/", label: "Mecze", icon: Calendar },
+  { href: "/players", label: "Zawodnicy / Skład", icon: Users },
+  { href: "/finances", label: "Finanse", icon: Wallet, badge: "NOWOŚĆ" },
+  { href: "/stats", label: "Statystyki", icon: BarChart3 },
+  { href: "/announcements", label: "Ogłoszenia", icon: Megaphone },
+  { href: "/settings", label: "Ustawienia", icon: Settings },
 ]
 
-export function Sidebar({
-  open,
-  onClose,
-  user,
-  onLogout
-}: {
-  open: boolean;
-  onClose: () => void;
-  user?: any;
-  onLogout?: () => void;
-}) {
+export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
   const pathname = usePathname()
-  const [showUserMenu, setShowUserMenu] = useState(false)
-  const [isDarkMode, setIsDarkMode] = useState(true)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [isDark, setIsDark] = useState(true)
 
-  // Inicjalizacja i obsługa klasy `dark` na znaczniku <html>
+  // Inicjalizacja motywu na podstawie ustawień przeglądarki / localStorage
   useEffect(() => {
-    const isDark = document.documentElement.classList.contains("dark") ||
-      localStorage.getItem("theme") !== "light"
-    setIsDarkMode(isDark)
-    if (isDark) {
-      document.documentElement.classList.add("dark")
+    const savedTheme = localStorage.getItem("theme")
+    if (savedTheme) {
+      const dark = savedTheme === "dark"
+      setIsDark(dark)
+      if (dark) {
+        document.documentElement.classList.add("dark")
+      } else {
+        document.documentElement.classList.remove("dark")
+      }
     } else {
-      document.documentElement.classList.remove("dark")
+      const isSystemDark = document.documentElement.classList.contains("dark")
+      setIsDark(isSystemDark)
     }
   }, [])
 
-  const toggleTheme = () => {
-    const nextTheme = !isDarkMode
-    setIsDarkMode(nextTheme)
-    if (nextTheme) {
+  // Funkcja przełączająca motyw w całej aplikacji
+  function toggleTheme() {
+    const nextDark = !isDark
+    setIsDark(nextDark)
+    if (nextDark) {
       document.documentElement.classList.add("dark")
       localStorage.setItem("theme", "dark")
     } else {
@@ -69,69 +72,76 @@ export function Sidebar({
     }
   }
 
-  // Zamykanie menu po kliknięciu poza nim
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setShowUserMenu(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
-
-  const isAdmin = user?.email === "admin@admin.pl" || user?.role === "admin"
-  const displayName = user?.full_name || (user?.email === "admin@admin.pl" ? "Mateusz Podzorski" : user?.email) || "Użytkownik"
-  const displayRole = isAdmin ? "Tryb administratora" : "Zawodnika"
-  const initials = displayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) || "MP"
+  const userName = user?.full_name || (user?.email === "admin@admin.pl" ? "Mateusz Podzorski" : user?.email?.split("@")[0]) || "brudas"
+  const userRoleText = user?.role === "admin" || user?.email === "admin@admin.pl" ? "Administrator" : "Zawodnik"
+  const avatarLetter = userName.charAt(0).toUpperCase()
 
   return (
     <>
-      {/* Overlay dla mobile */}
+      {/* Tło nakładki dla wersji mobilnej */}
       {open && (
         <div
-          className="fixed inset-0 z-40 bg-foreground/50 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
           onClick={onClose}
         />
       )}
 
-      <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-[#0d1527] text-white border-r border-border/40 transition-transform duration-300 lg:static lg:translate-x-0",
-        open ? "translate-x-0" : "-translate-x-full"
-      )}>
-        {/* Logo / Header */}
-        <div className="flex h-16 items-center gap-3 px-6 border-b border-border/40">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-base shadow-sm">
-            VM
-          </div>
-          <div>
-            <h2 className="font-bold text-white text-base tracking-tight">VolleyManager</h2>
-            <p className="text-xs text-slate-400">ESCO Volleyball</p>
-          </div>
+      {/* Kontener Bocznego Paska Nawigacji */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-card text-card-foreground transition-transform duration-300 lg:static lg:translate-x-0",
+          open ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        {/* Nagłówek Sidebara / Logo */}
+        <div className="flex h-16 items-center justify-between px-6 border-b border-border/60">
+          <Link href="/" className="flex items-center gap-3 group">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold shadow-md shadow-primary/20 transition-transform group-hover:scale-105">
+              <Volleyball className="h-5 w-5" />
+            </div>
+            <div>
+              <span className="font-extrabold tracking-tight text-foreground text-sm">VolleyManager</span>
+              <span className="block text-[10px] text-muted-foreground font-semibold">ESCO Volleyball</span>
+            </div>
+          </Link>
+
+          {/* Przycisk zamknięcia na telefonach */}
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground lg:hidden"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
-        {/* Nawigacja */}
-        <nav className="flex-1 space-y-1.5 px-4 py-6 overflow-y-auto">
-          {navigation.map((item) => {
+        {/* Menu Nawigacyjne */}
+        <nav className="flex-1 space-y-1.5 p-4 overflow-y-auto">
+          {navItems.map((item) => {
             const isActive = pathname === item.href
+            const Icon = item.icon
+
             return (
               <Link
-                key={item.name}
+                key={item.href}
                 href={item.href}
                 onClick={onClose}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors",
+                  "flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all duration-200",
                   isActive
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-slate-400 hover:bg-white/5 hover:text-white"
+                    ? "bg-primary text-primary-foreground shadow-sm shadow-primary/30 font-bold"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                 )}
               >
-                <item.icon className="h-5 w-5 shrink-0" />
-                <span className="flex-1">{item.name}</span>
+                <div className="flex items-center gap-3">
+                  <Icon className={cn("h-4 w-4", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+                  <span>{item.label}</span>
+                </div>
                 {item.badge && (
                   <span className={cn(
-                    "rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase",
-                    isActive ? "bg-primary-foreground/20 text-primary-foreground" : "bg-emerald-500/10 text-emerald-400"
+                    "rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider",
+                    isActive
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
                   )}>
                     {item.badge}
                   </span>
@@ -141,99 +151,69 @@ export function Sidebar({
           })}
         </nav>
 
-        {/* Panel użytkownika na dole */}
-        <div className="relative p-4 border-t border-border/40" ref={menuRef}>
-          {/* Rozwijane menu z opcjami */}
-          {showUserMenu && (
-            <div className="absolute bottom-20 left-4 right-4 rounded-2xl bg-[#131d35] border border-border/60 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-bottom-2 space-y-1">
 
-              {/* Nagłówek wewnątrz menu */}
-              <div className="px-3 py-2 border-b border-white/10 mb-1">
-                <p className="text-xs font-semibold text-slate-300 truncate">{displayName}</p>
-                <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                  {isAdmin && <ShieldAlert className="h-3 w-3 text-amber-400" />}
-                  {displayRole}
-                </p>
-              </div>
-
-              {/* Opcja 1: Mój Profil */}
+        {/* Sekcja Profilu Użytkownika na dole */}
+        <div className="p-3 border-t border-border/60 bg-secondary/30">
+          {profileOpen && (
+            <div className="mb-2 space-y-1 rounded-2xl border border-border bg-popover p-2 shadow-xl backdrop-blur">
               <Link
-                href="/profile"
-                onClick={() => setShowUserMenu(false)}
-                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                href="/settings"
+                onClick={onClose}
+                className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
               >
-                <User className="h-4 w-4 text-primary" />
+                <User className="h-3.5 w-3.5 text-primary" />
                 Mój profil i dane
               </Link>
 
-              {/* Opcja 2: Moje Wpłaty */}
               <Link
                 href="/finances"
-                onClick={() => setShowUserMenu(false)}
-                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                onClick={onClose}
+                className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
               >
-                <CreditCard className="h-4 w-4 text-emerald-400" />
+                <Wallet className="h-3.5 w-3.5 text-emerald-400" />
                 Moje finanse i wpłaty
               </Link>
 
-              {/* Opcja 3: Ustawienia */}
-              <Link
-                href="/settings"
-                onClick={() => setShowUserMenu(false)}
-                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
-              >
-                <Settings className="h-4 w-4 text-slate-400" />
-                Ustawienia konta
-              </Link>
-
-              {/* Opcja 4: Przełącznik Motywu (Jasny / Ciemny) */}
+              {/* Działający Przełącznik Motywu */}
               <button
                 onClick={toggleTheme}
-                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
               >
-                <div className="flex items-center gap-2.5">
-                  {isDarkMode ? (
-                    <Moon className="h-4 w-4 text-indigo-400" />
-                  ) : (
-                    <Sun className="h-4 w-4 text-amber-400" />
-                  )}
-                  Motyw {isDarkMode ? "Ciemny" : "Jasny"}
-                </div>
-                <span className="text-[10px] text-slate-400 uppercase font-semibold">
-                  {isDarkMode ? "Dark" : "Light"}
+                <span className="flex items-center gap-2">
+                  {isDark ? <Moon className="h-3.5 w-3.5 text-amber-400" /> : <Sun className="h-3.5 w-3.5 text-amber-500" />}
+                  Motyw {isDark ? "Ciemny" : "Jasny"}
                 </span>
+                <span className="text-[10px] font-bold text-muted-foreground uppercase">{isDark ? "DARK" : "LIGHT"}</span>
               </button>
 
-              <div className="my-1 border-t border-white/10" />
-
-              {/* Opcja 5: Wylogowanie */}
-              <button
-                onClick={() => {
-                  setShowUserMenu(false)
-                  if (onLogout) onLogout()
-                }}
-                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-rose-400 hover:bg-rose-500/10 transition-colors"
-              >
-                <LogOut className="h-4 w-4" />
-                Wyloguj się
-              </button>
+              <div className="pt-1 border-t border-border/60">
+                <button
+                  onClick={onLogout}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-rose-400 hover:bg-rose-500/10 transition-colors"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  Wyloguj się
+                </button>
+              </div>
             </div>
           )}
 
-          {/* Przycisk profilu otwierający menu */}
-          <div
-            onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center gap-3 rounded-xl bg-white/5 p-3 border border-white/10 hover:bg-white/10 transition-colors cursor-pointer"
+          {/* Przycisk otwierający menu profilu */}
+          <button
+            onClick={() => setProfileOpen(!profileOpen)}
+            className="flex w-full items-center justify-between rounded-2xl p-2 hover:bg-secondary transition-colors"
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm shadow-sm">
-              {initials}
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/20 text-primary font-bold text-xs border border-primary/30">
+                {avatarLetter}
+              </div>
+              <div className="min-w-0 text-left">
+                <p className="text-xs font-bold text-foreground truncate">{userName}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{userRoleText}</p>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-white truncate">{displayName}</p>
-              <p className="text-xs text-slate-400 truncate">{displayRole}</p>
-            </div>
-            <ChevronUp className={cn("h-4 w-4 text-slate-400 transition-transform duration-200", showUserMenu && "rotate-180")} />
-          </div>
+            <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform duration-200", profileOpen && "rotate-180")} />
+          </button>
         </div>
       </aside>
     </>
