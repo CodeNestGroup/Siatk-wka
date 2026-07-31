@@ -1,6 +1,5 @@
-import { Calendar, MapPin, Users, ChevronRight, CheckCircle2 } from "lucide-react"
+import { Calendar, MapPin, Users, ChevronRight } from "lucide-react"
 import { type Match, mainRoster, waitlist, collected } from "@/lib/data"
-import { Badge } from "@/components/dashboard/ui-bits"
 
 type MatchListProps = {
   matches: Match[]
@@ -39,10 +38,17 @@ export function MatchList({ matches, onSelect }: MatchListProps) {
                     <h3 className="font-bold text-foreground text-base group-hover:text-primary transition-colors">
                       {match.date}
                     </h3>
-                    <Badge tone={isUpcoming ? "warning" : "neutral"}>
+
+                    {/* Zaktualizowany Badge statusu dopasowany do ikonki obok */}
+                    <span className={`inline-flex items-center rounded-lg px-2.5 py-0.5 text-xs font-semibold border transition-colors ${
+                      isUpcoming
+                        ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                        : "bg-secondary text-muted-foreground border-border/40"
+                    }`}>
                       {isUpcoming ? "Nadchodzący" : "Zakończony"}
-                    </Badge>
+                    </span>
                   </div>
+
                   <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1">
                     <MapPin className="h-3.5 w-3.5 text-primary" />
                     {match.location} • <span className="font-medium text-foreground">{match.price_per_player} PLN</span> / os.

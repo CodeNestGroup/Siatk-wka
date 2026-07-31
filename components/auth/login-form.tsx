@@ -1,96 +1,124 @@
 "use client"
 
 import { useState } from "react"
-import { supabase } from "@/lib/supabase"
+import { Volleyball, Lock, Mail, ArrowRight, ShieldCheck, Award } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { supabase } from "@/lib/supabase"
 
-export function LoginForm({ onLoginSuccess }: { onLoginSuccess: () => void }) {
-  const [identifier, setIdentifier] = useState("")
+type LoginFormProps = {
+  onLoginSuccess?: () => void
+}
+
+export function LoginForm({ onLoginSuccess }: LoginFormProps) {
+  const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  async function handleLogin(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    setError(null)
+    setErrorMsg(null)
 
-    const cleanIdentifier = identifier.trim().toLowerCase()
-
-    // 1. Sprawdzanie czy to admin
-    if (cleanIdentifier === "admin" || cleanIdentifier === "admin@admin.pl") {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: "admin@admin.pl",
-        password,
-      })
-      if (error) {
-        setError("Błędne hasło administratora.")
-        setLoading(false)
-      } else {
-        onLoginSuccess()
-      }
-      return
-    }
-
-    // 2. Dla zwykłego gracza: sprawdzamy czy istnieje w tabeli players po e-mailu lub części imienia/nazwiska
-    const { data: playerData, error: playerError } = await supabase
-      .from('players')
-      .select('*')
-      .or(`email.eq.${cleanIdentifier},full_name.ilike.%${cleanIdentifier}%`)
-      .single()
-
-    if (playerError || !playerData) {
-      setError("Nie znaleziono takiego zawodnika w bazie.")
+    // Domyślne szybkie logowanie deweloperskie / demo
+    if (email === "admin@admin.pl" && password === "admin") {
+      const mockAdmin = { email: "admin@admin.pl", full_name: "Mateusz Podzorski", role: "admin" }
+      localStorage.setItem("volley_user", JSON.stringify(mockAdmin))
+      if (onLoginSuccess) onLoginSuccess()
       setLoading(false)
       return
     }
 
-    // Jeśli hasło to domyślne "haslo123", logujemy pomyślnie
-    if (password === "haslo123") {
-      // Zapisujemy w localStorage informację o zalogowanym graczu
-      localStorage.setItem("volley_user", JSON.stringify(playerData))
-      onLoginSuccess()
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+
+    if (error) {
+      setErrorMsg("Nieprawidłowy e-mail lub hasło.")
     } else {
-      setError("Błędne hasło (domyślne to: haslo123).")
-      setLoading(false)
+      if (onLoginSuccess) onLoginSuccess()
     }
+
+    setLoading(false)
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <form onSubmit={handleLogin} className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl border border-border space-y-4">
-        <h2 className="text-xl font-bold text-foreground text-center">Logowanie do Systemu Meczów</h2>
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 relative overflow-hidden">
 
-        {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+      {/* Tło dekoracyjne */}
+      <div className="absolute -top-40 -right-40 h-96 w-96 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-40 -left-40 h-96 w-96 rounded-full bg-purple-500/10 blur-3xl pointer-events-none" />
 
-        <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Login / Email zawodnika</label>
-          <input
-            type="text"
-            required
-            value={identifier}
-            onChange={(e) => setIdentifier(e.target.value)}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-            placeholder="np. maciej.maciej@onet.eu lub imię"
-          />
+      <div className="w-full max-w-md rounded-3xl border border-border bg-card/80 p-8 shadow-2xl backdrop-blur-xl relative z-10 space-y-6">
+
+        {/* Logo i Tytuł */}
+        <div className="text-center space-y-2">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
+            <Volleyball className="h-8 w-8 animate-pulse" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">VolleyManager</h1>
+          <p className="text-xs text-muted-foreground">System Zarządzania Drużyną Siatkarską</p>
         </div>
 
-        <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Hasło</label>
-          <input
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-            placeholder="••••••••"
-          />
+        {/* Formularz */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1.5">Adres E-mail</label>
+            <div className="relative">
+              <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="twoj@email.pl"
+                className="w-full rounded-xl border border-input bg-background pl-10 pr-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1.5">Hasło</label>
+            <div className="relative">
+              <Lock className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full rounded-xl border border-input bg-background pl-10 pr-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+          </div>
+
+          {errorMsg && (
+            <p className="text-xs text-rose-500 font-semibold text-center">{errorMsg}</p>
+          )}
+
+          <Button type="submit" disabled={loading} className="w-full rounded-xl py-2.5 font-bold gap-2">
+            {loading ? "Logowanie..." : "Zaloguj się do panelu"}
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </form>
+
+        {/* Sekcja Sponsorów na dole ekranu logowania */}
+        <div className="border-t border-border/60 pt-4 text-center space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-center gap-1.5">
+            <Award className="h-3 w-3 text-amber-400" />
+            Oficjalni Sponsorzy Drużyny
+          </p>
+          <div className="flex items-center justify-center gap-3 text-xs font-bold text-muted-foreground/80 flex-wrap">
+            <span className="hover:text-primary transition-colors">ESCO Jaworze</span>
+            <span>•</span>
+            <span className="hover:text-primary transition-colors">Beskid Sport</span>
+            <span>•</span>
+            <span className="hover:text-primary transition-colors">VolleyStore</span>
+          </div>
         </div>
 
-        <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? "Logowanie..." : "Zaloguj się"}
-        </Button>
-      </form>
+      </div>
     </div>
   )
 }

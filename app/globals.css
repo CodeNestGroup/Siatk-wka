@@ -175,3 +175,24 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Animacja dla płynnego taśmociągu sponsorów */
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 25s linear infinite;
+}
+
+/* Pauza animacji po najechaniu myszką */
+.animate-marquee:hover {
+  animation-play-state: paused;
+}

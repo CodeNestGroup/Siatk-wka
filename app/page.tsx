@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, useEffect } from "react"
-import { Menu, Plus, Search, Bell, CheckCircle2 } from "lucide-react"
+import { Menu, Plus, Search, Bell, CheckCircle2, ShieldAlert, UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { StatCards } from "@/components/dashboard/stat-cards"
@@ -9,6 +9,7 @@ import { MatchList } from "@/components/dashboard/match-list"
 import { MatchDetail } from "@/components/dashboard/match-detail"
 import { CreateMatch } from "@/components/dashboard/create-match"
 import { LoginForm } from "@/components/auth/login-form"
+import { SponsorsMarquee } from "@/components/dashboard/sponsors-marquee"
 import {
   type Match,
   collected as matchCollected,
@@ -35,6 +36,9 @@ export default function DashboardPage() {
   const [creating, setCreating] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
 
+  // Stan symulacji widoku gracza dla Admina
+  const [simulateAsPlayer, setSimulateAsPlayer] = useState(false)
+
   // Stan przełącznika kafelków (najbliższy mecz vs cały sezon)
   const [statsMode, setStatsMode] = useState<"match" | "season">("match")
 
@@ -45,8 +49,9 @@ export default function DashboardPage() {
 
       const localUser = localStorage.getItem("volley_user")
       if (localUser) {
-        setSession({ user: JSON.parse(localUser) })
-        setUserRole("user")
+        const parsedUser = JSON.parse(localUser)
+        setSession({ user: parsedUser })
+        setUserRole(parsedUser.role || (parsedUser.email === "admin@admin.pl" ? "admin" : "user"))
         setIsAuthLoading(false)
         return
       }
@@ -64,7 +69,7 @@ export default function DashboardPage() {
         if (playerData?.role) {
           setUserRole(playerData.role)
         } else {
-          setUserRole("user")
+          setUserRole(session.user.email === "admin@admin.pl" ? "admin" : "user")
         }
       }
       setIsAuthLoading(false)
@@ -84,7 +89,7 @@ export default function DashboardPage() {
           .eq('email', session.user.email)
           .single()
 
-        setUserRole(playerData?.role || "user")
+        setUserRole(playerData?.role || (session.user.email === "admin@admin.pl" ? "admin" : "user"))
       } else {
         setUserRole("user")
       }
@@ -106,7 +111,10 @@ export default function DashboardPage() {
     fetchMatches()
   }, [session])
 
-  const isAdmin = userRole === "admin"
+  // Wyznaczenie faktycznej roli oraz opcji symulacji
+  const isRealAdmin = userRole === "admin" || session?.user?.email === "admin@admin.pl"
+  const isAdmin = isRealAdmin && !simulateAsPlayer
+
   const selected = matches.find((m) => m.id === selectedId) ?? null
 
   function notify(msg: string) {
@@ -153,7 +161,7 @@ export default function DashboardPage() {
     totalPlayed: stats.played,
     upcoming: stats.upcoming,
     collected: stats.collected,
-    overpaid: "0 PLN", // Bilans nadpłat / zaliczek
+    overpaid: "0 PLN",
   }
 
   function updateMatch(updated: Match) {
@@ -217,6 +225,23 @@ export default function DashboardPage() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {/* Pasek przełącznika trybu Admin / Gracz (Widoczny dla Admina) */}
+        {isRealAdmin && (
+          <div className="bg-[#131d35] border-b border-border px-4 py-2 flex items-center justify-between text-xs lg:px-8">
+            <span className="text-slate-400 flex items-center gap-1.5">
+              <ShieldAlert className="h-3.5 w-3.5 text-amber-400" />
+              Tryb: <strong className="text-white">{isAdmin ? "Administrator" : "Symulacja Gracza"}</strong>
+            </span>
+            <button
+              onClick={() => setSimulateAsPlayer(!simulateAsPlayer)}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/10 text-white font-medium hover:bg-white/20 transition-colors"
+            >
+              <UserCheck className="h-3.5 w-3.5 text-primary" />
+              {simulateAsPlayer ? "Włącz tryb Admina" : "Podgląd jako Gracz"}
+            </button>
+          </div>
+        )}
+
         {/* Top bar */}
         <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-background/80 px-4 py-3 backdrop-blur lg:px-8">
           <button
@@ -258,7 +283,7 @@ export default function DashboardPage() {
               </p>
             </div>
             {isAdmin && (
-              <Button size="lg" className="gap-2" onClick={() => setCreating(true)}>
+              <Button size="lg" className="gap-2 rounded-xl" onClick={() => setCreating(true)}>
                 <Plus className="h-4 w-4" />
                 Utwórz nowy mecz
               </Button>
@@ -271,6 +296,9 @@ export default function DashboardPage() {
             matchData={matchCardData}
             seasonData={seasonCardData}
           />
+
+          {/* Sekcja Sponsorów i Partnerów */}
+          <SponsorsMarquee />
 
           <div className="flex items-center gap-1 rounded-xl border border-border bg-card p-1 w-fit">
             {filters.map((f) => (
@@ -314,11 +342,16 @@ export default function DashboardPage() {
         </main>
       </div>
 
+      {/* Przekazanie obiektu użytkownika do szczegółów meczu */}
       {selected && (
         <MatchDetail
           match={selected}
           onChange={updateMatch}
           onClose={() => setSelectedId(null)}
+          currentUser={{
+            ...session?.user,
+            role: isAdmin ? "admin" : "user"
+          }}
         />
       )}
 
@@ -328,7 +361,7 @@ export default function DashboardPage() {
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-4 py-2.5 text-sm font-medium text-background shadow-lg">
-          <CheckCircle2 className="h-4 w-4 text-success" />
+          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
           {toast}
         </div>
       )}

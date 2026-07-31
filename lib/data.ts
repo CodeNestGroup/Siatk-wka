@@ -142,3 +142,31 @@ export function formatWeekday(iso: string): string {
   const d = new Date(iso + "T00:00:00")
   return d.toLocaleDateString("en-GB", { weekday: "long" })
 }
+
+// Dodaj te funkcje na końcu pliku lib/data.ts
+
+export async function getTransactions() {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .order('date', { ascending: false })
+
+  if (error) {
+    console.error("Błąd pobierania transakcji:", error)
+    return []
+  }
+  return data || []
+}
+
+export async function getPlayerBalances() {
+  const { data, error } = await supabase
+    .from('player_balances')
+    .select('*')
+    .order('name', { ascending: true })
+
+  if (error) {
+    console.error("Błąd pobierania nadpłat:", error)
+    return []
+  }
+  return data || []
+}
