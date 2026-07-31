@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<langXML lang="en" defaultMessage="Brak tłumaczenia">
-	<msg label="brak" value="No message in system module" />
-	<msg label="access_denied" value="Access Denied" />
-	<msg label="update_successfull" value="Update successfull" />
-	<msg label="update_error" value="Update error" />
-</langXML>
