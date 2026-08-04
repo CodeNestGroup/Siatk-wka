@@ -37,7 +37,8 @@ export default function AnnouncementsPage() {
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
 
-  const [isAdmin, setIsAdmin] = useState(true)
+  // Sprawdzanie uprawnień admina
+  const isAdmin = user?.role === "admin" || user?.is_admin || user?.email === "admin@admin.pl" || user?.name === "Mateusz Podzorski" || user?.full_name === "Mateusz Podzorski"
 
   // Formularz ogłoszenia
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -47,13 +48,13 @@ export default function AnnouncementsPage() {
   const [newIsPinned, setNewIsPinned] = useState(false)
   const [sendPushNotification, setSendPushNotification] = useState(true)
 
-  // 1. Pobieranie ogłoszeń z bazy Supabase przy wejściu na stronę
+  // 1. Pobieranie użytkownika z localStorage i ogłoszeń z Supabase
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
     if (localUser) {
-      const parsed = JSON.parse(localUser)
-      setUser(parsed)
-      setIsAdmin(parsed.role === "admin" || parsed.email === "admin@admin.pl")
+      setUser(JSON.parse(localUser))
+    } else {
+      setUser(null)
     }
 
     fetchAnnouncements()
@@ -79,12 +80,22 @@ export default function AnnouncementsPage() {
     setTimeout(() => setToast(null), 3000)
   }
 
+  // Obsługa wylogowania
+  async function handleLogout() {
+    localStorage.removeItem("volley_user")
+    localStorage.clear()
+    sessionStorage.clear()
+    await supabase.auth.signOut()
+    setUser(null)
+    window.location.href = "/login"
+  }
+
   // 2. Trwałe zapisywanie nowego ogłoszenia w Supabase
   async function handleCreateAnnouncement(e: React.FormEvent) {
     e.preventDefault()
     if (!newTitle.trim() || !newContent.trim()) return
 
-    const authorName = user?.full_name || "Mateusz Podzorski"
+    const authorName = user?.name || user?.full_name || "Mateusz Podzorski"
 
     const newAnnouncement = {
       title: newTitle,
@@ -129,7 +140,7 @@ export default function AnnouncementsPage() {
 
     if (error) {
       notify("Błąd podczas usuwania")
-      fetchAnnouncements() // przywrócenie stanu w razie błędu
+      fetchAnnouncements()
     } else {
       notify("Ogłoszenie usunięte z bazy")
     }
@@ -163,10 +174,7 @@ export default function AnnouncementsPage() {
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         user={user}
-        onLogout={() => {
-          localStorage.removeItem("volley_user")
-          window.location.reload()
-        }}
+        onLogout={handleLogout}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -322,7 +330,7 @@ export default function AnnouncementsPage() {
       </div>
 
       {/* Modal Nowego Ogłoszenia */}
-      {isModalOpen && (
+      {isModalOpen && isAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 backdrop-blur-sm p-4">
           <div className="w-full max-w-lg rounded-3xl border border-border bg-card p-6 shadow-2xl space-y-4">
             <h2 className="text-lg font-bold text-foreground">Nowe Ogłoszenie</h2>

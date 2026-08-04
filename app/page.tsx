@@ -10,13 +10,14 @@ import {
   Wallet,
   Plus,
   ChevronRight,
-  Lock,
   Bell,
   Sparkles,
   RefreshCw,
   X,
   CheckCircle2,
-  UserCheck
+  UserCheck,
+  Crown,
+  Trophy
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { MatchDetail } from "@/components/dashboard/match-detail"
@@ -24,6 +25,14 @@ import { Button } from "@/components/ui/button"
 import { type Match, mainRoster, waitlist, getMatches } from "@/lib/data"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
+
+const sponsors = [
+  { code: "BSC", name: "Beskid Sport Center", desc: "Partner Sprzętowy", color: "bg-emerald-100 text-emerald-700" },
+  { code: "SKO", name: "Skoczów Park", desc: "Oficjalny Partner", color: "bg-amber-100 text-amber-700" },
+  { code: "VOLLEY", name: "VolleyStore", desc: "Sklep Siatkarski", color: "bg-purple-100 text-purple-700" },
+  { code: "AZ", name: "AZ-Cloud Solutions", desc: "Infrastruktura IT", color: "bg-blue-100 text-blue-700" },
+  { code: "ESCO", name: "ESCO Jaworze", desc: "Sponsor Tytularny", color: "bg-indigo-100 text-indigo-700" },
+]
 
 export default function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -38,6 +47,11 @@ export default function DashboardPage() {
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
 
+  // Przełącznik widoku podsumowania (Najbliższy mecz vs Cały Sezon)
+  const [viewMode, setViewMode] = useState<"nearest" | "season">("nearest")
+
+  const isAdmin = user?.role === "admin" || user?.is_admin || user?.name?.toLowerCase().includes("admin") || user?.name === "Mateusz Podzorski"
+
   // Formularz nowego meczu
   const [newDate, setNewDate] = useState("")
   const [newLocation, setNewLocation] = useState("Hala Sportowa ESCO Jaworze")
@@ -50,6 +64,8 @@ export default function DashboardPage() {
     const localUser = localStorage.getItem("volley_user")
     if (localUser) {
       setUser(JSON.parse(localUser))
+    } else {
+      setUser(null)
     }
 
     loadData()
@@ -60,10 +76,8 @@ export default function DashboardPage() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  // Pobieranie danych i automatyczne ustalanie statusów na podstawie daty
   async function loadData() {
     setIsLoading(true)
-
     const todayStr = new Date().toISOString().split("T")[0]
 
     let fetchedMatches: Match[] = []
@@ -77,7 +91,6 @@ export default function DashboardPage() {
       fetchedMatches = matchesData
     }
 
-    // Dynamiczna aktualizacja statusu na podstawie daty
     const processedMatches = fetchedMatches.map((match) => {
       const matchDateStr = match.date ? match.date.trim() : ""
       let computedStatus = match.status || "upcoming"
@@ -94,7 +107,6 @@ export default function DashboardPage() {
 
     setMatches(processedMatches)
 
-    // Pobieranie listy zawodników
     const { data: playersData } = await supabase.from("players").select("*")
 
     if (playersData && playersData.length > 0) {
@@ -116,10 +128,10 @@ export default function DashboardPage() {
 
       if (extractedPlayers.length === 0) {
         setAvailablePlayers([
-          { id: "p1", name: "Mateusz Podzorski" },
-          { id: "p2", name: "Główny Admin" },
-          { id: "p3", name: "maciek" },
-          { id: "p4", name: "brudas" }
+          { id: "p1", name: "Mateusz Podzorski", role: "admin" },
+          { id: "p2", name: "Główny Admin", role: "admin" },
+          { id: "p3", name: "maciek", role: "player" },
+          { id: "p4", name: "brudas", role: "player" }
         ])
       } else {
         setAvailablePlayers(extractedPlayers)
@@ -145,7 +157,6 @@ export default function DashboardPage() {
     }
   }
 
-  // Tworzenie nowego meczu
   async function handleCreateMatch(e: React.FormEvent) {
     e.preventDefault()
     if (!newDate) return
@@ -204,7 +215,15 @@ export default function DashboardPage() {
     loadData()
   }
 
-  // LOGIKA BEZPIECZNEGO SORTOWANIA (ROZŁĄCZNE WARUNKI)
+  async function handleLogout() {
+    localStorage.removeItem("volley_user")
+    localStorage.clear()
+    sessionStorage.clear()
+    await supabase.auth.signOut()
+    setUser(null)
+    window.location.href = "/login"
+  }
+
   const upcomingMatches = matches
     .filter((m) => m.status === "upcoming" && !(m as any).is_settled)
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -215,9 +234,45 @@ export default function DashboardPage() {
 
   const nearestMatch = upcomingMatches[0] || matches[0]
 
+  // === WYLICZENIA DLA CAŁEGO SEZONU ===
+  const totalSeasonMatches = matches.length
+
+  // Obliczanie Króla Frekwencji
+  const playerMatchCounts: Record<string, { name: string; count: number }> = {}
+  matches.forEach((m) => {
+    const roster = mainRoster(m)
+    roster.forEach((p: any) => {
+      const pName = p.name || p.full_name || "Zawodnik"
+      if (!playerMatchCounts[pName]) {
+        playerMatchCounts[pName] = { name: pName, count: 0 }
+      }
+      playerMatchCounts[pName].count += 1
+    })
+  })
+
+  let attendanceKing = { name: "Brak danych", count: 0 }
+  Object.values(playerMatchCounts).forEach((p) => {
+    if (p.count > attendanceKing.count) {
+      attendanceKing = p
+    }
+  })
+
+  // Średnia frekwencja w sezonie
+  const totalRosterEntries = matches.reduce((acc, m) => acc + mainRoster(m).length, 0)
+  const avgAttendance = totalSeasonMatches > 0 ? (totalRosterEntries / totalSeasonMatches).toFixed(1) : "0"
+
+  // Łączny budżet zebrany w sezonie
+  const totalSeasonCollected = matches.reduce((acc, m) => {
+    const price = Number(m.price_per_player || 25)
+    const paid = mainRoster(m).filter(p => p.paid).length
+    return acc + (paid * price)
+  }, 0)
+
+  // === WYLICZENIA DLA NAJBLIŻSZEGO MECZU ===
   const nearestRoster = nearestMatch ? mainRoster(nearestMatch) : []
   const nearestWaitlist = nearestMatch ? waitlist(nearestMatch) : []
   const nearestPrice = Number(nearestMatch?.price_per_player || 25)
+  const nearestCollected = nearestRoster.filter(p => p.paid).length * nearestPrice
 
   const sortedAllMatches = [...upcomingMatches, ...pastOrSettledMatches]
 
@@ -238,10 +293,7 @@ export default function DashboardPage() {
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         user={user}
-        onLogout={() => {
-          localStorage.removeItem("volley_user")
-          window.location.reload()
-        }}
+        onLogout={handleLogout}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -273,79 +325,117 @@ export default function DashboardPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-                Zarządzanie meczami
+                {isAdmin ? "Zarządzanie meczami" : "Harmonogram meczów"}
               </h1>
               <p className="mt-1 text-xs text-slate-500 font-medium">
-                Śledź składy, listę rezerwową i wpłaty z każdej sesji.
+                {isAdmin
+                  ? "Śledź składy, listę rezerwową i wpłaty z każdej sesji."
+                  : "Sprawdzaj mecze, sprawdzaj zapisy i dołączaj do składu."}
               </p>
             </div>
 
-            <Button
-              onClick={() => setShowCreateModal(true)}
-              className="rounded-2xl bg-blue-600 hover:bg-blue-700 font-bold text-xs gap-2 px-5 py-2.5 shadow-md shadow-blue-500/20"
-            >
-              <Plus className="h-4 w-4" />
-              Utwórz nowy mecz
-            </Button>
+            {isAdmin && (
+              <Button
+                onClick={() => setShowCreateModal(true)}
+                className="rounded-2xl bg-blue-600 hover:bg-blue-700 font-bold text-xs gap-2 px-5 py-2.5 shadow-md shadow-blue-500/20"
+              >
+                <Plus className="h-4 w-4" />
+                Utwórz nowy mecz
+              </Button>
+            )}
           </div>
 
-          {/* Podgląd Najbliższego Meczu */}
+          {/* Podgląd Kart Podsumowania */}
           {nearestMatch && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full bg-blue-600 animate-pulse" />
-                  Podgląd: Najbliższy mecz
+                  {viewMode === "nearest" ? "Podgląd: Najbliższy mecz" : "Podgląd: Cały Sezon / Rok"}
                 </span>
 
-                <button className="text-xs font-bold text-slate-500 hover:text-slate-900 flex items-center gap-1">
-                  <RefreshCw className="h-3 w-3" /> Przełącz na Cały sezon
+                <button
+                  onClick={() => setViewMode(viewMode === "nearest" ? "season" : "nearest")}
+                  className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1.5 bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100 transition-colors"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  {viewMode === "nearest" ? "Przełącz na Cały sezon" : "Przełącz na Najbliższy mecz"}
                 </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
+                {/* KARTA 1: Najbliższy Mecz / Ilość Rozegranych Meczów */}
                 <div
                   onClick={() => setSelectedMatch(nearestMatch)}
                   className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm hover:border-blue-300 transition-all cursor-pointer flex items-center justify-between"
                 >
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Najbliższy Mecz</p>
-                    <h3 className="text-xl font-black text-slate-900 mt-1">{nearestMatch.date}</h3>
-                    <p className="text-[11px] text-slate-500 font-medium mt-0.5 truncate max-w-[130px]">{nearestMatch.location}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      {viewMode === "nearest" ? "Najbliższy Mecz" : "Rozegrane Mecze"}
+                    </p>
+                    <h3 className="text-xl font-black text-slate-900 mt-1">
+                      {viewMode === "nearest" ? nearestMatch.date : `${totalSeasonMatches} Sesji`}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5 truncate max-w-[130px]">
+                      {viewMode === "nearest" ? nearestMatch.location : "W tym sezonie"}
+                    </p>
                   </div>
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100">
-                    <Calendar className="h-6 w-6" />
+                    {viewMode === "nearest" ? <Calendar className="h-6 w-6" /> : <Trophy className="h-6 w-6 text-blue-600" />}
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-purple-100 bg-gradient-to-br from-purple-50/40 to-white p-5 shadow-sm flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-purple-400">Skład Główny</p>
-                    <h3 className="text-xl font-black text-slate-900 mt-1">{nearestRoster.length} / {nearestMatch.capacity || 12}</h3>
-                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">Wolne miejsca</p>
-                  </div>
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-100/60 text-purple-600 border border-purple-200/50">
-                    <Users className="h-6 w-6" />
-                  </div>
-                </div>
-
+                {/* KARTA 2: Skład Główny / Król Frekwencji */}
                 <div className="rounded-3xl border border-amber-100 bg-gradient-to-br from-amber-50/40 to-white p-5 shadow-sm flex items-center justify-between">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500">Lista Rezerwowa</p>
-                    <h3 className="text-xl font-black text-slate-900 mt-1">+{nearestWaitlist.length}</h3>
-                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">Graczy na rezerwie</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500">
+                      {viewMode === "nearest" ? "Skład Główny" : "Król Frekwencji"}
+                    </p>
+                    <h3 className="text-xl font-black text-slate-900 mt-1 truncate max-w-[140px]">
+                      {viewMode === "nearest"
+                        ? `${nearestRoster.length} / ${nearestMatch.capacity || 12}`
+                        : attendanceKing.name}
+                    </h3>
+                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                      {viewMode === "nearest" ? "Wolne miejsca" : `${attendanceKing.count} zagranych meczów`}
+                    </p>
                   </div>
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100/60 text-amber-600 border border-amber-200/50">
-                    <Clock className="h-6 w-6" />
+                    {viewMode === "nearest" ? <Users className="h-6 w-6" /> : <Crown className="h-6 w-6 text-amber-500" />}
                   </div>
                 </div>
 
+                {/* KARTA 3: Lista Rezerwowa / Średnia Frekwencja */}
+                <div className="rounded-3xl border border-purple-100 bg-gradient-to-br from-purple-50/40 to-white p-5 shadow-sm flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-purple-400">
+                      {viewMode === "nearest" ? "Lista Rezerwowa" : "Śr. Frekwencja"}
+                    </p>
+                    <h3 className="text-xl font-black text-slate-900 mt-1">
+                      {viewMode === "nearest" ? `+${nearestWaitlist.length}` : `${avgAttendance} / 12`}
+                    </h3>
+                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                      {viewMode === "nearest" ? "Graczy na rezerwie" : "Graczy na mecz"}
+                    </p>
+                  </div>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-100/60 text-purple-600 border border-purple-200/50">
+                    {viewMode === "nearest" ? <Clock className="h-6 w-6" /> : <Users className="h-6 w-6" />}
+                  </div>
+                </div>
+
+                {/* KARTA 4: Budżet Meczowy / Budżet Sezonu */}
                 <div className="rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50/40 to-white p-5 shadow-sm flex items-center justify-between">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">Budżet Meczowy</p>
-                    <h3 className="text-xl font-black text-slate-900 mt-1">{nearestRoster.filter(p => p.paid).length * nearestPrice} PLN</h3>
-                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">Koszt: {nearestPrice} PLN / os.</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">
+                      {viewMode === "nearest" ? "Budżet Meczowy" : "Budżet Sezonu"}
+                    </p>
+                    <h3 className="text-xl font-black text-slate-900 mt-1">
+                      {viewMode === "nearest" ? nearestCollected : totalSeasonCollected} PLN
+                    </h3>
+                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                      {viewMode === "nearest" ? `Koszt: ${nearestPrice} PLN / os.` : "Suma zebranych wpłat"}
+                    </p>
                   </div>
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100/60 text-emerald-600 border border-emerald-200/50">
                     <Wallet className="h-6 w-6" />
@@ -356,52 +446,41 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Sponsorzy */}
-          <div className="rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm">
+          {/* SPONSORZY Z ANIMOWANYM PRZESUWANIEM (INFINITE MARQUEE) */}
+          <div className="rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm overflow-hidden">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 mb-3">
               <Sparkles className="h-3.5 w-3.5 text-amber-500" />
               Sponsorzy i Partnerzy Zespołu
             </span>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 font-black text-xs text-emerald-700">BSC</div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-900 truncate">Beskid Sport Center</p>
-                  <p className="text-[10px] text-slate-400 truncate">Partner Sprzętowy</p>
-                </div>
-              </div>
+            <style jsx>{`
+              @keyframes marquee {
+                0% { transform: translateX(0%); }
+                100% { transform: translateX(-50%); }
+              }
+              .animate-marquee {
+                display: flex;
+                width: max-content;
+                animation: marquee 25s linear infinite;
+              }
+              .animate-marquee:hover {
+                animation-play-state: paused;
+              }
+            `}</style>
 
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 font-black text-xs text-amber-700">SKO</div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-900 truncate">Skoczów Park</p>
-                  <p className="text-[10px] text-slate-400 truncate">Oficjalny Partner</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-100 font-black text-xs text-purple-700">VOLLEY</div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-900 truncate">VolleyStore</p>
-                  <p className="text-[10px] text-slate-400 truncate">Sklep Siatkarski</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100 font-black text-xs text-blue-700">AZ</div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-900 truncate">AZ-Cloud Solutions</p>
-                  <p className="text-[10px] text-slate-400 truncate">Infrastruktura IT</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100 font-black text-xs text-indigo-700">ESCO</div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-900 truncate">ESCO Jaworze</p>
-                  <p className="text-[10px] text-slate-400 truncate">Sponsor Tytularny</p>
-                </div>
+            <div className="relative w-full overflow-hidden">
+              <div className="animate-marquee gap-3 flex">
+                {[...sponsors, ...sponsors].map((s, index) => (
+                  <div key={index} className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-2.5 min-w-[200px] shrink-0">
+                    <div className={cn("flex h-9 w-9 items-center justify-center rounded-xl font-black text-xs shrink-0", s.color)}>
+                      {s.code}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900 truncate">{s.name}</p>
+                      <p className="text-[10px] text-slate-400 truncate">{s.desc}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -533,7 +612,7 @@ export default function DashboardPage() {
       </div>
 
       {/* MODAL TWORZENIA NOWEGO MECZU */}
-      {showCreateModal && (
+      {showCreateModal && isAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4 my-8">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">

@@ -40,6 +40,7 @@ type PlayerOverpayment = {
 
 export default function FinancesPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [user, setUser] = useState<any>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [showAddModal, setShowAddModal] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -56,8 +57,17 @@ export default function FinancesPage() {
   const [newCategory, setNewCategory] = useState("mecz")
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Pobieranie danych z Supabase
+  // 1. Wczytywanie profilu zalogowanego użytkownika z localStorage oraz danych finansowych
   useEffect(() => {
+    const localUser = localStorage.getItem("volley_user")
+    if (localUser) {
+      const parsedUser = JSON.parse(localUser)
+      setUser(parsedUser)
+      setNewCollectedBy(parsedUser?.name || parsedUser?.full_name || "Mateusz Podzorski")
+    } else {
+      setUser(null)
+    }
+
     async function loadData() {
       setIsLoading(true)
       const [txData, balancesData] = await Promise.all([
@@ -78,7 +88,17 @@ export default function FinancesPage() {
     setTimeout(() => setToast(null), 3500)
   }
 
-  // Wyliczenia bilansu
+  // Obsługa wylogowania
+  async function handleLogout() {
+    localStorage.removeItem("volley_user")
+    localStorage.clear()
+    sessionStorage.clear()
+    await supabase.auth.signOut()
+    setUser(null)
+    window.location.href = "/login"
+  }
+
+  // Wyliczania bilansu
   const totalIncome = useMemo(() => {
     return transactions.filter(t => t.type === "income").reduce((acc, t) => acc + Number(t.amount), 0)
   }, [transactions])
@@ -135,7 +155,12 @@ export default function FinancesPage() {
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        user={user}
+        onLogout={handleLogout}
+      />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <main className="mx-auto w-full max-w-7xl flex-1 space-y-8 px-4 py-8 lg:px-8">
