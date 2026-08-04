@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,70 +6,42 @@ import {
   FlatList,
   TextInput,
   TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, shadow } from '@/constants/app-theme';
-
-type AnnouncementType = 'new' | 'cancelled' | 'info' | 'change';
+import { supabase } from '@/lib/supabase';
+import { formatRelativeDate } from '@/lib/format';
 
 type Announcement = {
   id: string;
-  type: AnnouncementType;
   title: string;
-  description: string;
-  date: string;
+  content: string;
+  category: string;
+  is_pinned: boolean;
+  author: string;
+  created_at: string;
 };
 
-const MOCK_ANNOUNCEMENTS: Announcement[] = [
-  {
-    id: '1',
-    type: 'new',
-    title: 'Nowy mecz dodany!',
-    description: 'Sobota 18:00, Hala Sportowa ESCO Jaworze. Zapisy otwarte.',
-    date: 'Dziś, 10:30',
-  },
-  {
-    id: '2',
-    type: 'cancelled',
-    title: 'Mecz odwołany',
-    description: 'Środowy trening o 19:00 odwołany z powodu braku hali.',
-    date: 'Wczoraj, 14:00',
-  },
-  {
-    id: '3',
-    type: 'change',
-    title: 'Zmiana godziny',
-    description: 'Niedzielna gra przesunięta z 17:00 na 18:30.',
-    date: '2 dni temu',
-  },
-  {
-    id: '4',
-    type: 'info',
-    title: 'Nowy sponsor drużyny',
-    description: 'Witamy AZ-Cloud Solutions jako partnera infrastruktury IT.',
-    date: '3 dni temu',
-  },
-];
+type CategoryMeta = { bg: string; fg: string; icon: string; label: string };
 
-const TYPE_META: Record <
-  AnnouncementType,
-  { bg: string; fg: string; icon: string; label: string }
-> = {
+const CATEGORY_META: Record<string, CategoryMeta> = {
+  general: { bg: '#E0E7FF', fg: colors.primary, icon: 'i', label: 'Ogólne' },
   new: { bg: '#DCFCE7', fg: '#16A34A', icon: '＋', label: 'Nowe' },
   cancelled: { bg: '#FEE2E2', fg: '#DC2626', icon: '✕', label: 'Odwołane' },
   change: { bg: '#FEF3C7', fg: '#D97706', icon: '↻', label: 'Zmiana' },
-  info: { bg: '#E0E7FF', fg: colors.primary, icon: 'i', label: 'Info' },
+  urgent: { bg: '#FEE2E2', fg: '#DC2626', icon: '!', label: 'Ważne' },
 };
 
-const FILTERS: { key: 'all' | AnnouncementType; label: string }[] = [
-  { key: 'all', label: 'Wszystkie' },
-  { key: 'new', label: 'Nowe' },
-  { key: 'cancelled', label: 'Odwołane' },
-  { key: 'change', label: 'Zmiany' },
-];
+const DEFAULT_META: CategoryMeta = CATEGORY_META.general;
+
+function getCategoryMeta(category: string): CategoryMeta {
+  return CATEGORY_META[category] ?? DEFAULT_META;
+}
 
 function AnnouncementCard({ item }: { item: Announcement }) {
-  const meta = TYPE_META[item.type];
+  const meta = getCategoryMeta(item.category);
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.85}>
       <View style={[styles.iconCircle, { backgroundColor: meta.bg }]}>
@@ -79,29 +51,81 @@ function AnnouncementCard({ item }: { item: Announcement }) {
       <View style={styles.cardBody}>
         <View style={styles.cardTopRow}>
           <Text style={[styles.badgeLabel, { color: meta.fg }]}>{meta.label}</Text>
-          <Text style={styles.cardDate}>{item.date}</Text>
+          <Text style={styles.cardDate}>{formatRelativeDate(item.created_at)}</Text>
         </View>
-        <Text style={styles.cardTitle}>{item.title}</Text>
-        <Text style={styles.cardDescription}>{item.description}</Text>
+        <View style={styles.titleRow}>
+          {item.is_pinned && <Text style={styles.pinIcon}>📌</Text>}
+          <Text style={styles.cardTitle}>{item.title}</Text>
+        </View>
+        <Text style={styles.cardDescription}>{item.content}</Text>
+        <Text style={styles.cardAuthor}>— {item.author}</Text>
       </View>
     </TouchableOpacity>
   );
 }
 
 export default function AnnouncementsScreen() {
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | AnnouncementType>('all');
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const filtered = useMemo(() => {
-    return MOCK_ANNOUNCEMENTS.filter((a) => {
-      const matchesFilter = filter === 'all' || a.type === filter;
-      const matchesSearch =
-        search.trim() === '' ||
-        a.title.toLowerCase().includes(search.toLowerCase()) ||
-        a.description.toLowerCase().includes(search.toLowerCase());
-      return matchesFilter && matchesSearch;
-    });
-  }, [search, filter]);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<string>('all');
+
+  const loadAnnouncements = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('announcements')
+      .select('*')
+      .order('is_pinned', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      setErrorMsg(error.message);
+    } else {
+      setErrorMsg(null);
+      setAnnouncements(data ?? []);
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      await loadAnnouncements();
+      setLoading(false);
+    })();
+  }, [loadAnnouncements]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadAnnouncements();
+    setRefreshing(false);
+  };
+
+  const availableFilters = [
+    { key: 'all', label: 'Wszystkie' },
+    ...Array.from(new Set(announcements.map((a) => a.category))).map((cat) => ({
+      key: cat,
+      label: getCategoryMeta(cat).label,
+    })),
+  ];
+
+  const filtered = announcements.filter((a) => {
+    const matchesFilter = filter === 'all' || a.category === filter;
+    const matchesSearch =
+      search.trim() === '' ||
+      a.title.toLowerCase().includes(search.toLowerCase()) ||
+      a.content.toLowerCase().includes(search.toLowerCase());
+    return matchesFilter && matchesSearch;
+  });
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer} edges={['bottom']}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
@@ -110,16 +134,15 @@ export default function AnnouncementsScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+        }
         ListHeaderComponent={
           <View>
             <View style={styles.headerRow}>
               <View>
                 <Text style={styles.headerTitle}>Tablica ogłoszeń</Text>
                 <Text style={styles.headerSubtitle}>Co się dzieje w Twojej grupie</Text>
-              </View>
-              <View style={styles.bellWrap}>
-                <Text style={styles.bellIcon}>🔔</Text>
-                <View style={styles.bellDot} />
               </View>
             </View>
 
@@ -134,37 +157,49 @@ export default function AnnouncementsScreen() {
               />
             </View>
 
-            <FlatList
-              horizontal
-              data={FILTERS}
-              keyExtractor={(f) => f.key}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterRow}
-              renderItem={({ item }) => {
-                const isActive = filter === item.key;
-                return (
-                  <TouchableOpacity
-                    style={[styles.filterChip, isActive && styles.filterChipActive]}
-                    onPress={() => setFilter(item.key)}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.filterChipText,
-                        isActive && styles.filterChipTextActive,
-                      ]}
+            {errorMsg && (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>Błąd wczytywania: {errorMsg}</Text>
+              </View>
+            )}
+
+            {availableFilters.length > 1 && (
+              <FlatList
+                horizontal
+                data={availableFilters}
+                keyExtractor={(f) => f.key}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterRow}
+                renderItem={({ item }) => {
+                  const isActive = filter === item.key;
+                  return (
+                    <TouchableOpacity
+                      style={[styles.filterChip, isActive && styles.filterChipActive]}
+                      onPress={() => setFilter(item.key)}
+                      activeOpacity={0.7}
                     >
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              }}
-            />
+                      <Text
+                        style={[
+                          styles.filterChipText,
+                          isActive && styles.filterChipTextActive,
+                        ]}
+                      >
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            )}
           </View>
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>Brak ogłoszeń spełniających kryteria.</Text>
+            <Text style={styles.emptyText}>
+              {announcements.length === 0
+                ? 'Brak ogłoszeń.'
+                : 'Brak ogłoszeń spełniających kryteria.'}
+            </Text>
           </View>
         }
         renderItem={({ item }) => <AnnouncementCard item={item} />}
@@ -175,6 +210,12 @@ export default function AnnouncementsScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   listContent: { padding: 16, paddingBottom: 32 },
 
   headerRow: {
@@ -186,26 +227,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 24, fontWeight: '700', color: colors.foreground },
   headerSubtitle: { fontSize: 14, color: colors.mutedForeground, marginTop: 4 },
-
-  bellWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.lg,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadow.card,
-  },
-  bellIcon: { fontSize: 18 },
-  bellDot: {
-    position: 'absolute',
-    top: 8,
-    right: 9,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.destructive,
-  },
 
   searchBar: {
     flexDirection: 'row',
@@ -220,6 +241,14 @@ const styles = StyleSheet.create({
   },
   searchIcon: { fontSize: 14, marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15, color: colors.foreground },
+
+  errorBox: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: radius.md,
+    padding: 12,
+    marginBottom: 14,
+  },
+  errorText: { color: '#DC2626', fontSize: 13 },
 
   filterRow: { gap: 8, paddingBottom: 18 },
   filterChip: {
@@ -263,8 +292,11 @@ const styles = StyleSheet.create({
   },
   badgeLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
   cardDate: { fontSize: 11, color: colors.mutedForeground },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: colors.foreground, marginBottom: 3 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
+  pinIcon: { fontSize: 12, marginRight: 4 },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: colors.foreground },
   cardDescription: { fontSize: 13, color: colors.mutedForeground, lineHeight: 18 },
+  cardAuthor: { fontSize: 11, color: colors.mutedForeground, marginTop: 6, fontStyle: 'italic' },
 
   emptyState: { paddingVertical: 40, alignItems: 'center' },
   emptyText: { fontSize: 14, color: colors.mutedForeground },

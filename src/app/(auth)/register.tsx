@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 
@@ -20,13 +21,14 @@ export default function RegisterScreen() {
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleRegister = async () => {
-    if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
-      Alert.alert('Błąd', 'Wypełnij wszystkie pola.');
+    if (!name.trim() || !email.trim() || !phone.trim() || !password.trim() || !confirmPassword.trim()) {
+      Alert.alert('Błąd', 'Wypełnij wszystkie pola, w tym numer telefonu.');
       return;
     }
     if (!email.includes('@')) {
@@ -44,35 +46,57 @@ export default function RegisterScreen() {
 
     setLoading(true);
 
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        data: {
-          full_name: name.trim(),
-        },
-      },
-    });
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
+    const cleanPhone = phone.trim();
 
-    setLoading(false);
+    try {
+      // 1. Sprawdzamy czy email już istnieje w tabeli players
+      const { data: existingUser, error: checkError } = await supabase
+        .from('players')
+        .select('id')
+        .eq('email', cleanEmail)
+        .maybeSingle();
 
-    if (error) {
-      Alert.alert('Błąd rejestracji', error.message);
-      return;
-    }
+      if (existingUser) {
+        setLoading(false);
+        Alert.alert('Błąd', 'Ten adres email jest już zajęty.');
+        return;
+      }
 
-    if (data.user && !data.session) {
-      // Supabase domyślnie wysyła email z potwierdzeniem
-      Alert.alert(
-        'Sprawdź email',
-        'Wysłaliśmy link potwierdzający na Twój adres email. Potwierdź konto, żeby się zalogować.',
-        [{ text: 'OK', onPress: () => router.back() }]
-      );
-      return;
-    }
+      // 2. Bezpośredni zapis nowego gracza wraz z hasłem do tabeli players
+      const { data, error: insertError } = await supabase
+        .from('players')
+        .insert({
+          full_name: cleanName,
+          email: cleanEmail,
+          phone: cleanPhone,
+          password: password, // Zapisujemy hasło w kolumnie tabeli
+          role: 'user',
+        })
+        .select()
+        .single();
 
-    if (data.session) {
+      if (insertError || !data) {
+        setLoading(false);
+        Alert.alert('Błąd rejestracji', insertError?.message || 'Nie udało się utworzyć konta.');
+        return;
+      }
+
+      // 3. Automatyczne logowanie po rejestracji - zapis w AsyncStorage
+      await AsyncStorage.setItem('current_player_id', data.id);
+      await AsyncStorage.setItem('current_player_data', JSON.stringify(data));
+      if (data.auth_user_id) {
+        await AsyncStorage.setItem('current_auth_user_id', data.auth_user_id);
+      }
+
+      setLoading(false);
+      
+      // Przejście do widoku głównego
       router.replace('/(tabs)');
+    } catch (err) {
+      setLoading(false);
+      Alert.alert('Błąd', 'Wystąpił nieoczekiwany błąd podczas rejestracji.');
     }
   };
 
@@ -106,7 +130,7 @@ export default function RegisterScreen() {
 
           <View style={styles.form}>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Imię i nazwisko</Text>
+              <Text style={styles.label}>Nazwa (Imię i nazwisko)</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Jan Kowalski"
@@ -128,6 +152,18 @@ export default function RegisterScreen() {
                 autoCorrect={false}
                 value={email}
                 onChangeText={setEmail}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Numer telefonu</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="np. 123456789"
+                placeholderTextColor={colors.mutedForeground}
+                keyboardType="phone-pad"
+                value={phone}
+                onChangeText={setPhone}
               />
             </View>
 

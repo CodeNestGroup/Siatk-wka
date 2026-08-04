@@ -12,6 +12,8 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 
@@ -23,11 +25,17 @@ type NotificationPrefs = {
 };
 
 export default function ProfilScreen() {
+  const router = useRouter();
   const [loadingUser, setLoadingUser] = useState(true);
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
+  const [playerId, setPlayerId] = useState<string | null>(null);
 
+  // Dane profilu (tylko do odczytu)
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+
+  // Zmiana hasła
+  const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
@@ -40,28 +48,47 @@ export default function ProfilScreen() {
   });
 
   useEffect(() => {
-    loadUser();
+    loadPlayerData();
   }, []);
 
-  const loadUser = async () => {
+  const loadPlayerData = async () => {
     setLoadingUser(true);
-    const { data, error } = await supabase.auth.getUser();
+    try {
+      // 1. Pobieramy ID gracza z AsyncStorage
+      const storedPlayerId = await AsyncStorage.getItem('current_player_id');
+      
+      if (!storedPlayerId) {
+        router.replace('/(auth)');
+        return;
+      }
 
-    if (!error && data.user) {
-      setEmail(data.user.email ?? '');
+      setPlayerId(storedPlayerId);
 
-      const fullName: string = data.user.user_metadata?.full_name ?? '';
-      const parts = fullName.trim().split(' ');
-      setFirstName(parts[0] ?? '');
-      setLastName(parts.slice(1).join(' ') ?? '');
+      // 2. Pobieramy aktualne dane gracza bezpośrednio z tabeli players
+      const { data, error } = await supabase
+        .from('players')
+        .select('*')
+        .eq('id', storedPlayerId)
+        .single();
+
+      if (error || !data) {
+        Alert.alert('Błąd', 'Nie udało się pobrać danych profilu.');
+        return;
+      }
+
+      setFullName(data.full_name ?? '');
+      setEmail(data.email ?? '');
+      setPhone(data.phone ?? 'Brak numeru');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingUser(false);
     }
-
-    setLoadingUser(false);
   };
 
   const handleChangePassword = async () => {
-    if (!newPassword.trim() || !confirmPassword.trim()) {
-      Alert.alert('Błąd', 'Wypełnij oba pola hasła.');
+    if (!oldPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
+      Alert.alert('Błąd', 'Wypełnij wszystkie pola dotyczące hasła.');
       return;
     }
     if (newPassword.length < 6) {
@@ -69,27 +96,72 @@ export default function ProfilScreen() {
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert('Błąd', 'Hasła nie są takie same.');
+      Alert.alert('Błąd', 'Nowe hasła nie są takie same.');
       return;
     }
+    if (!playerId) return;
 
     setChangingPassword(true);
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    setChangingPassword(false);
 
-    if (error) {
-      Alert.alert('Błąd', error.message);
-      return;
+    try {
+      // 1. Sprawdzamy stare hasło w tabeli players
+      const { data: player, error: fetchError } = await supabase
+        .from('players')
+        .select('password')
+        .eq('id', playerId)
+        .single();
+
+      if (fetchError || !player || player.password !== oldPassword) {
+        setChangingPassword(false);
+        Alert.alert('Błąd', 'Stare hasło jest niepoprawne.');
+        return;
+      }
+
+      // 2. Aktualizujemy hasło na nowe w tabeli players
+      const { error: updateError } = await supabase
+        .from('players')
+        .update({ password: newPassword })
+        .eq('id', playerId);
+
+      setChangingPassword(false);
+
+      if (updateError) {
+        Alert.alert('Błąd', updateError.message);
+        return;
+      }
+
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      Alert.alert('Sukces', 'Hasło zostało zmienione.');
+    } catch (e: any) {
+      setChangingPassword(false);
+      Alert.alert('Błąd', e.message || 'Wystąpił nieoczekiwany błąd.');
     }
+  };
 
-    setNewPassword('');
-    setConfirmPassword('');
-    Alert.alert('Sukces', 'Hasło zostało zmienione.');
+  const handleLogout = async () => {
+    Alert.alert('Wylogowanie', 'Czy na pewno chcesz się wylogować?', [
+      { text: 'Anuluj', style: 'cancel' },
+      {
+        text: 'Wyloguj',
+        style: 'destructive',
+        onPress: async () => {
+          // Czyścimy dane sesji z pamięci urządzenia
+          await AsyncStorage.removeItem('current_player_id');
+          await AsyncStorage.removeItem('remember_me_status');
+          await AsyncStorage.removeItem('current_player_data');
+          await AsyncStorage.removeItem('current_auth_user_id');
+
+          // Przekierowanie do ekranu logowania
+          router.replace('/(auth)');
+        },
+      },
+    ]);
   };
 
   const togglePref = (key: keyof NotificationPrefs) => {
     setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
-    // TODO: zapisać ustawienia powiadomień w bazie (np. tabela profiles / user_settings)
   };
 
   if (loadingUser) {
@@ -110,24 +182,24 @@ export default function ProfilScreen() {
         <Text style={styles.headerTitle}>Profil</Text>
         <Text style={styles.headerSubtitle}>Twoje dane i ustawienia konta</Text>
 
-        {/* Sekcja: Dane profilu */}
+        {/* Sekcja: Dane profilu (Tylko do odczytu) */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Dane profilu</Text>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Imię</Text>
+            <Text style={styles.label}>Nazwa</Text>
             <TextInput
               style={[styles.input, styles.inputReadOnly]}
-              value={firstName}
+              value={fullName}
               editable={false}
             />
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Nazwisko</Text>
+            <Text style={styles.label}>Telefon</Text>
             <TextInput
               style={[styles.input, styles.inputReadOnly]}
-              value={lastName}
+              value={phone}
               editable={false}
             />
           </View>
@@ -147,6 +219,18 @@ export default function ProfilScreen() {
           <Text style={styles.cardTitle}>Zmiana hasła</Text>
 
           <View style={styles.inputGroup}>
+            <Text style={styles.label}>Stare hasło</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Wpisz obecne hasło"
+              placeholderTextColor={colors.mutedForeground}
+              secureTextEntry
+              value={oldPassword}
+              onChangeText={setOldPassword}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
             <Text style={styles.label}>Nowe hasło</Text>
             <TextInput
               style={styles.input}
@@ -162,7 +246,7 @@ export default function ProfilScreen() {
             <Text style={styles.label}>Powtórz nowe hasło</Text>
             <TextInput
               style={styles.input}
-              placeholder="Powtórz hasło"
+              placeholder="Powtórz nowe hasło"
               placeholderTextColor={colors.mutedForeground}
               secureTextEntry
               value={confirmPassword}
@@ -177,7 +261,7 @@ export default function ProfilScreen() {
             activeOpacity={0.8}
           >
             <Text style={styles.buttonText}>
-              {changingPassword ? 'Zapisywanie...' : 'Zmień hasło'}
+              {changingPassword ? 'Zmienianie...' : 'Zmień hasło'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -252,6 +336,15 @@ export default function ProfilScreen() {
             />
           </View>
         </View>
+
+        {/* Przycisk Wyloguj */}
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={handleLogout}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.logoutButtonText}>Wyloguj się</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -313,6 +406,7 @@ const styles = StyleSheet.create({
   },
   inputReadOnly: {
     color: colors.mutedForeground,
+    opacity: 0.8,
   },
 
   button: {
@@ -326,6 +420,22 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.6 },
   buttonText: {
     color: colors.primaryForeground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  logoutButton: {
+    backgroundColor: '#fee2e2',
+    borderWidth: 1.5,
+    borderColor: '#fca5a5',
+    borderRadius: radius.lg,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 20,
+  },
+  logoutButtonText: {
+    color: '#b91c1c',
     fontSize: 15,
     fontWeight: '700',
   },
