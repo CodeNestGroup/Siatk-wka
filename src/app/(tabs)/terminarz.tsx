@@ -137,14 +137,14 @@ export default function ScheduleScreen() {
 
   if (loading && matches.length === 0) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
+      <SafeAreaView style={styles.loadingContainer} edges={['top', 'left', 'right']}>
         <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Terminarz Meczów</Text>
       </View>
@@ -153,6 +153,7 @@ export default function ScheduleScreen() {
         data={matches}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
         renderItem={({ item }) => {
           const { weekday, day, month } = formatMatchDate(item.date);
           const isFinished = isDateInPast(item.date) || item.status === 'cancelled';
@@ -236,9 +237,9 @@ export default function ScheduleScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
-  header: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  header: { paddingHorizontal: 16, paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: colors.border },
   headerTitle: { fontSize: 20, fontWeight: '700', color: colors.foreground },
-  listContainer: { padding: 16, paddingBottom: 40 },
+  listContainer: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
 
   matchCard: {
     backgroundColor: colors.card,

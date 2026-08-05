@@ -1,7 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform } from 'react-native';
 import { Tabs } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius } from '@/constants/app-theme';
 
 const TAB_LABELS: Record<string, string> = {
@@ -13,7 +12,7 @@ const TAB_LABELS: Record<string, string> = {
 
 function TopTabBar({ state, navigation }: any) {
   return (
-    <SafeAreaView edges={['top']} style={styles.safeArea}>
+    <View style={styles.container}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -48,7 +47,7 @@ function TopTabBar({ state, navigation }: any) {
           );
         })}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -56,7 +55,10 @@ export default function TabsLayout() {
   return (
     <Tabs
       tabBar={(props) => <TopTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        tabBarPosition: 'top', // <-- TO PRZENOSI PASEK NA SAMĄ GÓRĘ
+      }}
     >
       <Tabs.Screen name="index" />
       <Tabs.Screen name="terminarz" />
@@ -67,21 +69,25 @@ export default function TabsLayout() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  container: {
     backgroundColor: colors.card,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    paddingTop: Platform.OS === 'ios' ? 44 : 44, // Odpowiedni margines pod aparat / pasek stanu
   },
   tabBar: {
     flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 10,
     gap: 8,
   },
   tabItem: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: radius['2xl'],
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   tabItemActive: {
     backgroundColor: colors.primary,

@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "MojaAplikacja",
-    "slug": "MojaAplikacja",
+    "name": "Siatkówka",
+    "slug": "siatkowka",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mojaaplikacja",
+    "scheme": "siatkowka",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.siatkowka"
     },
     "web": {
       "output": "static",
@@ -32,11 +33,18 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "57867bb9-4fea-41a8-958d-0f6f9a1b0003"
+      }
     }
   }
 }

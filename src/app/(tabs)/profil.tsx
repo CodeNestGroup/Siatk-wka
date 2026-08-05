@@ -18,10 +18,9 @@ import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 
 type NotificationPrefs = {
-  newAnnouncements: boolean;
-  scheduleChanges: boolean;
-  signupReminders: boolean;
-  payments: boolean;
+  notif_announcements: boolean;
+  notif_match_reminders: boolean;
+  notif_payments: boolean;
 };
 
 export default function ProfilScreen() {
@@ -40,11 +39,11 @@ export default function ProfilScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
 
+  // Prefs odpowiadające kolumnom w bazie danych players
   const [prefs, setPrefs] = useState<NotificationPrefs>({
-    newAnnouncements: true,
-    scheduleChanges: true,
-    signupReminders: true,
-    payments: false,
+    notif_announcements: true,
+    notif_match_reminders: true,
+    notif_payments: false,
   });
 
   useEffect(() => {
@@ -54,7 +53,6 @@ export default function ProfilScreen() {
   const loadPlayerData = async () => {
     setLoadingUser(true);
     try {
-      // 1. Pobieramy ID gracza z AsyncStorage
       const storedPlayerId = await AsyncStorage.getItem('current_player_id');
       
       if (!storedPlayerId) {
@@ -64,7 +62,7 @@ export default function ProfilScreen() {
 
       setPlayerId(storedPlayerId);
 
-      // 2. Pobieramy aktualne dane gracza bezpośrednio z tabeli players
+      // Pobieramy dane gracza wraz z preferencjami powiadomień
       const { data, error } = await supabase
         .from('players')
         .select('*')
@@ -79,10 +77,38 @@ export default function ProfilScreen() {
       setFullName(data.full_name ?? '');
       setEmail(data.email ?? '');
       setPhone(data.phone ?? 'Brak numeru');
+
+      // Ustawiamy stany przełączników na podstawie bazy danych
+      setPrefs({
+        notif_announcements: data.notif_announcements ?? true,
+        notif_match_reminders: data.notif_match_reminders ?? true,
+        notif_payments: data.notif_payments ?? false,
+      });
     } catch (e) {
       console.error(e);
     } finally {
       setLoadingUser(false);
+    }
+  };
+
+  const togglePref = async (key: keyof NotificationPrefs) => {
+    if (!playerId) return;
+
+    const newValue = !prefs[key];
+
+    // Optymistyczna zmiana stanu w interfejsie
+    setPrefs((prev) => ({ ...prev, [key]: newValue }));
+
+    // Zapis w bazie danych (czysty SQL UPDATE na tabeli players)
+    const { error } = await supabase
+      .from('players')
+      .update({ [key]: newValue })
+      .eq('id', playerId);
+
+    if (error) {
+      Alert.alert('Błąd', 'Nie udało się zapisać ustawienia powiadomień.');
+      // Przywrócenie stanu w razie błędu
+      setPrefs((prev) => ({ ...prev, [key]: !newValue }));
     }
   };
 
@@ -104,7 +130,6 @@ export default function ProfilScreen() {
     setChangingPassword(true);
 
     try {
-      // 1. Sprawdzamy stare hasło w tabeli players
       const { data: player, error: fetchError } = await supabase
         .from('players')
         .select('password')
@@ -117,7 +142,6 @@ export default function ProfilScreen() {
         return;
       }
 
-      // 2. Aktualizujemy hasło na nowe w tabeli players
       const { error: updateError } = await supabase
         .from('players')
         .update({ password: newPassword })
@@ -147,33 +171,34 @@ export default function ProfilScreen() {
         text: 'Wyloguj',
         style: 'destructive',
         onPress: async () => {
-          // Czyścimy dane sesji z pamięci urządzenia
+          if (playerId) {
+            await supabase
+              .from('players')
+              .update({ push_token: null })
+              .eq('id', playerId);
+          }
+
           await AsyncStorage.removeItem('current_player_id');
           await AsyncStorage.removeItem('remember_me_status');
           await AsyncStorage.removeItem('current_player_data');
           await AsyncStorage.removeItem('current_auth_user_id');
 
-          // Przekierowanie do ekranu logowania
           router.replace('/(auth)');
         },
       },
     ]);
   };
 
-  const togglePref = (key: keyof NotificationPrefs) => {
-    setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
   if (loadingUser) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={['bottom']}>
+      <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
         <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -182,7 +207,7 @@ export default function ProfilScreen() {
         <Text style={styles.headerTitle}>Profil</Text>
         <Text style={styles.headerSubtitle}>Twoje dane i ustawienia konta</Text>
 
-        {/* Sekcja: Dane profilu (Tylko do odczytu) */}
+        {/* Sekcja: Dane profilu */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Dane profilu</Text>
 
@@ -266,7 +291,7 @@ export default function ProfilScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Sekcja: Powiadomienia */}
+        {/* Sekcja: Powiadomienia spięta z bazą danych */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Powiadomienia</Text>
 
@@ -278,8 +303,8 @@ export default function ProfilScreen() {
               </Text>
             </View>
             <Switch
-              value={prefs.newAnnouncements}
-              onValueChange={() => togglePref('newAnnouncements')}
+              value={prefs.notif_announcements}
+              onValueChange={() => togglePref('notif_announcements')}
               trackColor={{ false: colors.border, true: colors.primary }}
               thumbColor="#fff"
             />
@@ -289,14 +314,14 @@ export default function ProfilScreen() {
 
           <View style={styles.prefRow}>
             <View style={styles.prefTextWrap}>
-              <Text style={styles.prefLabel}>Zmiany w terminarzu</Text>
+              <Text style={styles.prefLabel}>Przypomnienia o meczach</Text>
               <Text style={styles.prefDescription}>
-                Powiadom o zmianie godziny lub odwołaniu meczu
+                Tydzień, dzień, 6 rano w dniu meczu oraz na 3h przed
               </Text>
             </View>
             <Switch
-              value={prefs.scheduleChanges}
-              onValueChange={() => togglePref('scheduleChanges')}
+              value={prefs.notif_match_reminders}
+              onValueChange={() => togglePref('notif_match_reminders')}
               trackColor={{ false: colors.border, true: colors.primary }}
               thumbColor="#fff"
             />
@@ -306,31 +331,14 @@ export default function ProfilScreen() {
 
           <View style={styles.prefRow}>
             <View style={styles.prefTextWrap}>
-              <Text style={styles.prefLabel}>Przypomnienia o zapisach</Text>
+              <Text style={styles.prefLabel}>Płatności po meczu</Text>
               <Text style={styles.prefDescription}>
-                Przypomnij mi przed zamknięciem zapisów na mecz
+                Przypomnij o nieopłaconym meczu po jego zakończeniu
               </Text>
             </View>
             <Switch
-              value={prefs.signupReminders}
-              onValueChange={() => togglePref('signupReminders')}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor="#fff"
-            />
-          </View>
-
-          <View style={styles.prefDivider} />
-
-          <View style={styles.prefRow}>
-            <View style={styles.prefTextWrap}>
-              <Text style={styles.prefLabel}>Płatności</Text>
-              <Text style={styles.prefDescription}>
-                Powiadom o statusie płatności za mecz
-              </Text>
-            </View>
-            <Switch
-              value={prefs.payments}
-              onValueChange={() => togglePref('payments')}
+              value={prefs.notif_payments}
+              onValueChange={() => togglePref('notif_payments')}
               trackColor={{ false: colors.border, true: colors.primary }}
               thumbColor="#fff"
             />
@@ -357,14 +365,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 16,
   },
-  scrollContent: { padding: 16, paddingBottom: 40 },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
 
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
     color: colors.foreground,
-    marginTop: 8,
+    marginTop: 16, // Zwiększone, żeby tytuł był niżej
   },
   headerSubtitle: {
     fontSize: 14,

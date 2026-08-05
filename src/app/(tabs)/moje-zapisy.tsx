@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime } from '@/lib/format';
@@ -32,14 +33,30 @@ type MyRegistration = {
   matches: MatchInfo | null;
 };
 
+type TabType = 'active' | 'unpaid_past' | 'paid_past';
+
+function isMatchPast(matchDateStr: string, matchTimeStartStr: string): boolean {
+  try {
+    const matchDateTime = new Date(`${matchDateStr}T${matchTimeStartStr}`);
+    const now = new Date();
+    return matchDateTime.getTime() < now.getTime();
+  } catch {
+    return false;
+  }
+}
+
 function RegistrationCard({
   reg,
   onCancel,
+  onPress,
   cancelling,
+  activeTab,
 }: {
   reg: MyRegistration;
   onCancel: (registrationId: string) => void;
+  onPress: (matchId: string) => void;
   cancelling: boolean;
+  activeTab: TabType;
 }) {
   if (!reg.matches) return null;
 
@@ -47,7 +64,11 @@ function RegistrationCard({
   const title = reg.matches.title?.trim() || 'Trening Siatkówki';
 
   return (
-    <View style={styles.card}>
+    <TouchableOpacity
+      style={styles.card}
+      activeOpacity={0.8}
+      onPress={() => reg.matches && onPress(reg.matches.id)}
+    >
       <View style={styles.dateBox}>
         <Text style={styles.dateDay}>{day}</Text>
         <Text style={styles.dateMonth}>{month}</Text>
@@ -82,30 +103,37 @@ function RegistrationCard({
         </Text>
 
         <View style={styles.footerRow}>
-          <Text
-            style={[
-              styles.paymentStatus,
-              { color: reg.is_paid ? '#16A34A' : colors.destructive },
-            ]}
-          >
-            {reg.is_paid ? '✓ Opłacone' : '✕ Nieopłacone'}
-          </Text>
+          {activeTab === 'active' ? (
+            <View />
+          ) : (
+            <Text
+              style={[
+                styles.paymentStatus,
+                { color: reg.is_paid ? '#16A34A' : colors.destructive },
+              ]}
+            >
+              {reg.is_paid ? '✓ Opłacone' : '✕ Nieopłacone'}
+            </Text>
+          )}
           <Text style={styles.footerText}>{Number(reg.matches.price_per_player)} PLN</Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.cancelButton}
-          onPress={() => onCancel(reg.id)}
-          disabled={cancelling}
-        >
-          <Text style={styles.cancelButtonText}>Wypisz się</Text>
-        </TouchableOpacity>
+        {activeTab === 'active' && (
+          <TouchableOpacity
+            style={styles.cancelButton}
+            onPress={() => onCancel(reg.id)}
+            disabled={cancelling}
+          >
+            <Text style={styles.cancelButtonText}>Wypisz się</Text>
+          </TouchableOpacity>
+        )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
 export default function MojeZapisyScreen() {
+  const router = useRouter();
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [registrations, setRegistrations] = useState<MyRegistration[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,38 +141,44 @@ export default function MojeZapisyScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
-  const loadData = useCallback(async () => {
-    const player = await getCurrentPlayer();
-    setCurrentPlayer(player);
+  const [activeTab, setActiveTab] = useState<TabType>('active');
 
-    if (!player) {
-      setRegistrations([]);
-      return;
-    }
+  const loadData = async () => {
+    try {
+      const player = await getCurrentPlayer();
+      setCurrentPlayer(player);
 
-    const { data, error } = await supabase
-      .from('match_registrations')
-      .select(
-        'id, status, is_paid, matches(id, title, date, time_start, time_end, location, price_per_player)'
-      )
-      .eq('player_id', player.id)
-      .order('created_at', { ascending: false });
+      if (!player) {
+        setRegistrations([]);
+        return;
+      }
 
-    if (error) {
-      setErrorMsg(error.message);
-    } else {
-      setErrorMsg(null);
-      setRegistrations((data as any) ?? []);
-    }
-  }, []);
+      const { data, error } = await supabase
+        .from('match_registrations')
+        .select(
+          'id, status, is_paid, matches(id, title, date, time_start, time_end, location, price_per_player)'
+        )
+        .eq('player_id', player.id)
+        .order('created_at', { ascending: false });
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      await loadData();
+      if (error) {
+        setErrorMsg(error.message);
+      } else {
+        setErrorMsg(null);
+        setRegistrations((data as any) ?? []);
+      }
+    } catch (e: any) {
+      setErrorMsg(e?.message || 'Wystąpił nieznany błąd');
+    } finally {
       setLoading(false);
-    })();
-  }, [loadData]);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [])
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -176,18 +210,36 @@ export default function MojeZapisyScreen() {
     ]);
   };
 
+  const handlePressMatch = (matchId: string) => {
+    router.push(`/(match)/${matchId}`);
+  };
+
+  const filteredRegistrations = registrations.filter((reg) => {
+    if (!reg.matches) return false;
+    const isPast = isMatchPast(reg.matches.date, reg.matches.time_start);
+
+    if (activeTab === 'active') {
+      return !isPast;
+    } else if (activeTab === 'unpaid_past') {
+      return isPast && !reg.is_paid;
+    } else if (activeTab === 'paid_past') {
+      return isPast && reg.is_paid;
+    }
+    return false;
+  });
+
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={['bottom']}>
+      <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
         <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
       <FlatList
-        data={registrations}
+        data={filteredRegistrations}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
@@ -210,18 +262,58 @@ export default function MojeZapisyScreen() {
                 <Text style={styles.warnText}>Nie znaleziono Twojego profilu gracza.</Text>
               </View>
             )}
+
+            <View style={styles.tabsContainer}>
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'active' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('active')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>
+                  Zapisany
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'unpaid_past' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('unpaid_past')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.tabText, activeTab === 'unpaid_past' && styles.tabTextActive]}>
+                  Nie opłacone i zakończone
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'paid_past' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('paid_past')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.tabText, activeTab === 'paid_past' && styles.tabTextActive]}>
+                  Opłacone i zakończone
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>Nie zapisałeś się jeszcze na żaden mecz.</Text>
+            <Text style={styles.emptyText}>
+              {activeTab === 'active'
+                ? 'Brak nadchodzących zapisów.'
+                : activeTab === 'unpaid_past'
+                ? 'Brak nieopłaconych i zakończonych meczów.'
+                : 'Brak opłaconych i zakończonych meczów.'}
+            </Text>
           </View>
         }
         renderItem={({ item }) => (
           <RegistrationCard
             reg={item}
             onCancel={handleCancel}
+            onPress={handlePressMatch}
             cancelling={cancellingId === item.id}
+            activeTab={activeTab}
           />
         )}
       />
@@ -236,10 +328,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 16,
   },
-  listContent: { padding: 16, paddingBottom: 32 },
+  listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32 },
 
-  headerTitle: { fontSize: 24, fontWeight: '700', color: colors.foreground, marginTop: 8 },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: colors.foreground, marginTop: 16 }, // Zwiększony margines góra
   headerSubtitle: { fontSize: 14, color: colors.mutedForeground, marginTop: 4, marginBottom: 16 },
 
   errorBox: {
@@ -257,6 +350,37 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   warnText: { color: '#92400E', fontSize: 13 },
+
+  tabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: 4,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.md,
+  },
+  tabButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  tabText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.mutedForeground,
+    textAlign: 'center',
+  },
+  tabTextActive: {
+    color: colors.primaryForeground,
+    fontWeight: '700',
+  },
 
   card: {
     flexDirection: 'row',
