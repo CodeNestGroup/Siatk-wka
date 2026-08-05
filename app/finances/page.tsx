@@ -13,7 +13,9 @@ import {
   CheckCircle2,
   ArrowLeft,
   PiggyBank,
-  Loader2
+  Loader2,
+  Trash2,
+  Download
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import Link from "next/link"
@@ -49,7 +51,6 @@ export default function FinancesPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [playerBalances, setPlayerBalances] = useState<PlayerOverpayment[]>([])
 
-  // Formularz nowej operacji
   const [newTitle, setNewTitle] = useState("")
   const [newType, setNewType] = useState<"income" | "expense">("income")
   const [newAmount, setNewAmount] = useState("")
@@ -57,7 +58,13 @@ export default function FinancesPage() {
   const [newCategory, setNewCategory] = useState("mecz")
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // 1. Wczytywanie profilu zalogowanego użytkownika z localStorage oraz danych finansowych
+  const isAdmin =
+    user?.role === "admin" ||
+    user?.is_admin ||
+    user?.email === "admin@admin.pl" ||
+    user?.name === "Mateusz Podzorski" ||
+    user?.full_name === "Mateusz Podzorski"
+
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
     if (localUser) {
@@ -68,27 +75,26 @@ export default function FinancesPage() {
       setUser(null)
     }
 
-    async function loadData() {
-      setIsLoading(true)
-      const [txData, balancesData] = await Promise.all([
-        getTransactions(),
-        getPlayerBalances()
-      ])
-
-      setTransactions(txData)
-      setPlayerBalances(balancesData)
-      setIsLoading(false)
-    }
-
     loadData()
   }, [])
+
+  async function loadData() {
+    setIsLoading(true)
+    const [txData, balancesData] = await Promise.all([
+      getTransactions(),
+      getPlayerBalances()
+    ])
+
+    setTransactions(txData)
+    setPlayerBalances(balancesData)
+    setIsLoading(false)
+  }
 
   function notify(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(null), 3500)
   }
 
-  // Obsługa wylogowania
   async function handleLogout() {
     localStorage.removeItem("volley_user")
     localStorage.clear()
@@ -98,7 +104,42 @@ export default function FinancesPage() {
     window.location.href = "/login"
   }
 
-  // Wyliczania bilansu
+  // Funkcja eksportująca Księgę do pliku CSV
+  function exportFinancesToCSV() {
+    if (transactions.length === 0) return alert("Brak transakcji do wyeksportowania!")
+
+    const headers = "Lp.,Data,Tytul,Kategoria,Osoba Zbierajaca,Kwota (PLN)\n"
+    const rows = transactions.map((t, i) => {
+      const amountStr = t.type === "income" ? `+${t.amount}` : `-${t.amount}`
+      return `${transactions.length - i},"${t.date}","${t.title}","${t.category}","${t.collected_by}","${amountStr}"`
+    }).join("\n")
+
+    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.setAttribute("href", url)
+    link.setAttribute("download", `Raport_Finansowy_ESCO_${new Date().toISOString().split("T")[0]}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    notify("Pobrano plik CSV!")
+  }
+
+  async function handleDeleteTransaction(id: string) {
+    if (!confirm("Czy na pewno chcesz usunąć ten wpis z bazy finansowej?")) return
+
+    setTransactions((prev) => prev.filter((t) => t.id !== id))
+    const { error } = await supabase.from('transactions').delete().eq('id', id)
+
+    if (error) {
+      console.error("Błąd usuwania transakcji:", error.message)
+      notify(`Błąd usuwania: ${error.message}`)
+      loadData()
+    } else {
+      notify("Transakcja została usunięta")
+    }
+  }
+
   const totalIncome = useMemo(() => {
     return transactions.filter(t => t.type === "income").reduce((acc, t) => acc + Number(t.amount), 0)
   }, [transactions])
@@ -113,7 +154,6 @@ export default function FinancesPage() {
     return playerBalances.reduce((acc, p) => acc + (Number(p.balance) > 0 ? Number(p.balance) : 0), 0)
   }, [playerBalances])
 
-  // Zapis nowej operacji w Supabase z dokładnym raportowaniem błędów
   async function handleAddTransaction(e: React.FormEvent) {
     e.preventDefault()
     if (!newTitle || !newAmount) return
@@ -135,8 +175,8 @@ export default function FinancesPage() {
       .select()
 
     if (error) {
-      console.error("Błąd zapisu Supabase:", error.message, error.details, error.hint)
-      notify(`Błąd zapisu: ${error.message || 'Sprawdź uprawnienia RLS'}`)
+      console.error("Błąd zapisu Supabase:", error.message)
+      notify(`Błąd zapisu: ${error.message}`)
     } else if (data && data.length > 0) {
       setTransactions([data[0], ...transactions])
       setShowAddModal(false)
@@ -154,7 +194,7 @@ export default function FinancesPage() {
   )
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -163,82 +203,85 @@ export default function FinancesPage() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <main className="mx-auto w-full max-w-7xl flex-1 space-y-8 px-4 py-8 lg:px-8">
+        <main className="mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8">
 
-          <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link href="/" className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-900 transition-colors">
             <ArrowLeft className="h-4 w-4" />
             Powrót do pulpitu
           </Link>
 
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
-                <Wallet className="h-7 w-7 text-primary" />
+              <h1 className="text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2.5">
+                <Wallet className="h-7 w-7 text-blue-600" />
                 Rozliczenie Kasy Zespołu
               </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-1 text-xs font-medium text-slate-500">
                 Śledź wpływy z meczy, wydatki na salę oraz nadpłaty zawodników.
               </p>
             </div>
 
-            <Button onClick={() => setShowAddModal(true)} className="gap-2 rounded-xl shadow-md">
-              <Plus className="h-4 w-4" />
-              Dodaj wpłatę / wydatek
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button onClick={exportFinancesToCSV} variant="outline" className="gap-2 rounded-2xl text-xs font-bold border-slate-200 bg-white">
+                <Download className="h-4 w-4 text-blue-600" />
+                Pobierz raport CSV
+              </Button>
+
+              {isAdmin && (
+                <Button onClick={() => setShowAddModal(true)} className="gap-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-lg shadow-blue-500/25">
+                  <Plus className="h-4 w-4" />
+                  Dodaj wpłatę / wydatek
+                </Button>
+              )}
+            </div>
           </div>
 
-          {/* Kafelki Podsumowania Finansowego (KPI) */}
+          {/* Kafelki Podsumowania */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
-            <div className="relative overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/40 via-background to-background p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Aktualny Stan Kasy</p>
-                  <h3 className="mt-2 text-2xl font-extrabold tracking-tight text-emerald-400">{currentCash.toFixed(2)} PLN</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">Dostępny budżet bieżący</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  <PiggyBank className="h-6 w-6" />
-                </div>
+            <div className="rounded-3xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/60 to-white p-5 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600">Aktualny Stan Kasy</p>
+                <h3 className={cn("mt-1 text-xl font-black", currentCash < 0 ? "text-rose-600" : "text-slate-900")}>
+                  {currentCash.toFixed(2)} PLN
+                </h3>
+                <p className="mt-0.5 text-[11px] font-medium text-slate-400">Dostępny budżet</p>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 border border-emerald-200/50">
+                <PiggyBank className="h-6 w-6" />
               </div>
             </div>
 
-            <div className="relative overflow-hidden rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-950/40 via-background to-background p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Suma Wpływów</p>
-                  <h3 className="mt-2 text-2xl font-extrabold tracking-tight text-blue-400">+{totalIncome.toFixed(2)} PLN</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">Wszystkie zebrane opłaty</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                  <ArrowUpCircle className="h-6 w-6" />
-                </div>
+            <div className="rounded-3xl border border-blue-200/80 bg-gradient-to-br from-blue-50/60 to-white p-5 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-blue-600">Suma Wpływów</p>
+                <h3 className="mt-1 text-xl font-black text-slate-900">+{totalIncome.toFixed(2)} PLN</h3>
+                <p className="mt-0.5 text-[11px] font-medium text-slate-400">Wszystkie zebrane opłaty</p>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 border border-blue-200/50">
+                <ArrowUpCircle className="h-6 w-6" />
               </div>
             </div>
 
-            <div className="relative overflow-hidden rounded-2xl border border-rose-500/30 bg-gradient-to-br from-rose-950/40 via-background to-background p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Suma Wydatków</p>
-                  <h3 className="mt-2 text-2xl font-extrabold tracking-tight text-rose-400">-{totalExpense.toFixed(2)} PLN</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">Opłaty za halę i rachunki</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30">
-                  <ArrowDownCircle className="h-6 w-6" />
-                </div>
+            <div className="rounded-3xl border border-rose-200/80 bg-gradient-to-br from-rose-50/60 to-white p-5 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-rose-600">Suma Wydatków</p>
+                <h3 className="mt-1 text-xl font-black text-slate-900">-{totalExpense.toFixed(2)} PLN</h3>
+                <p className="mt-0.5 text-[11px] font-medium text-slate-400">Opłaty za halę</p>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 border border-rose-200/50">
+                <ArrowDownCircle className="h-6 w-6" />
               </div>
             </div>
 
-            <div className="relative overflow-hidden rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-950/40 via-background to-background p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nadpłaty Graczy</p>
-                  <h3 className="mt-2 text-2xl font-extrabold tracking-tight text-purple-400">{totalOverpayments.toFixed(2)} PLN</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">Zaliczki na przyszłe mecze</p>
-                </div>
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                  <TrendingUp className="h-6 w-6" />
-                </div>
+            <div className="rounded-3xl border border-purple-200/80 bg-gradient-to-br from-purple-50/60 to-white p-5 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-purple-600">Nadpłaty Graczy</p>
+                <h3 className="mt-1 text-xl font-black text-slate-900">{totalOverpayments.toFixed(2)} PLN</h3>
+                <p className="mt-0.5 text-[11px] font-medium text-slate-400">Zaliczki zawodników</p>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-100 text-purple-600 border border-purple-200/50">
+                <TrendingUp className="h-6 w-6" />
               </div>
             </div>
 
@@ -247,67 +290,79 @@ export default function FinancesPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
             <div className="lg:col-span-2 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-card p-4 rounded-2xl border border-border">
-                <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-                  <Receipt className="h-5 w-5 text-primary" />
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-200/80 shadow-sm">
+                <h2 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <Receipt className="h-4 w-4 text-blue-600" />
                   Księga Rozliczeń i Wpłat
                 </h2>
 
                 <div className="relative max-w-xs w-full">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type="search"
                     placeholder="Szukaj wpłaty, zbierającego…"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full rounded-xl border border-input bg-background py-1.5 pl-9 pr-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 py-1.5 pl-10 pr-3 text-xs font-medium outline-none focus:border-blue-500 focus:bg-white transition-all"
                   />
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+              <div className="rounded-3xl border border-slate-200/80 bg-white overflow-hidden shadow-sm">
                 {isLoading ? (
-                  <div className="p-12 text-center text-muted-foreground flex items-center justify-center gap-2">
-                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                    Ładowanie księgi rozliczeń z bazy Supabase...
+                  <div className="p-12 text-center text-slate-400 text-xs font-bold flex items-center justify-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                    Ładowanie księgi rozliczeń z bazy...
                   </div>
                 ) : filteredTransactions.length === 0 ? (
-                  <div className="p-12 text-center text-muted-foreground text-xs">
+                  <div className="p-12 text-center text-slate-400 text-xs font-medium">
                     Brak opłat spełniających kryteria.
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
-                      <thead className="border-b border-border bg-secondary/50 text-muted-foreground uppercase text-[10px] font-bold tracking-wider">
+                      <thead className="border-b border-slate-100 bg-slate-50/80 text-slate-400 uppercase text-[10px] font-extrabold tracking-wider">
                         <tr>
-                          <th className="p-3.5">Lp.</th>
-                          <th className="p-3.5">Data</th>
-                          <th className="p-3.5">Opis operacji / Tytuł</th>
-                          <th className="p-3.5">Osoba zbierająca</th>
-                          <th className="p-3.5 text-right">Kwota</th>
+                          <th className="p-4">Lp.</th>
+                          <th className="p-4">Data</th>
+                          <th className="p-4">Opis operacji / Tytuł</th>
+                          <th className="p-4">Osoba zbierająca</th>
+                          <th className="p-4 text-right">Kwota</th>
+                          {isAdmin && <th className="p-4 text-right">Akcje</th>}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-border/60 font-medium">
+                      <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                         {filteredTransactions.map((tx, idx) => (
-                          <tr key={tx.id || idx} className="hover:bg-secondary/20 transition-colors">
-                            <td className="p-3.5 text-muted-foreground font-bold">{filteredTransactions.length - idx}</td>
-                            <td className="p-3.5 text-foreground whitespace-nowrap">{tx.date}</td>
-                            <td className="p-3.5 text-foreground">
-                              <p className="font-semibold">{tx.title}</p>
-                              <span className="text-[10px] text-muted-foreground uppercase">{tx.category}</span>
+                          <tr key={tx.id || idx} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="p-4 text-slate-400 font-extrabold">{filteredTransactions.length - idx}</td>
+                            <td className="p-4 text-slate-900 font-bold whitespace-nowrap">{tx.date}</td>
+                            <td className="p-4 text-slate-900">
+                              <p className="font-bold">{tx.title}</p>
+                              <span className="text-[10px] text-slate-400 uppercase font-extrabold">{tx.category}</span>
                             </td>
-                            <td className="p-3.5">
-                              <span className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-1 text-[11px] font-semibold text-foreground border border-border/40">
-                                <UserCheck className="h-3 w-3 text-primary" />
+                            <td className="p-4">
+                              <span className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700 border border-slate-200/60">
+                                <UserCheck className="h-3 w-3 text-blue-600" />
                                 {tx.collected_by}
                               </span>
                             </td>
                             <td className={cn(
-                              "p-3.5 text-right font-bold text-sm whitespace-nowrap",
-                              tx.type === "income" ? "text-emerald-400" : "text-rose-400"
+                              "p-4 text-right font-black text-sm whitespace-nowrap",
+                              tx.type === "income" ? "text-emerald-600" : "text-rose-600"
                             )}>
                               {tx.type === "income" ? "+" : "-"}{Number(tx.amount).toFixed(2)} PLN
                             </td>
+                            {isAdmin && (
+                              <td className="p-4 text-right">
+                                <button
+                                  onClick={() => handleDeleteTransaction(tx.id)}
+                                  className="p-1.5 rounded-xl text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                                  title="Usuń wpis"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -318,32 +373,32 @@ export default function FinancesPage() {
             </div>
 
             <div className="space-y-4">
-              <div className="bg-card p-4 rounded-2xl border border-border">
-                <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-                  <PiggyBank className="h-5 w-5 text-purple-400" />
+              <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-sm">
+                <h2 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <PiggyBank className="h-4 w-4 text-purple-600" />
                   Nadpłaty Zawodników
                 </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Saldo zaliczek graczy na poczet nadchodzących meczy</p>
+                <p className="text-[11px] text-slate-400 mt-0.5 font-medium">Saldo zaliczek graczy na mecze</p>
               </div>
 
-              <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+              <div className="rounded-3xl border border-slate-200/80 bg-white p-4 space-y-2.5 shadow-sm">
                 {playerBalances.length === 0 ? (
-                  <p className="text-xs text-muted-foreground text-center py-4">Brak wpisanych nadpłat.</p>
+                  <p className="text-xs text-slate-400 text-center py-4 font-medium">Brak wpisanych nadpłat.</p>
                 ) : (
                   playerBalances.map((player) => (
-                    <div key={player.id} className="flex items-center justify-between p-3 rounded-xl bg-secondary/30 border border-border/40">
+                    <div key={player.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
                       <div>
-                        <p className="text-xs font-bold text-foreground">{player.name}</p>
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-xs font-bold text-slate-900">{player.name}</p>
+                        <p className="text-[10px] text-slate-400 font-medium">
                           {Number(player.balance) > 0 ? "Posiada depozyt" : "Brak nadpłaty"}
                         </p>
                       </div>
 
                       <span className={cn(
-                        "text-xs font-extrabold px-2.5 py-1 rounded-lg border",
+                        "text-xs font-black px-2.5 py-1 rounded-xl border",
                         Number(player.balance) > 0
-                          ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                          : "bg-secondary text-muted-foreground border-border/40"
+                          ? "bg-purple-100 text-purple-700 border-purple-200"
+                          : "bg-slate-100 text-slate-400 border-slate-200"
                       )}>
                         +{Number(player.balance).toFixed(2)} PLN
                       </span>
@@ -359,20 +414,20 @@ export default function FinancesPage() {
       </div>
 
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-2xl space-y-4">
-            <h2 className="text-lg font-bold text-foreground">Dodaj nową operację do Kasy</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4 text-slate-900">
+            <h2 className="text-base font-black">Dodaj nową operację do Kasy</h2>
 
             <form onSubmit={handleAddTransaction} className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Typ operacji</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Typ operacji</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setNewType("income")}
                     className={cn(
-                      "py-2 rounded-xl text-xs font-bold border transition-colors",
-                      newType === "income" ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" : "bg-secondary text-muted-foreground"
+                      "py-2 rounded-xl text-xs font-extrabold border transition-colors",
+                      newType === "income" ? "bg-emerald-100 text-emerald-700 border-emerald-300" : "bg-slate-100 text-slate-500 border-slate-200"
                     )}
                   >
                     + Wpływ (Przychód)
@@ -381,8 +436,8 @@ export default function FinancesPage() {
                     type="button"
                     onClick={() => setNewType("expense")}
                     className={cn(
-                      "py-2 rounded-xl text-xs font-bold border transition-colors",
-                      newType === "expense" ? "bg-rose-500/20 text-rose-400 border-rose-500/40" : "bg-secondary text-muted-foreground"
+                      "py-2 rounded-xl text-xs font-extrabold border transition-colors",
+                      newType === "expense" ? "bg-rose-100 text-rose-700 border-rose-300" : "bg-slate-100 text-slate-500 border-slate-200"
                     )}
                   >
                     - Wydatek (Opłata)
@@ -391,20 +446,20 @@ export default function FinancesPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Tytuł / Opis operacji</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Tytuł / Opis operacji</label>
                 <input
                   type="text"
                   required
                   placeholder="np. Wpłata od Marka / Zapłata za halę"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full rounded-xl border border-input bg-background px-3.5 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2 text-xs font-medium outline-none focus:border-blue-500 focus:bg-white"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">Kwota (PLN)</label>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Kwota (PLN)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -412,28 +467,28 @@ export default function FinancesPage() {
                     placeholder="0.00"
                     value={newAmount}
                     onChange={(e) => setNewAmount(e.target.value)}
-                    className="w-full rounded-xl border border-input bg-background px-3.5 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30 font-bold"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2 text-xs font-black outline-none focus:border-blue-500 focus:bg-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">Kto zbierał / płacił?</label>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Kto zbierał / płacił?</label>
                   <input
                     type="text"
                     required
                     placeholder="np. Krzysiek, Marek"
                     value={newCollectedBy}
                     onChange={(e) => setNewCollectedBy(e.target.value)}
-                    className="w-full rounded-xl border border-input bg-background px-3.5 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2 text-xs font-medium outline-none focus:border-blue-500 focus:bg-white"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3">
-                <Button type="button" variant="ghost" onClick={() => setShowAddModal(false)} className="rounded-xl text-xs">
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <Button type="button" variant="ghost" onClick={() => setShowAddModal(false)} className="rounded-xl text-xs font-bold">
                   Anuluj
                 </Button>
-                <Button type="submit" disabled={isSubmitting} className="rounded-xl text-xs">
+                <Button type="submit" disabled={isSubmitting} className="rounded-xl text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold">
                   {isSubmitting ? "Zapisywanie..." : "Zapisz operację"}
                 </Button>
               </div>
@@ -443,7 +498,7 @@ export default function FinancesPage() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-4 py-2.5 text-sm font-medium text-background shadow-lg">
+        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-xl">
           <CheckCircle2 className="h-4 w-4 text-emerald-400" />
           {toast}
         </div>

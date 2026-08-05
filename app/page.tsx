@@ -17,10 +17,13 @@ import {
   CheckCircle2,
   UserCheck,
   Crown,
-  Trophy
+  Trophy,
+  Share2,
+  Shuffle
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { MatchDetail } from "@/components/dashboard/match-detail"
+import { TeamBalancerModal } from "@/components/dashboard/team-balancer-modal"
 import { Button } from "@/components/ui/button"
 import { type Match, mainRoster, waitlist, getMatches } from "@/lib/data"
 import { cn } from "@/lib/utils"
@@ -46,6 +49,9 @@ export default function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | "upcoming" | "past">("all")
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
+
+  // Stan dla Losowania Składów A vs B
+  const [selectedMatchForTeams, setSelectedMatchForTeams] = useState<Match | null>(null)
 
   // Przełącznik widoku podsumowania (Najbliższy mecz vs Cały Sezon)
   const [viewMode, setViewMode] = useState<"nearest" | "season">("nearest")
@@ -129,7 +135,6 @@ export default function DashboardPage() {
       if (extractedPlayers.length === 0) {
         setAvailablePlayers([
           { id: "p1", name: "Mateusz Podzorski", role: "admin" },
-          { id: "p2", name: "Główny Admin", role: "admin" },
           { id: "p3", name: "maciek", role: "player" },
           { id: "p4", name: "brudas", role: "player" }
         ])
@@ -139,6 +144,24 @@ export default function DashboardPage() {
     }
 
     setIsLoading(false)
+  }
+
+  // Kopiowanie wiadomości na WhatsAppa / Messenger
+  function copyMatchToClipboard(match: Match, e: React.MouseEvent) {
+    e.stopPropagation()
+    const roster = mainRoster(match)
+    const playerNames = roster.map((p: any) => p.name || p.full_name).join(", ")
+    const freeSpots = (match.capacity || 12) - roster.length
+
+    const text = `🏐 *Trening ESCO Volleyball (${match.date})*\n📍 *Lokalizacja:* ${match.location || 'Hala Sportowa ESCO Jaworze'}\n👥 *Skład (${roster.length}/${match.capacity || 12}):* ${playerNames || 'Brak zgłoszeń'}\n⏳ *Wolne miejsca:* ${freeSpots > 0 ? freeSpots : 'Brak (Lista rezerwowa)'}\n💰 *Składka:* ${match.price_per_player || 25} PLN / os.`
+
+    navigator.clipboard.writeText(text)
+    notify("Skopiowano treść powiadomienia do schowka!")
+  }
+
+  function handleOpenBalancer(match: Match, e: React.MouseEvent) {
+    e.stopPropagation()
+    setSelectedMatchForTeams(match)
   }
 
   function togglePlayerSelection(playerId: string) {
@@ -234,10 +257,8 @@ export default function DashboardPage() {
 
   const nearestMatch = upcomingMatches[0] || matches[0]
 
-  // === WYLICZENIA DLA CAŁEGO SEZONU ===
   const totalSeasonMatches = matches.length
 
-  // Obliczanie Króla Frekwencji
   const playerMatchCounts: Record<string, { name: string; count: number }> = {}
   matches.forEach((m) => {
     const roster = mainRoster(m)
@@ -257,18 +278,15 @@ export default function DashboardPage() {
     }
   })
 
-  // Średnia frekwencja w sezonie
   const totalRosterEntries = matches.reduce((acc, m) => acc + mainRoster(m).length, 0)
   const avgAttendance = totalSeasonMatches > 0 ? (totalRosterEntries / totalSeasonMatches).toFixed(1) : "0"
 
-  // Łączny budżet zebrany w sezonie
   const totalSeasonCollected = matches.reduce((acc, m) => {
     const price = Number(m.price_per_player || 25)
     const paid = mainRoster(m).filter(p => p.paid).length
     return acc + (paid * price)
   }, 0)
 
-  // === WYLICZENIA DLA NAJBLIŻSZEGO MECZU ===
   const nearestRoster = nearestMatch ? mainRoster(nearestMatch) : []
   const nearestWaitlist = nearestMatch ? waitlist(nearestMatch) : []
   const nearestPrice = Number(nearestMatch?.price_per_player || 25)
@@ -337,7 +355,7 @@ export default function DashboardPage() {
             {isAdmin && (
               <Button
                 onClick={() => setShowCreateModal(true)}
-                className="rounded-2xl bg-blue-600 hover:bg-blue-700 font-bold text-xs gap-2 px-5 py-2.5 shadow-md shadow-blue-500/20"
+                className="rounded-2xl bg-blue-600 hover:bg-blue-700 font-bold text-xs gap-2 px-5 py-2.5 shadow-md shadow-blue-500/20 text-white"
               >
                 <Plus className="h-4 w-4" />
                 Utwórz nowy mecz
@@ -365,7 +383,7 @@ export default function DashboardPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
-                {/* KARTA 1: Najbliższy Mecz / Ilość Rozegranych Meczów */}
+                {/* KARTA 1 */}
                 <div
                   onClick={() => setSelectedMatch(nearestMatch)}
                   className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm hover:border-blue-300 transition-all cursor-pointer flex items-center justify-between"
@@ -386,7 +404,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* KARTA 2: Skład Główny / Król Frekwencji */}
+                {/* KARTA 2 */}
                 <div className="rounded-3xl border border-amber-100 bg-gradient-to-br from-amber-50/40 to-white p-5 shadow-sm flex items-center justify-between">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500">
@@ -406,7 +424,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* KARTA 3: Lista Rezerwowa / Średnia Frekwencja */}
+                {/* KARTA 3 */}
                 <div className="rounded-3xl border border-purple-100 bg-gradient-to-br from-purple-50/40 to-white p-5 shadow-sm flex items-center justify-between">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-purple-400">
@@ -424,7 +442,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* KARTA 4: Budżet Meczowy / Budżet Sezonu */}
+                {/* KARTA 4 */}
                 <div className="rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50/40 to-white p-5 shadow-sm flex items-center justify-between">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">
@@ -446,7 +464,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* SPONSORZY Z ANIMOWANYM PRZESUWANIEM (INFINITE MARQUEE) */}
+          {/* SPONSORZY Z ANIMOWANYM PRZESUWANIEM */}
           <div className="rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm overflow-hidden">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 mb-3">
               <Sparkles className="h-3.5 w-3.5 text-amber-500" />
@@ -582,13 +600,38 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between sm:justify-end gap-6 border-t sm:border-t-0 border-slate-100 pt-3 sm:pt-0">
+                    <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 border-slate-100 pt-3 sm:pt-0">
+
+                      {/* Przycisk Udostępnij */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => copyMatchToClipboard(match, e)}
+                        className="rounded-xl text-[11px] font-bold gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50"
+                        title="Kopiuj na WhatsAppa"
+                      >
+                        <Share2 className="h-3.5 w-3.5 text-blue-600" />
+                        Udostępnij
+                      </Button>
+
+                      {/* Przycisk Losuj A vs B */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => handleOpenBalancer(match, e)}
+                        className="rounded-xl text-[11px] font-bold gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50"
+                        title="Losuj skład A vs B"
+                      >
+                        <Shuffle className="h-3.5 w-3.5 text-purple-600" />
+                        Losuj A vs B
+                      </Button>
+
                       <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-1.5 border border-slate-100 text-xs font-semibold text-slate-600">
                         <Users className="h-4 w-4 text-blue-600" />
                         <span>Skład: <strong>{roster.length}/{match.capacity || 12}</strong></span>
                       </div>
 
-                      <div className="text-right">
+                      <div className="text-right min-w-[60px]">
                         <p className="text-[10px] uppercase font-bold text-slate-400">Wpłaty</p>
                         <p className={cn(
                           "text-xs font-extrabold",
@@ -732,16 +775,24 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex justify-end gap-2 pt-3">
-                <Button type="button" variant="ghost" onClick={() => setShowCreateModal(false)} className="rounded-xl">
+                <Button type="button" variant="ghost" onClick={() => setShowCreateModal(false)} className="rounded-xl text-xs font-bold">
                   Anuluj
                 </Button>
-                <Button type="submit" disabled={isCreating} className="rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-white">
+                <Button type="submit" disabled={isCreating} className="rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-white text-xs">
                   {isCreating ? "Tworzenie..." : "Zapisz mecz"}
                 </Button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {/* MODAL LOSOWANIA SKŁADÓW A vs B */}
+      {selectedMatchForTeams && (
+        <TeamBalancerModal
+          match={selectedMatchForTeams}
+          onClose={() => setSelectedMatchForTeams(null)}
+        />
       )}
 
       {/* Modal szczegółów meczu */}

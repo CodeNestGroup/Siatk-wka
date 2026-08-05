@@ -13,22 +13,49 @@ export default function LoginPage() {
   useEffect(() => {
     async function loadPlayers() {
       setIsLoading(true)
+
+      // Pobieranie zawodników z Supabase
       const { data, error } = await supabase.from("players").select("*")
 
+      let rawPlayers: any[] = []
+
       if (!error && data && data.length > 0) {
-        setPlayers(data)
-        setSelectedPlayer(data[0])
-      } else {
-        // Fallback w razie braku tabeli/danych w Supabase
-        const fallbackPlayers = [
-          { id: "p1", name: "Mateusz Podzorski" },
-          { id: "p2", name: "Główny Admin" },
-          { id: "p3", name: "maciek" },
-          { id: "p4", name: "brudas" }
-        ]
-        setPlayers(fallbackPlayers)
-        setSelectedPlayer(fallbackPlayers[0])
+        rawPlayers = data
       }
+
+      // Bezwarunkowa filtracja "Głównego Admina"
+      const cleanPlayers = rawPlayers.filter((p) => {
+        const name = (p.full_name || p.name || "").toLowerCase()
+        return !name.includes("główny admin") && !name.includes("glowny admin")
+      })
+
+      // Nadajemy uprawnienia Admina dla konta Mateusz Podzorski
+      const formattedPlayers = cleanPlayers.map((p) => {
+        const name = p.full_name || p.name || ""
+        let role = p.role || "player"
+        let isAdmin = p.is_admin || false
+
+        if (name === "Mateusz Podzorski") {
+          role = "admin"
+          isAdmin = true
+        }
+
+        return {
+          id: p.id,
+          name: name,
+          full_name: name,
+          email: p.email,
+          role: role,
+          is_admin: isAdmin
+        }
+      })
+
+      setPlayers(formattedPlayers)
+
+      if (formattedPlayers.length > 0) {
+        setSelectedPlayer(formattedPlayers[0])
+      }
+
       setIsLoading(false)
     }
 
@@ -64,14 +91,18 @@ export default function LoginPage() {
         <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-xl shadow-slate-200/50 space-y-5">
           {isLoading ? (
             <div className="py-8 text-center text-xs font-bold text-blue-600 animate-pulse">
-              Ładowanie listy zawodników...
+              Ładowanie listy zawodników z bazy Supabase...
+            </div>
+          ) : players.length === 0 ? (
+            <div className="py-8 text-center text-xs font-semibold text-slate-400">
+              Brak graczy w bazie. Zaloguj się domyślnie lub dodaj ich w zakładce Zawodnicy.
             </div>
           ) : (
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <label className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                   <UserCheck className="h-4 w-4 text-blue-600" />
-                  Wybierz zawodnika
+                  Wybierz zawodnika z bazy
                 </label>
 
                 <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
