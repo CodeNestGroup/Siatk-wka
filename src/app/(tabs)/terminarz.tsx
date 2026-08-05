@@ -33,6 +33,17 @@ type MatchItem = {
   registrationStatus?: 'main' | 'waitlist';
 };
 
+function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
+  try {
+    const matchDateTime = new Date(`${matchDateStr}T${matchTimeStartStr}`);
+    const now = new Date();
+    const diffMs = matchDateTime.getTime() - now.getTime();
+    return diffMs / (1000 * 60 * 60) > 2;
+  } catch {
+    return true;
+  }
+}
+
 export default function ScheduleScreen() {
   const router = useRouter();
   const [matches, setMatches] = useState<MatchItem[]>([]);
@@ -103,6 +114,14 @@ export default function ScheduleScreen() {
 
     const isFinished = isDateInPast(match.date) || match.status === 'cancelled';
     if (isFinished) return;
+
+    if (match.isRegistered) {
+      // Sprawdź limit 2 godzin przed wypisaniem
+      if (!canCancelMatch(match.date, match.time_start)) {
+        Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+        return;
+      }
+    }
 
     setActionLoadingId(match.id);
 

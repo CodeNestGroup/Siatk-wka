@@ -45,6 +45,17 @@ function isMatchPast(matchDateStr: string, matchTimeStartStr: string): boolean {
   }
 }
 
+function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
+  try {
+    const matchDateTime = new Date(`${matchDateStr}T${matchTimeStartStr}`);
+    const now = new Date();
+    const diffMs = matchDateTime.getTime() - now.getTime();
+    return diffMs / (1000 * 60 * 60) > 2;
+  } catch {
+    return true;
+  }
+}
+
 function RegistrationCard({
   reg,
   onCancel,
@@ -53,7 +64,7 @@ function RegistrationCard({
   activeTab,
 }: {
   reg: MyRegistration;
-  onCancel: (registrationId: string) => void;
+  onCancel: (reg: MyRegistration) => void;
   onPress: (matchId: string) => void;
   cancelling: boolean;
   activeTab: TabType;
@@ -121,7 +132,7 @@ function RegistrationCard({
         {activeTab === 'active' && (
           <TouchableOpacity
             style={styles.cancelButton}
-            onPress={() => onCancel(reg.id)}
+            onPress={() => onCancel(reg)}
             disabled={cancelling}
           >
             <Text style={styles.cancelButtonText}>Wypisz się</Text>
@@ -186,18 +197,25 @@ export default function MojeZapisyScreen() {
     setRefreshing(false);
   };
 
-  const handleCancel = (registrationId: string) => {
+  const handleCancel = (reg: MyRegistration) => {
+    if (reg.matches) {
+      if (!canCancelMatch(reg.matches.date, reg.matches.time_start)) {
+        Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+        return;
+      }
+    }
+
     Alert.alert('Wypisać się?', 'Na pewno chcesz wypisać się z tego meczu?', [
       { text: 'Anuluj', style: 'cancel' },
       {
         text: 'Wypisz się',
         style: 'destructive',
         onPress: async () => {
-          setCancellingId(registrationId);
+          setCancellingId(reg.id);
           const { error } = await supabase
             .from('match_registrations')
             .delete()
-            .eq('id', registrationId);
+            .eq('id', reg.id);
           setCancellingId(null);
 
           if (error) {
@@ -332,7 +350,7 @@ const styles = StyleSheet.create({
   },
   listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32 },
 
-  headerTitle: { fontSize: 24, fontWeight: '700', color: colors.foreground, marginTop: 16 }, // Zwiększony margines góra
+  headerTitle: { fontSize: 24, fontWeight: '700', color: colors.foreground, marginTop: 16 },
   headerSubtitle: { fontSize: 14, color: colors.mutedForeground, marginTop: 4, marginBottom: 16 },
 
   errorBox: {
