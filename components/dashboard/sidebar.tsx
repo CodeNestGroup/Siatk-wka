@@ -28,21 +28,17 @@ type SidebarProps = {
   onLogout?: () => void
 }
 
-const navItems = [
-  { href: "/", label: "Mecze", icon: Calendar },
-  { href: "/players", label: "Zawodnicy / Skład", icon: Users },
-  { href: "/finances", label: "Finanse", icon: Wallet, badge: "NOWOŚĆ" },
-  { href: "/stats", label: "Statystyki", icon: BarChart3 },
-  { href: "/announcements", label: "Ogłoszenia", icon: Megaphone },
-  { href: "/settings", label: "Ustawienia", icon: Settings },
-]
-
 export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
   const pathname = usePathname()
   const [profileOpen, setProfileOpen] = useState(false)
   const [isDark, setIsDark] = useState(true)
 
-  // Inicjalizacja motywu na podstawie ustawień przeglądarki / localStorage
+  // Stany powiadomień (czerwonych kropek) dla poszczególnych zakładek
+  const [unreadMatches, setUnreadMatches] = useState(false)
+  const [unreadPlayers, setUnreadPlayers] = useState(false)
+  const [unreadFinances, setUnreadFinances] = useState(false)
+
+  // Inicjalizacja motywu
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme")
     if (savedTheme) {
@@ -59,7 +55,54 @@ export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
     }
   }, [])
 
-  // Funkcja przełączająca motyw w całej aplikacji
+  // Sprawdzanie zmian w bazie Supabase i aktualizacja kropek
+  useEffect(() => {
+    checkUnreadBadges()
+  }, [pathname])
+
+  async function checkUnreadBadges() {
+    const savedRead = JSON.parse(localStorage.getItem("volley_read_sidebar_sections") || "[]")
+
+    // 1. Sprawdzamy czy są mecze w bazie
+    const { data: matches } = await supabase.from("matches").select("id").limit(1)
+    if (matches && matches.length > 0 && !savedRead.includes("/") && pathname !== "/") {
+      setUnreadMatches(true)
+    } else {
+      setUnreadMatches(false)
+    }
+
+    // 2. Sprawdzamy czy są gracze oczekujący na zatwierdzenie ('pending')
+    const { data: pendingPlayers } = await supabase.from("players").select("id").eq("role", "pending")
+    if (pendingPlayers && pendingPlayers.length > 0 && pathname !== "/players") {
+      setUnreadPlayers(true)
+    } else {
+      setUnreadPlayers(false)
+    }
+
+    // 3. Sprawdzamy nieprzeczytane transakcje w Finansach
+    const { data: txs } = await supabase.from("transactions").select("id").limit(1)
+    if (txs && txs.length > 0 && !savedRead.includes("/finances") && pathname !== "/finances") {
+      setUnreadFinances(true)
+    } else {
+      setUnreadFinances(false)
+    }
+  }
+
+  // Funkcja czyszcząca kropkę po wejściu w dany dział
+  function handleNavClick(path: string) {
+    const savedRead = JSON.parse(localStorage.getItem("volley_read_sidebar_sections") || "[]")
+    if (!savedRead.includes(path)) {
+      const updated = [...savedRead, path]
+      localStorage.setItem("volley_read_sidebar_sections", JSON.stringify(updated))
+    }
+
+    if (path === "/") setUnreadMatches(false)
+    if (path === "/players") setUnreadPlayers(false)
+    if (path === "/finances") setUnreadFinances(false)
+
+    if (onClose) onClose()
+  }
+
   function toggleTheme() {
     const nextDark = !isDark
     setIsDark(nextDark)
@@ -72,7 +115,6 @@ export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
     }
   }
 
-  // Uniwersalna, bezawaryjna funkcja wylogowania dla wszystkich stron
   async function handleLogoutClick() {
     localStorage.removeItem("volley_user")
     localStorage.clear()
@@ -91,7 +133,16 @@ export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
     window.location.href = "/login"
   }
 
-  const userName = user?.full_name || user?.name || (user?.email === "admin@admin.pl" ? "Mateusz Podzorski" : user?.email?.split("@")[0]) || "brudas"
+  const navItems = [
+    { href: "/", label: "Mecze", icon: Calendar, badge: null, hasDot: unreadMatches },
+    { href: "/players", label: "Zawodnicy / Skład", icon: Users, badge: null, hasDot: unreadPlayers },
+    { href: "/finances", label: "Finanse", icon: Wallet, badge: "NOWOŚĆ", hasDot: unreadFinances },
+    { href: "/stats", label: "Statystyki", icon: BarChart3, badge: null, hasDot: false },
+    { href: "/announcements", label: "Ogłoszenia", icon: Megaphone, badge: null, hasDot: false },
+    { href: "/settings", label: "Ustawienia", icon: Settings, badge: null, hasDot: false },
+  ]
+
+  const userName = user?.full_name || user?.name || (user?.email === "admin@admin.pl" ? "Mateusz Podzorski" : user?.email?.split("@")[0]) || "Użytkownik"
   const userRoleText = user?.role === "admin" || user?.email === "admin@admin.pl" || user?.name === "Mateusz Podzorski" ? "Administrator" : "Zawodnik"
   const avatarLetter = userName.charAt(0).toUpperCase()
 
@@ -126,7 +177,6 @@ export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
               </div>
             </Link>
 
-            {/* Przycisk zamknięcia na telefonach */}
             <button
               onClick={onClose}
               className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground lg:hidden"
@@ -145,9 +195,9 @@ export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  onClick={onClose}
+                  onClick={() => handleNavClick(item.href)}
                   className={cn(
-                    "flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all duration-200",
+                    "relative flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all duration-200",
                     isActive
                       ? "bg-primary text-primary-foreground shadow-sm shadow-primary/30 font-bold"
                       : "text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -157,16 +207,25 @@ export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
                     <Icon className={cn("h-4 w-4", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
                     <span>{item.label}</span>
                   </div>
-                  {item.badge && (
-                    <span className={cn(
-                      "rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider",
-                      isActive
-                        ? "bg-primary-foreground/20 text-primary-foreground"
-                        : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
-                    )}>
-                      {item.badge}
-                    </span>
-                  )}
+
+                  <div className="flex items-center gap-1.5">
+                    {/* PLAKIETKA BADGE */}
+                    {item.badge && (
+                      <span className={cn(
+                        "rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider",
+                        isActive
+                          ? "bg-primary-foreground/20 text-primary-foreground"
+                          : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                      )}>
+                        {item.badge}
+                      </span>
+                    )}
+
+                    {/* CZERWONA KROPKA POWIADOMIENIA PRZY ZAKŁADCE */}
+                    {item.hasDot && (
+                      <span className="h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-card animate-pulse" />
+                    )}
+                  </div>
                 </Link>
               )
             })}
@@ -195,7 +254,6 @@ export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
                 Moje finanse i wpłaty
               </Link>
 
-              {/* Działający Przełącznik Motywu */}
               <button
                 onClick={toggleTheme}
                 className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
@@ -220,7 +278,6 @@ export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
             </div>
           )}
 
-          {/* Przycisk otwierający menu profilu */}
           <button
             onClick={() => setProfileOpen(!profileOpen)}
             className="flex w-full items-center justify-between rounded-2xl p-2 hover:bg-secondary transition-colors"

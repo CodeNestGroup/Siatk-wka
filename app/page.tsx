@@ -20,8 +20,7 @@ import {
   Share2,
   Shuffle,
   Trash2,
-  Check,
-  AlertCircle
+  Check
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { MatchDetail } from "@/components/dashboard/match-detail"
@@ -63,7 +62,7 @@ export default function DashboardPage() {
   // Przełącznik widoku podsumowania (Najbliższy mecz vs Cały Sezon)
   const [viewMode, setViewMode] = useState<"nearest" | "season">("nearest")
 
-  const isAdmin = user?.role === "admin" || user?.is_admin || user?.name?.toLowerCase().includes("admin") || user?.name === "Mateusz Podzorski"
+  const isAdmin = user?.role === "admin" || user?.is_admin
 
   // Formularz nowego meczu
   const [newDate, setNewDate] = useState("")
@@ -73,12 +72,22 @@ export default function DashboardPage() {
   const [newTitle, setNewTitle] = useState("Trening Siatkówki")
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([])
 
+  // Wymuszenie logowania (Auth Guard) przy wejściu na stronę
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
-    if (localUser) {
-      setUser(JSON.parse(localUser))
-    } else {
-      setUser(null)
+
+    if (!localUser) {
+      window.location.href = "/login"
+      return
+    }
+
+    try {
+      const parsedUser = JSON.parse(localUser)
+      setUser(parsedUser)
+    } catch (e) {
+      localStorage.removeItem("volley_user")
+      window.location.href = "/login"
+      return
     }
 
     const savedRead = localStorage.getItem("volley_read_notifications")
@@ -145,15 +154,7 @@ export default function DashboardPage() {
         }
       })
 
-      if (extractedPlayers.length === 0) {
-        setAvailablePlayers([
-          { id: "p1", name: "Mateusz Podzorski", role: "admin" },
-          { id: "p3", name: "maciek", role: "player" },
-          { id: "p4", name: "brudas", role: "player" }
-        ])
-      } else {
-        setAvailablePlayers(extractedPlayers)
-      }
+      setAvailablePlayers(extractedPlayers)
     }
 
     setIsLoading(false)
@@ -171,19 +172,15 @@ export default function DashboardPage() {
     }
   }
 
-  // USUWANIE MECZU Z BAZY SUPABASE
+  // Usunięcie meczu z bazy Supabase
   async function handleDeleteMatch(matchId: string, matchDate: string, e: React.MouseEvent) {
     e.stopPropagation()
 
     if (!confirm(`Czy na pewno chcesz usunąć mecz z dnia ${matchDate}? Mecz oraz powiązane wpłaty zostaną usunięte z całej bazy.`)) return
 
-    // 1. Usuwamy powiązane rejestracje z match_registrations
     await supabase.from("match_registrations").delete().eq("match_id", matchId)
-
-    // 2. Usuwamy powiązane ogłoszenia/powiadomienia
     await supabase.from("announcements").delete().eq("match_id", matchId)
 
-    // 3. Usuwamy główny rekord meczu z tabeli matches
     const { error } = await supabase.from("matches").delete().eq("id", matchId)
 
     if (error) {
@@ -195,13 +192,11 @@ export default function DashboardPage() {
     }
   }
 
-  // Podgląd składu na mecz
   function handleOpenRosterPreview(match: Match, e: React.MouseEvent) {
     e.stopPropagation()
     setSelectedMatchRosterPreview(match)
   }
 
-  // Kopiowanie wiadomości na WhatsAppa / Messenger
   function copyMatchToClipboard(match: Match, e: React.MouseEvent) {
     e.stopPropagation()
     const roster = mainRoster(match)
@@ -300,6 +295,18 @@ export default function DashboardPage() {
     await supabase.auth.signOut()
     setUser(null)
     window.location.href = "/login"
+  }
+
+  // Zabezpieczenie przed pokazaniem pustej strony przed przekierowaniem na /login
+  if (!user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC]">
+        <div className="text-center space-y-3">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-600 border-t-transparent mx-auto" />
+          <p className="text-xs font-extrabold text-slate-600">Sprawdzanie uprawnień...</p>
+        </div>
+      </div>
+    )
   }
 
   const upcomingMatches = matches
@@ -667,7 +674,7 @@ export default function DashboardPage() {
 
                     <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 border-t sm:border-t-0 border-slate-100 pt-3 sm:pt-0">
 
-                      {/* Przycisk Udostępnij */}
+                      {/* Udostępnij */}
                       <Button
                         size="sm"
                         variant="outline"
@@ -679,7 +686,7 @@ export default function DashboardPage() {
                         Udostępnij
                       </Button>
 
-                      {/* Przycisk Losuj A vs B */}
+                      {/* Losuj A vs B */}
                       <Button
                         size="sm"
                         variant="outline"
@@ -691,7 +698,7 @@ export default function DashboardPage() {
                         Losuj A vs B
                       </Button>
 
-                      {/* INTERAKTYWNY PRZYCISK SKŁADU - KLIKNIĘCIE OTWIERA PODGLĄD GRACZY */}
+                      {/* SKŁAD */}
                       <button
                         onClick={(e) => handleOpenRosterPreview(match, e)}
                         className="flex items-center gap-2 rounded-xl bg-blue-50/80 hover:bg-blue-100 px-3 py-1.5 border border-blue-200/80 text-xs font-bold text-blue-900 transition-all shadow-sm"
@@ -711,7 +718,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
 
-                      {/* PRZYCISK USUWANIA MECZU (DLA ADMINA) */}
+                      {/* USUWANIE MECZU DLA ADMINA */}
                       {isAdmin && (
                         <button
                           onClick={(e) => handleDeleteMatch(match.id, match.date, e)}

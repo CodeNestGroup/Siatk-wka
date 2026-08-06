@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react"
 import { Bell, Calendar, Wallet, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { cn } from "@/lib/utils"
 
 export type NotificationItem = {
   id: string
@@ -34,54 +33,62 @@ export function NotificationsBell({ onNotificationClick }: { onNotificationClick
       supabase.from("transactions").select("*").order("created_at", { ascending: false }).limit(5)
     ])
 
-    const savedRead = JSON.parse(localStorage.getItem("volley_read_notifications") || "[]")
+    const savedRead: string[] = JSON.parse(localStorage.getItem("volley_read_notifications") || "[]")
     const list: NotificationItem[] = []
 
     matches?.forEach((m) => {
-      list.push({
-        id: `match-${m.id}`,
-        title: "Nowy / Zmieniony mecz",
-        description: `Mecz (${m.date}) - ${m.location || 'Hala Jaworze'}`,
-        date: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Dzisiaj",
-        type: "match",
-        read: savedRead.includes(`match-${m.id}`)
-      })
+      const notifId = `match-${m.id}`
+      if (!savedRead.includes(notifId)) {
+        list.push({
+          id: notifId,
+          title: "Nowy / Zmieniony mecz",
+          description: `Mecz (${m.date}) - ${m.location || 'Hala Jaworze'}`,
+          date: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Dzisiaj",
+          type: "match",
+          read: false
+        })
+      }
     })
 
     txs?.forEach((t) => {
-      list.push({
-        id: `tx-${t.id}`,
-        title: t.type === "income" ? "Nowa wpłata" : "Nowy wydatek",
-        description: `${t.title} (${t.amount} PLN)`,
-        date: t.created_at ? new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Dzisiaj",
-        type: "finance",
-        read: savedRead.includes(`tx-${t.id}`)
-      })
+      const notifId = `tx-${t.id}`
+      if (!savedRead.includes(notifId)) {
+        list.push({
+          id: notifId,
+          title: t.type === "income" ? "Nowa wpłata" : "Nowy wydatek",
+          description: `${t.title} (${t.amount} PLN)`,
+          date: t.created_at ? new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Dzisiaj",
+          type: "finance",
+          read: false
+        })
+      }
     })
 
     setNotifications(list)
   }
 
-  const unreadCount = notifications.filter((n) => !n.read).length
-
+  // Kliknięcie pojedynczego powiadomienia – usuwa je z listy
   function markAsRead(id: string) {
     const updatedRead = [...readIds, id]
     setReadIds(updatedRead)
     localStorage.setItem("volley_read_notifications", JSON.stringify(updatedRead))
 
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    )
+    // Filtrujemy listę, wycinając kliknięte powiadomienie
+    setNotifications((prev) => prev.filter((n) => n.id !== id))
   }
 
+  // Kliknięcie "Odczytaj wszystkie" – czyszczenie całej listy w oknie
   function markAllAsRead() {
     const allIds = notifications.map((n) => n.id)
     const updatedRead = Array.from(new Set([...readIds, ...allIds]))
     setReadIds(updatedRead)
     localStorage.setItem("volley_read_notifications", JSON.stringify(updatedRead))
 
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+    // Czyścimy widoczną listę
+    setNotifications([])
   }
+
+  const unreadCount = notifications.length
 
   return (
     <div className="relative">
@@ -137,17 +144,11 @@ export function NotificationsBell({ onNotificationClick }: { onNotificationClick
                     markAsRead(item.id)
                     if (onNotificationClick) onNotificationClick(item)
                   }}
-                  className={cn(
-                    "flex items-start gap-3 p-2.5 rounded-2xl border text-xs transition-all cursor-pointer",
-                    item.read
-                      ? "bg-slate-50/50 border-slate-100 text-slate-500"
-                      : "bg-blue-50/60 border-blue-200 text-slate-900 font-bold shadow-sm"
-                  )}
+                  className="flex items-start gap-3 p-2.5 rounded-2xl border text-xs bg-blue-50/60 border-blue-200 text-slate-900 font-bold shadow-sm transition-all cursor-pointer hover:bg-blue-100/80"
                 >
-                  <div className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-xl shrink-0 mt-0.5",
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-xl shrink-0 mt-0.5 ${
                     item.type === "match" ? "bg-blue-100 text-blue-600" : "bg-emerald-100 text-emerald-600"
-                  )}>
+                  }`}>
                     {item.type === "match" ? <Calendar className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
                   </div>
 
@@ -159,9 +160,7 @@ export function NotificationsBell({ onNotificationClick }: { onNotificationClick
                     <p className="text-[11px] font-medium text-slate-500 truncate mt-0.5">{item.description}</p>
                   </div>
 
-                  {!item.read && (
-                    <span className="h-2 w-2 rounded-full bg-blue-600 shrink-0 mt-2" />
-                  )}
+                  <span className="h-2 w-2 rounded-full bg-blue-600 shrink-0 mt-2" />
                 </div>
               ))
             )}
