@@ -10,7 +10,6 @@ import {
   Wallet,
   Plus,
   ChevronRight,
-  Bell,
   Sparkles,
   RefreshCw,
   X,
@@ -19,11 +18,15 @@ import {
   Crown,
   Trophy,
   Share2,
-  Shuffle
+  Shuffle,
+  Trash2,
+  Check,
+  AlertCircle
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { MatchDetail } from "@/components/dashboard/match-detail"
 import { TeamBalancerModal } from "@/components/dashboard/team-balancer-modal"
+import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
 import { Button } from "@/components/ui/button"
 import { type Match, mainRoster, waitlist, getMatches } from "@/lib/data"
 import { cn } from "@/lib/utils"
@@ -50,8 +53,12 @@ export default function DashboardPage() {
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
 
-  // Stan dla Losowania Składów A vs B
+  // Przechowywanie przeczytanych identyfikatorów powiadomień
+  const [readMatchIds, setReadMatchIds] = useState<string[]>([])
+
+  // Stan dla Losowania Składów A vs B oraz podglądu składu
   const [selectedMatchForTeams, setSelectedMatchForTeams] = useState<Match | null>(null)
+  const [selectedMatchRosterPreview, setSelectedMatchRosterPreview] = useState<Match | null>(null)
 
   // Przełącznik widoku podsumowania (Najbliższy mecz vs Cały Sezon)
   const [viewMode, setViewMode] = useState<"nearest" | "season">("nearest")
@@ -74,6 +81,11 @@ export default function DashboardPage() {
       setUser(null)
     }
 
+    const savedRead = localStorage.getItem("volley_read_notifications")
+    if (savedRead) {
+      setReadMatchIds(JSON.parse(savedRead))
+    }
+
     loadData()
   }, [])
 
@@ -90,6 +102,7 @@ export default function DashboardPage() {
     const { data: matchesData, error: matchesErr } = await supabase
       .from("matches")
       .select("*")
+      .order("date", { ascending: true })
 
     if (matchesErr || !matchesData || matchesData.length === 0) {
       fetchedMatches = await getMatches()
@@ -144,6 +157,48 @@ export default function DashboardPage() {
     }
 
     setIsLoading(false)
+  }
+
+  // Automatyczne oznaczanie meczu jako przeczytany po wejściu w kartę
+  function handleSelectMatch(match: Match) {
+    setSelectedMatch(match)
+
+    const matchNotifId = `match-${match.id}`
+    if (!readMatchIds.includes(matchNotifId)) {
+      const updated = [...readMatchIds, matchNotifId]
+      setReadMatchIds(updated)
+      localStorage.setItem("volley_read_notifications", JSON.stringify(updated))
+    }
+  }
+
+  // USUWANIE MECZU Z BAZY SUPABASE
+  async function handleDeleteMatch(matchId: string, matchDate: string, e: React.MouseEvent) {
+    e.stopPropagation()
+
+    if (!confirm(`Czy na pewno chcesz usunąć mecz z dnia ${matchDate}? Mecz oraz powiązane wpłaty zostaną usunięte z całej bazy.`)) return
+
+    // 1. Usuwamy powiązane rejestracje z match_registrations
+    await supabase.from("match_registrations").delete().eq("match_id", matchId)
+
+    // 2. Usuwamy powiązane ogłoszenia/powiadomienia
+    await supabase.from("announcements").delete().eq("match_id", matchId)
+
+    // 3. Usuwamy główny rekord meczu z tabeli matches
+    const { error } = await supabase.from("matches").delete().eq("id", matchId)
+
+    if (error) {
+      console.error("Błąd usuwania meczu:", error.message)
+      notify(`Błąd: ${error.message}`)
+    } else {
+      notify(`Usunięto mecz z dnia ${matchDate}`)
+      loadData()
+    }
+  }
+
+  // Podgląd składu na mecz
+  function handleOpenRosterPreview(match: Match, e: React.MouseEvent) {
+    e.stopPropagation()
+    setSelectedMatchRosterPreview(match)
   }
 
   // Kopiowanie wiadomości na WhatsAppa / Messenger
@@ -330,10 +385,15 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button className="relative rounded-2xl border border-slate-200 p-2.5 text-slate-500 hover:bg-slate-50 transition-colors">
-              <Bell className="h-4 w-4" />
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-rose-500" />
-            </button>
+            <NotificationsBell
+              onNotificationClick={(notif: NotificationItem) => {
+                if (notif.type === "match") {
+                  const matchId = notif.id.replace("match-", "")
+                  const target = matches.find((m) => m.id === matchId)
+                  if (target) handleSelectMatch(target)
+                }
+              }}
+            />
           </div>
         </header>
 
@@ -385,7 +445,7 @@ export default function DashboardPage() {
 
                 {/* KARTA 1 */}
                 <div
-                  onClick={() => setSelectedMatch(nearestMatch)}
+                  onClick={() => handleSelectMatch(nearestMatch)}
                   className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm hover:border-blue-300 transition-all cursor-pointer flex items-center justify-between"
                 >
                   <div>
@@ -552,11 +612,12 @@ export default function DashboardPage() {
                 const totalCollected = paidPlayersCount * price
                 const isSettled = (match as any).is_settled
                 const isPast = match.status === "past"
+                const isUnread = !readMatchIds.includes(`match-${match.id}`)
 
                 return (
                   <div
                     key={`${match.id}-${idx}`}
-                    onClick={() => setSelectedMatch(match)}
+                    onClick={() => handleSelectMatch(match)}
                     className={cn(
                       "group relative flex flex-col sm:flex-row sm:items-center justify-between rounded-3xl border bg-white p-4 sm:p-5 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-pointer gap-4",
                       isPast || isSettled ? "border-slate-200/70 bg-slate-50/50" : "border-slate-200/90"
@@ -564,12 +625,16 @@ export default function DashboardPage() {
                   >
                     <div className="flex items-center gap-4">
                       <div className={cn(
-                        "flex h-12 w-12 items-center justify-center rounded-2xl border shrink-0",
+                        "flex h-12 w-12 items-center justify-center rounded-2xl border shrink-0 relative",
                         isPast || isSettled
                           ? "bg-slate-100 text-slate-400 border-slate-200"
                           : "bg-amber-50 text-amber-500 border-amber-100"
                       )}>
                         <Calendar className="h-6 w-6" />
+
+                        {isUnread && (
+                          <span className="absolute -top-1 -right-1 flex h-3 w-3 rounded-full bg-rose-500 ring-2 ring-white animate-pulse" />
+                        )}
                       </div>
 
                       <div className="space-y-1">
@@ -600,7 +665,7 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 border-slate-100 pt-3 sm:pt-0">
+                    <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 border-t sm:border-t-0 border-slate-100 pt-3 sm:pt-0">
 
                       {/* Przycisk Udostępnij */}
                       <Button
@@ -626,10 +691,15 @@ export default function DashboardPage() {
                         Losuj A vs B
                       </Button>
 
-                      <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-1.5 border border-slate-100 text-xs font-semibold text-slate-600">
+                      {/* INTERAKTYWNY PRZYCISK SKŁADU - KLIKNIĘCIE OTWIERA PODGLĄD GRACZY */}
+                      <button
+                        onClick={(e) => handleOpenRosterPreview(match, e)}
+                        className="flex items-center gap-2 rounded-xl bg-blue-50/80 hover:bg-blue-100 px-3 py-1.5 border border-blue-200/80 text-xs font-bold text-blue-900 transition-all shadow-sm"
+                        title="Zobacz listę obecnych zawodników"
+                      >
                         <Users className="h-4 w-4 text-blue-600" />
                         <span>Skład: <strong>{roster.length}/{match.capacity || 12}</strong></span>
-                      </div>
+                      </button>
 
                       <div className="text-right min-w-[60px]">
                         <p className="text-[10px] uppercase font-bold text-slate-400">Wpłaty</p>
@@ -640,6 +710,17 @@ export default function DashboardPage() {
                           {totalCollected} PLN
                         </p>
                       </div>
+
+                      {/* PRZYCISK USUWANIA MECZU (DLA ADMINA) */}
+                      {isAdmin && (
+                        <button
+                          onClick={(e) => handleDeleteMatch(match.id, match.date, e)}
+                          className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-all border border-slate-200/60"
+                          title="Usuń mecz z całej bazy"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
 
                       <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-all">
                         <ChevronRight className="h-5 w-5" />
@@ -653,6 +734,80 @@ export default function DashboardPage() {
 
         </main>
       </div>
+
+      {/* MODAL PODGLĄDU SKŁADU MECZU */}
+      {selectedMatchRosterPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4 text-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h2 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <Users className="h-5 w-5 text-blue-600" />
+                  Skład na mecz ({selectedMatchRosterPreview.date})
+                </h2>
+                <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{selectedMatchRosterPreview.location}</p>
+              </div>
+              <button onClick={() => setSelectedMatchRosterPreview(null)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                <span>Powołani gracze ({mainRoster(selectedMatchRosterPreview).length}/{selectedMatchRosterPreview.capacity || 12})</span>
+                <span className="text-emerald-600">
+                  Wpłacono: {mainRoster(selectedMatchRosterPreview).filter(p => p.paid).length * Number(selectedMatchRosterPreview.price_per_player || 25)} PLN
+                </span>
+              </div>
+
+              <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
+                {mainRoster(selectedMatchRosterPreview).length === 0 ? (
+                  <p className="py-6 text-center text-xs font-semibold text-slate-400">Brak zapisanych graczy w głównym składzie.</p>
+                ) : (
+                  mainRoster(selectedMatchRosterPreview).map((p: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-50 border border-slate-100 text-xs font-bold">
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-blue-100 text-blue-700 font-extrabold text-[11px]">
+                          {i + 1}
+                        </span>
+                        <span className="text-slate-900">{p.name || p.full_name}</span>
+                      </div>
+
+                      <span className={cn(
+                        "inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black border",
+                        p.paid ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-slate-100 text-slate-400 border-slate-200"
+                      )}>
+                        {p.paid ? <Check className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                        {p.paid ? "Opłacono" : "Nieopłacone"}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {waitlist(selectedMatchRosterPreview).length > 0 && (
+                <div className="pt-2 border-t border-slate-100 space-y-2">
+                  <p className="text-xs font-bold text-purple-600">Lista rezerwowa ({waitlist(selectedMatchRosterPreview).length})</p>
+                  <div className="space-y-1">
+                    {waitlist(selectedMatchRosterPreview).map((p: any, i: number) => (
+                      <div key={i} className="p-2 rounded-xl bg-purple-50/50 border border-purple-100 text-xs font-bold text-purple-900 flex justify-between">
+                        <span>{p.name || p.full_name}</span>
+                        <span className="text-[10px] uppercase text-purple-600">Rezerwa #{i + 1}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <Button size="sm" onClick={() => setSelectedMatchRosterPreview(null)} className="rounded-xl text-xs font-bold bg-slate-900 text-white">
+                Zamknij
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL TWORZENIA NOWEGO MECZU */}
       {showCreateModal && isAdmin && (

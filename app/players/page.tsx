@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Users, Search, Trash2, Calendar, Plus, X, Mail, CheckCircle, Clock } from "lucide-react"
+import { Users, Search, Trash2, Calendar, Plus, X, Mail, CheckCircle, Clock, CheckCircle2, UserCheck } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { supabase } from "@/lib/supabase"
 import { Badge } from "@/components/dashboard/ui-bits"
@@ -11,6 +11,7 @@ type GlobalPlayer = {
   id: string
   full_name: string
   email?: string
+  role?: string
   created_at?: string
   matches_count?: number
   total_paid?: number
@@ -26,6 +27,7 @@ type PlayerHistory = {
 
 export default function PlayersPage() {
   const [players, setPlayers] = useState<GlobalPlayer[]>([])
+  const [pendingPlayers, setPendingPlayers] = useState<GlobalPlayer[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -71,7 +73,7 @@ export default function PlayersPage() {
   async function fetchPlayers() {
     setIsLoading(true)
 
-    // 1. Pobranie graczy
+    // 1. Pobranie graczy z Supabase
     const { data: dbPlayers, error: dbError } = await supabase
       .from('players')
       .select('*')
@@ -93,7 +95,7 @@ export default function PlayersPage() {
     const counts: Record<string, number> = {}
     const paidSums: Record<string, number> = {}
 
-    // A. Zliczanie z tabeli match_registrations (jeśli używana)
+    // A. Zliczanie z tabeli match_registrations
     regData?.forEach((reg: any) => {
       const pid = reg.player_id || reg.player || reg.player_name || reg.name
       if (!pid) return
@@ -106,7 +108,7 @@ export default function PlayersPage() {
       }
     })
 
-    // B. Zliczanie z tablicy `players` zapisanej bezpośrednio w meczach w tabeli `matches`
+    // B. Zliczanie z tablicy `players` w tabeli `matches`
     matchesData?.forEach((m: any) => {
       if (Array.isArray(m.players)) {
         m.players.forEach((p: any) => {
@@ -114,7 +116,6 @@ export default function PlayersPage() {
           if (!pid) return
 
           const key = String(pid).toLowerCase().trim()
-          // Zliczamy obecności w meczach (jeśli nie były już liczone z rejestracji)
           if (!regData || regData.length === 0) {
             counts[key] = (counts[key] || 0) + 1
             if (p.paid) {
@@ -126,37 +127,76 @@ export default function PlayersPage() {
     })
 
     if (dbPlayers && dbPlayers.length > 0) {
-      const formatted: GlobalPlayer[] = dbPlayers
-        .filter((p) => {
-          const name = p.full_name || p.name || ""
-          return !name.toLowerCase().includes("główny admin") && !name.toLowerCase().includes("glowny admin")
-        })
-        .map((p) => {
-          const fullName = p.full_name || p.name || ""
-          const idKey = String(p.id).toLowerCase().trim()
-          const nameKey = String(fullName).toLowerCase().trim()
+      const activeList: GlobalPlayer[] = []
+      const pendingList: GlobalPlayer[] = []
 
-          const matchesCount = counts[idKey] || counts[nameKey] || 0
-          const totalPaid = paidSums[idKey] || paidSums[nameKey] || 0
+      dbPlayers.forEach((p) => {
+        const fullName = p.full_name || p.name || ""
+        const idKey = String(p.id).toLowerCase().trim()
+        const nameKey = String(fullName).toLowerCase().trim()
 
-          return {
-            id: p.id,
-            full_name: fullName,
-            email: p.email || "Brak e-maila",
-            created_at: p.created_at,
-            matches_count: matchesCount,
-            total_paid: totalPaid,
-          }
-        })
-      setPlayers(formatted)
+        if (fullName.toLowerCase().includes("główny admin") || fullName.toLowerCase().includes("glowny admin")) {
+          return
+        }
+
+        const matchesCount = counts[idKey] || counts[nameKey] || 0
+        const totalPaid = paidSums[idKey] || paidSums[nameKey] || 0
+
+        const playerObj: GlobalPlayer = {
+          id: p.id,
+          full_name: fullName,
+          email: p.email || "Brak e-maila",
+          role: p.role,
+          created_at: p.created_at,
+          matches_count: matchesCount,
+          total_paid: totalPaid,
+        }
+
+        if (p.role === "pending") {
+          pendingList.push(playerObj)
+        } else {
+          activeList.push(playerObj)
+        }
+      })
+
+      setPlayers(activeList)
+      setPendingPlayers(pendingList)
     } else {
       setPlayers([])
+      setPendingPlayers([])
     }
 
     setIsLoading(false)
   }
 
-  // Zapis do Supabase
+  // Zatwierdzanie konta gracza (zmiana 'pending' -> 'user')
+  async function approvePlayer(id: string) {
+    const { error } = await supabase
+      .from('players')
+      .update({ role: 'user' })
+      .eq('id', id)
+
+    if (error) {
+      alert(`Błąd zatwierdzania: ${error.message}`)
+    } else {
+      fetchPlayers()
+    }
+  }
+
+  // Odrzucenie konta gracza (usunięcie z bazy)
+  async function rejectPlayer(id: string) {
+    if (!confirm("Czy na pewno chcesz odrzucić i usunąć to zgłoszenie?")) return
+
+    const { error } = await supabase.from('players').delete().eq('id', id)
+
+    if (error) {
+      alert(`Błąd odrzucania: ${error.message}`)
+    } else {
+      fetchPlayers()
+    }
+  }
+
+  // Zapis do Supabase (ręcznie dodany przez Admina)
   async function handleAddPlayer(e: React.FormEvent) {
     e.preventDefault()
     if (!newFullName.trim()) return
@@ -171,7 +211,7 @@ export default function PlayersPage() {
         {
           full_name: newFullName.trim(),
           email: emailToUse,
-          role: 'player'
+          role: 'user'
         }
       ])
 
@@ -188,15 +228,45 @@ export default function PlayersPage() {
     setIsSubmitting(false)
   }
 
-  // Usuwanie z bazy Supabase
+  // KOMPLEKSOWE USUWANIE ZAWODNIKA Z CAŁEJ BAZY (Tabel: players, match_registrations oraz kolumny JSONB players w matches)
   async function deletePlayer(id: string, e: React.MouseEvent) {
     e.stopPropagation()
-    if (!confirm("Czy na pewno chcesz usunąć tego zawodnika z bazy?")) return
 
+    const playerToDelete = players.find(p => p.id === id)
+    if (!playerToDelete) return
+
+    if (!confirm(`Czy na pewno chcesz usunąć zawodnika "${playerToDelete.full_name}" z CAŁEJ bazy? Zniknie on również ze statystyk oraz ze wszystkich meczów.`)) return
+
+    const pName = playerToDelete.full_name.toLowerCase().trim()
+
+    // 1. Usuwamy wpisy z tabeli match_registrations
+    await supabase.from('match_registrations').delete().eq('player_id', id)
+
+    // 2. Czyszczenie zawodnika ze wszystkich meczów w tabeli matches (kolumna JSONB)
+    const { data: matches } = await supabase.from('matches').select('*')
+
+    if (matches && matches.length > 0) {
+      for (const match of matches) {
+        if (Array.isArray(match.players)) {
+          const updatedRoster = match.players.filter((p: any) => {
+            const matchPid = String(p.id || "").toLowerCase().trim()
+            const matchPName = String(p.name || p.full_name || "").toLowerCase().trim()
+            return matchPid !== id && matchPName !== pName
+          })
+
+          await supabase
+            .from('matches')
+            .update({ players: updatedRoster })
+            .eq('id', match.id)
+        }
+      }
+    }
+
+    // 3. Usuwamy gracza z tabeli głównej players
     const { error } = await supabase.from('players').delete().eq('id', id)
 
     if (error) {
-      console.error("Błąd usuwania z bazy:", error.message)
+      console.error("Błąd podczas usuwania gracza:", error.message)
       alert(`Błąd podczas usuwania z bazy: ${error.message}`)
     } else {
       fetchPlayers()
@@ -207,7 +277,6 @@ export default function PlayersPage() {
     setSelectedPlayer(player)
     setIsLoadingHistory(true)
 
-    const { data: regData } = await supabase.from('match_registrations').select('*')
     const { data: matchesData } = await supabase.from('matches').select('*')
 
     if (!matchesData) {
@@ -220,7 +289,6 @@ export default function PlayersPage() {
     const pId = String(player.id).toLowerCase().trim()
     const pName = String(player.full_name).toLowerCase().trim()
 
-    // Szukanie w meczach
     matchesData.forEach((m: any) => {
       if (Array.isArray(m.players)) {
         const found = m.players.find((p: any) => {
@@ -292,6 +360,47 @@ export default function PlayersPage() {
               </Button>
             )}
           </div>
+
+          {/* BANER ZATWIERDZANIA NOWYCH KONTA PRZEZ ADMINA */}
+          {isAdmin && pendingPlayers.length > 0 && (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-amber-600 flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-amber-500" />
+                  Konta oczekujące na zatwierdzenie ({pendingPlayers.length})
+                </h2>
+              </div>
+
+              <div className="space-y-2">
+                {pendingPlayers.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between bg-card p-3 rounded-xl border border-border shadow-sm text-xs font-bold">
+                    <div>
+                      <p className="text-foreground">{p.full_name}</p>
+                      <p className="text-[11px] text-muted-foreground font-normal">{p.email}</p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => approvePlayer(p.id)}
+                        className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] gap-1 h-8"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Zatwierdź
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => rejectPlayer(p.id)}
+                        className="rounded-xl hover:bg-destructive/10 text-destructive font-bold text-[11px] h-8"
+                      >
+                        Odrzuć
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {isLoading ? (
             <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
