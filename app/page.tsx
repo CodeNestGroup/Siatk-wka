@@ -10,7 +10,6 @@ import {
   Wallet,
   Plus,
   ChevronRight,
-  Sparkles,
   RefreshCw,
   X,
   CheckCircle2,
@@ -20,14 +19,16 @@ import {
   Share2,
   Shuffle,
   Trash2,
-  Check
+  Check,
+  Ban,
+  Timer
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { MatchDetail } from "@/components/dashboard/match-detail"
 import { TeamBalancerModal } from "@/components/dashboard/team-balancer-modal"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
 import { Button } from "@/components/ui/button"
-import { type Match, mainRoster, waitlist, getMatches } from "@/lib/data"
+import { type Match, mainRoster, waitlist } from "@/lib/data"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 
@@ -47,43 +48,36 @@ export default function DashboardPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
+
   const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState<"all" | "upcoming" | "past">("all")
+  const [statusFilter, setStatusFilter] = useState<"all" | "upcoming" | "past" | "cancelled">("all")
+
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
-
-  // Przechowywanie przeczytanych identyfikatorów powiadomień
   const [readMatchIds, setReadMatchIds] = useState<string[]>([])
 
-  // Stan dla Losowania Składów A vs B oraz podglądu składu
   const [selectedMatchForTeams, setSelectedMatchForTeams] = useState<Match | null>(null)
   const [selectedMatchRosterPreview, setSelectedMatchRosterPreview] = useState<Match | null>(null)
-
-  // Przełącznik widoku podsumowania (Najbliższy mecz vs Cały Sezon)
   const [viewMode, setViewMode] = useState<"nearest" | "season">("nearest")
 
-  const isAdmin = user?.role === "admin" || user?.is_admin
+  const isAdmin = user?.role === "admin" || user?.is_admin || user?.role_id === 1
 
-  // Formularz nowego meczu
   const [newDate, setNewDate] = useState("")
   const [newLocation, setNewLocation] = useState("Hala Sportowa ESCO Jaworze")
   const [newPrice, setNewPrice] = useState("25")
   const [newCapacity, setNewCapacity] = useState("12")
-  const [newTitle, setNewTitle] = useState("Trening Siatkówki")
+  const [newTitle, setNewTitle] = useState("")
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([])
 
-  // Wymuszenie logowania (Auth Guard) przy wejściu na stronę
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
-
     if (!localUser) {
       window.location.href = "/login"
       return
     }
 
     try {
-      const parsedUser = JSON.parse(localUser)
-      setUser(parsedUser)
+      setUser(JSON.parse(localUser))
     } catch (e) {
       localStorage.removeItem("volley_user")
       window.location.href = "/login"
@@ -105,65 +99,44 @@ export default function DashboardPage() {
 
   async function loadData() {
     setIsLoading(true)
-    const todayStr = new Date().toISOString().split("T")[0]
 
     let fetchedMatches: Match[] = []
-    const { data: matchesData, error: matchesErr } = await supabase
+    // Poprawna nazwa tabeli relacji ze schematu: matches_status
+    const { data: matchesData, error } = await supabase
       .from("matches")
-      .select("*")
+      .select("*, matches_status(id, name)")
       .order("date", { ascending: true })
 
-    if (matchesErr || !matchesData || matchesData.length === 0) {
-      fetchedMatches = await getMatches()
-    } else {
-      fetchedMatches = matchesData
+    if (error) {
+      console.error("Błąd pobierania meczów:", error.message)
     }
 
-    const processedMatches = fetchedMatches.map((match) => {
-      const matchDateStr = match.date ? match.date.trim() : ""
-      let computedStatus = match.status || "upcoming"
+    if (matchesData) fetchedMatches = matchesData
 
-      if (matchDateStr && matchDateStr < todayStr) {
-        computedStatus = "past"
-      }
+    const { data: registrationsData } = await supabase.from("match_registrations").select("*")
 
-      return {
-        ...match,
-        status: computedStatus
-      }
+    const processedMatches = fetchedMatches.map((match: any) => {
+      const matchRegs = registrationsData?.filter((r: any) => r.match_id === match.id) || []
+      const matchPlayers = matchRegs.map((reg: any) => ({
+        id: reg.player_id,
+        paid: reg.is_paid
+      }))
+
+      return { ...match, players: matchPlayers }
     })
 
     setMatches(processedMatches)
 
     const { data: playersData } = await supabase.from("players").select("*")
-
-    if (playersData && playersData.length > 0) {
+    if (playersData) {
       setAvailablePlayers(playersData)
-    } else {
-      const extractedPlayers: any[] = []
-      const seenIds = new Set()
-
-      processedMatches.forEach((m) => {
-        if (Array.isArray(m.players)) {
-          m.players.forEach((p: any) => {
-            if (p.id && !seenIds.has(p.id)) {
-              seenIds.add(p.id)
-              extractedPlayers.push({ id: p.id, name: p.name || p.full_name })
-            }
-          })
-        }
-      })
-
-      setAvailablePlayers(extractedPlayers)
     }
 
     setIsLoading(false)
   }
 
-  // Automatyczne oznaczanie meczu jako przeczytany po wejściu w kartę
   function handleSelectMatch(match: Match) {
     setSelectedMatch(match)
-
     const matchNotifId = `match-${match.id}`
     if (!readMatchIds.includes(matchNotifId)) {
       const updated = [...readMatchIds, matchNotifId]
@@ -172,41 +145,79 @@ export default function DashboardPage() {
     }
   }
 
-  // Usunięcie meczu z bazy Supabase
-  async function handleDeleteMatch(matchId: string, matchDate: string, e: React.MouseEvent) {
-    e.stopPropagation()
-
-    if (!confirm(`Czy na pewno chcesz usunąć mecz z dnia ${matchDate}? Mecz oraz powiązane wpłaty zostaną usunięte z całej bazy.`)) return
-
-    await supabase.from("match_registrations").delete().eq("match_id", matchId)
-    await supabase.from("announcements").delete().eq("match_id", matchId)
-
-    const { error } = await supabase.from("matches").delete().eq("id", matchId)
-
-    if (error) {
-      console.error("Błąd usuwania meczu:", error.message)
-      notify(`Błąd: ${error.message}`)
-    } else {
-      notify(`Usunięto mecz z dnia ${matchDate}`)
-      loadData()
-    }
-  }
-
   function handleOpenRosterPreview(match: Match, e: React.MouseEvent) {
     e.stopPropagation()
     setSelectedMatchRosterPreview(match)
   }
 
+  // NAPRAWIONE ODWOŁYWANIE MECZU WG DOPASOWANEGO SCHEMATU ERD
+  async function handleCancelMatch(matchId: string, matchDate: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!confirm(`Odwołać mecz z dnia ${matchDate}?`)) return
+
+    // 1. Pobieramy rekordy z tabeli matches_status
+    const { data: statusList } = await supabase.from("matches_status").select("*")
+
+    // Szukamy ID dla statusu "Odwołany"
+    let cancelledStatusId = statusList?.find((s: any) =>
+      s.name?.toLowerCase().includes("odwoł") ||
+      s.name?.toLowerCase().includes("cancel")
+    )?.id
+
+    // Fallback: jeśli słownie nie znaleziono, wybieramy OSTATNIE id z tabeli matches_status lub 4
+    if (!cancelledStatusId && statusList && statusList.length > 0) {
+      cancelledStatusId = statusList[statusList.length - 1].id
+    }
+    if (!cancelledStatusId) cancelledStatusId = 4
+
+    // 2. Aktualizujemy status_id w tabeli matches
+    const { error: matchError } = await supabase
+      .from("matches")
+      .update({ status_id: cancelledStatusId })
+      .eq("id", matchId)
+
+    if (matchError) {
+      notify(`Błąd aktualizacji meczu: ${matchError.message}`)
+      return
+    }
+
+    // 3. Tworzymy ogłoszenie z poprawnym powiązaniem match_id (uuid)
+    try {
+      await supabase.from("announcements").insert([
+        {
+          title: `⚠️ MECZ ODWOŁANY (${matchDate})`,
+          content: `Informujemy, że mecz zaplanowany na dzień ${matchDate} został odwołany przez Administratora.`,
+          author: user?.full_name || user?.name || "Administrator",
+          match_id: matchId,
+          is_pinned: true
+        }
+      ])
+    } catch (announcementErr) {
+      console.warn("Błąd wysyłania ogłoszenia:", announcementErr)
+    }
+
+    notify("Mecz odwołany! Ogłoszenie zostało opublikowane.")
+    await loadData()
+  }
+
+  async function handleDeleteMatch(matchId: string, matchDate: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!confirm(`Usunąć mecz z dnia ${matchDate}?`)) return
+
+    await supabase.from("match_registrations").delete().eq("match_id", matchId)
+    await supabase.from("announcements").delete().eq("match_id", matchId)
+    await supabase.from("matches").delete().eq("id", matchId)
+    notify("Mecz usunięty z bazy.")
+    loadData()
+  }
+
   function copyMatchToClipboard(match: Match, e: React.MouseEvent) {
     e.stopPropagation()
     const roster = mainRoster(match)
-    const playerNames = roster.map((p: any) => p.name || p.full_name).join(", ")
-    const freeSpots = (match.capacity || 12) - roster.length
-
-    const text = `🏐 *Trening ESCO Volleyball (${match.date})*\n📍 *Lokalizacja:* ${match.location || 'Hala Sportowa ESCO Jaworze'}\n👥 *Skład (${roster.length}/${match.capacity || 12}):* ${playerNames || 'Brak zgłoszeń'}\n⏳ *Wolne miejsca:* ${freeSpots > 0 ? freeSpots : 'Brak (Lista rezerwowa)'}\n💰 *Składka:* ${match.price_per_player || 25} PLN / os.`
-
+    const subtitle = match.title && match.title !== match.date ? ` - ${match.title}` : ""
+    const text = `🏐 *Trening ESCO (${match.date}${subtitle})*\n📍 ${match.location}\n⏰ ${match.time_start || '19:00'} - ${match.time_end || '21:00'}\n👥 Skład: ${roster.length}/${match.capacity || 12}\n💰 Składka: ${match.price_per_player || 25} PLN`
     navigator.clipboard.writeText(text)
-    notify("Skopiowano treść powiadomienia do schowka!")
+    notify("Skopiowano do schowka!")
   }
 
   function handleOpenBalancer(match: Match, e: React.MouseEvent) {
@@ -216,9 +227,7 @@ export default function DashboardPage() {
 
   function togglePlayerSelection(playerId: string) {
     setSelectedPlayerIds((prev) =>
-      prev.includes(playerId)
-        ? prev.filter((id) => id !== playerId)
-        : [...prev, playerId]
+      prev.includes(playerId) ? prev.filter((id) => id !== playerId) : [...prev, playerId]
     )
   }
 
@@ -235,42 +244,42 @@ export default function DashboardPage() {
     if (!newDate) return
 
     setIsCreating(true)
-
-    const initialMatchPlayers = selectedPlayerIds.map((id) => {
-      const p = availablePlayers.find((player) => player.id === id)
-      return {
-        id: p.id,
-        name: p.name || p.full_name,
-        role: "main",
-        paid: false
-      }
-    })
-
     const todayStr = new Date().toISOString().split("T")[0]
-    const initialStatus = newDate < todayStr ? "past" : "upcoming"
+    const initialStatusId = newDate < todayStr ? 3 : 1
+
+    const matchTitle = newTitle.trim() ? newTitle.trim() : newDate
 
     const newMatchObj = {
-      title: newTitle || "Trening Siatkówki",
+      title: matchTitle,
       date: newDate,
-      time_start: "19:00",
-      time_end: "21:00",
+      time_start: "19:00:00",
+      time_end: "21:00:00",
       location: newLocation,
       price_per_player: Number(newPrice) || 25,
       capacity: Number(newCapacity) || 12,
-      status: initialStatus,
-      is_settled: false,
-      players: initialMatchPlayers
+      max_players: Number(newCapacity) || 12,
+      status_id: initialStatusId,
+      is_settled: false
     }
 
-    const { error } = await supabase.from("matches").insert([newMatchObj])
+    const { data: insertedMatch, error } = await supabase.from("matches").insert([newMatchObj]).select().single()
 
-    if (error) {
-      console.error("Błąd tworzenia meczu:", error.message)
-      notify(`Błąd zapisu: ${error.message}`)
+    if (error || !insertedMatch) {
+      notify(`Błąd zapisu: ${error?.message || "Nieznany błąd"}`)
     } else {
+      if (selectedPlayerIds.length > 0) {
+        const registrations = selectedPlayerIds.map(pid => ({
+          match_id: insertedMatch.id,
+          player_id: pid,
+          is_paid: false
+        }))
+        await supabase.from("match_registrations").insert(registrations)
+      }
+
       notify("Pomyślnie utworzono nowy mecz!")
       setShowCreateModal(false)
       setNewDate("")
+      setNewTitle("")
       setSelectedPlayerIds([])
       loadData()
     }
@@ -279,9 +288,7 @@ export default function DashboardPage() {
   }
 
   function handleMatchChange(updatedMatch: Match) {
-    setMatches((prev) =>
-      prev.map((m) => (m.id === updatedMatch.id ? updatedMatch : m))
-    )
+    setMatches((prev) => prev.map((m) => (m.id === updatedMatch.id ? updatedMatch : m)))
     if (selectedMatch?.id === updatedMatch.id) {
       setSelectedMatch(updatedMatch)
     }
@@ -290,39 +297,39 @@ export default function DashboardPage() {
 
   async function handleLogout() {
     localStorage.removeItem("volley_user")
-    localStorage.clear()
     sessionStorage.clear()
     await supabase.auth.signOut()
-    setUser(null)
     window.location.href = "/login"
   }
 
-  // Zabezpieczenie przed pokazaniem pustej strony przed przekierowaniem na /login
-  if (!user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC]">
-        <div className="text-center space-y-3">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-600 border-t-transparent mx-auto" />
-          <p className="text-xs font-extrabold text-slate-600">Sprawdzanie uprawnień...</p>
-        </div>
-      </div>
-    )
-  }
+  if (!user) return null
 
-  const upcomingMatches = matches
-    .filter((m) => m.status === "upcoming" && !(m as any).is_settled)
-    .sort((a, b) => a.date.localeCompare(b.date))
+  const todayStr = new Date().toISOString().split("T")[0]
 
-  const pastOrSettledMatches = matches
-    .filter((m) => m.status === "past" || (m as any).is_settled)
-    .sort((a, b) => b.date.localeCompare(a.date))
+  const filteredMatches = matches.filter((m: any) => {
+    const searchString = `${m.title || ''} ${m.location || ''} ${m.date || ''}`.toLowerCase()
+    const matchFound = searchString.includes(searchTerm.toLowerCase())
 
-  const nearestMatch = upcomingMatches[0] || matches[0]
+    const isCancelled = m.status_id === 4 || m.matches_status?.name?.toLowerCase().includes("odwoł")
+    const isPast = (m.date < todayStr || m.status_id === 3 || m.is_settled) && !isCancelled
+    const isUpcoming = m.date >= todayStr && !isCancelled && !m.is_settled
 
-  const totalSeasonMatches = matches.length
+    if (statusFilter === "upcoming") return matchFound && isUpcoming
+    if (statusFilter === "past") return matchFound && isPast
+    if (statusFilter === "cancelled") return matchFound && isCancelled
+    return matchFound
+  })
+
+  const sortedMatches = [...filteredMatches].sort((a: any, b: any) => a.date.localeCompare(b.date))
+
+  const activeMatches = matches.filter((m: any) => !m.matches_status?.name?.toLowerCase().includes("odwoł") && m.status_id !== 4)
+  const upcomingMatches = activeMatches.filter((m: any) => m.date >= todayStr)
+  const nearestMatch = upcomingMatches[0] || activeMatches[0]
+
+  const totalSeasonMatches = activeMatches.length
 
   const playerMatchCounts: Record<string, { name: string; count: number }> = {}
-  matches.forEach((m) => {
+  activeMatches.forEach((m) => {
     const roster = mainRoster(m)
     roster.forEach((p: any) => {
       const pName = p.name || p.full_name || "Zawodnik"
@@ -340,58 +347,43 @@ export default function DashboardPage() {
     }
   })
 
-  const totalRosterEntries = matches.reduce((acc, m) => acc + mainRoster(m).length, 0)
+  const totalRosterEntries = activeMatches.reduce((acc, m) => acc + mainRoster(m).length, 0)
   const avgAttendance = totalSeasonMatches > 0 ? (totalRosterEntries / totalSeasonMatches).toFixed(1) : "0"
 
-  const totalSeasonCollected = matches.reduce((acc, m) => {
+  const totalSeasonCollected = activeMatches.reduce((acc, m) => {
     const price = Number(m.price_per_player || 25)
-    const paid = mainRoster(m).filter(p => p.paid).length
+    const paid = mainRoster(m).filter((p: any) => p.paid || p.is_paid).length
     return acc + (paid * price)
   }, 0)
 
   const nearestRoster = nearestMatch ? mainRoster(nearestMatch) : []
   const nearestWaitlist = nearestMatch ? waitlist(nearestMatch) : []
   const nearestPrice = Number(nearestMatch?.price_per_player || 25)
-  const nearestCollected = nearestRoster.filter(p => p.paid).length * nearestPrice
-
-  const sortedAllMatches = [...upcomingMatches, ...pastOrSettledMatches]
-
-  const filteredMatches = sortedAllMatches.filter((m) => {
-    const matchesSearch =
-      m.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      m.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      m.date?.toLowerCase().includes(searchTerm.toLowerCase())
-
-    if (statusFilter === "upcoming") return matchesSearch && m.status === "upcoming" && !(m as any).is_settled
-    if (statusFilter === "past") return matchesSearch && (m.status === "past" || (m as any).is_settled)
-    return matchesSearch
-  })
+  const nearestCollected = nearestRoster.filter((p: any) => p.paid || p.is_paid).length * nearestPrice
 
   return (
     <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
-      <Sidebar
-        open={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        user={user}
-        onLogout={handleLogout}
-      />
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} user={user} onLogout={handleLogout} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-
-        {/* Górny Pasek Wyszukiwania */}
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/80 px-6 py-4 backdrop-blur-md">
-          <div className="relative w-full max-w-md">
-            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="search"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Szukaj meczów, graczy..."
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 py-2 pl-10 pr-4 text-xs font-medium outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/20 transition-all"
-            />
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/80 px-6 py-3.5 backdrop-blur-md">
+          <style jsx>{`
+            @keyframes marquee { 0% { transform: translateX(0%); } 100% { transform: translateX(-50%); } }
+            .animate-marquee { display: flex; width: max-content; animation: marquee 30s linear infinite; }
+            .animate-marquee:hover { animation-play-state: paused; }
+          `}</style>
+          <div className="flex-1 overflow-hidden">
+            <div className="animate-marquee gap-8 flex items-center">
+              {[...sponsors, ...sponsors].map((s, index) => (
+                <div key={index} className="flex items-center gap-2 shrink-0">
+                  <span className={cn("flex h-6 w-6 items-center justify-center rounded-lg font-black text-[9px]", s.color)}>{s.code}</span>
+                  <span className="text-xs font-extrabold text-slate-500">{s.name}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0 ml-6">
             <NotificationsBell
               onNotificationClick={(notif: NotificationItem) => {
                 if (notif.type === "match") {
@@ -404,33 +396,8 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        {/* Główna zawartość */}
         <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-6 py-8">
 
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-                {isAdmin ? "Zarządzanie meczami" : "Harmonogram meczów"}
-              </h1>
-              <p className="mt-1 text-xs text-slate-500 font-medium">
-                {isAdmin
-                  ? "Śledź składy, listę rezerwową i wpłaty z każdej sesji."
-                  : "Sprawdzaj mecze, sprawdzaj zapisy i dołączaj do składu."}
-              </p>
-            </div>
-
-            {isAdmin && (
-              <Button
-                onClick={() => setShowCreateModal(true)}
-                className="rounded-2xl bg-blue-600 hover:bg-blue-700 font-bold text-xs gap-2 px-5 py-2.5 shadow-md shadow-blue-500/20 text-white"
-              >
-                <Plus className="h-4 w-4" />
-                Utwórz nowy mecz
-              </Button>
-            )}
-          </div>
-
-          {/* Podgląd Kart Podsumowania */}
           {nearestMatch && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -441,7 +408,7 @@ export default function DashboardPage() {
 
                 <button
                   onClick={() => setViewMode(viewMode === "nearest" ? "season" : "nearest")}
-                  className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1.5 bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100 transition-colors"
+                  className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1.5 bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100 transition-colors cursor-pointer"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                   {viewMode === "nearest" ? "Przełącz na Cały sezon" : "Przełącz na Najbliższy mecz"}
@@ -449,8 +416,6 @@ export default function DashboardPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-
-                {/* KARTA 1 */}
                 <div
                   onClick={() => handleSelectMatch(nearestMatch)}
                   className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm hover:border-blue-300 transition-all cursor-pointer flex items-center justify-between"
@@ -471,7 +436,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* KARTA 2 */}
                 <div className="rounded-3xl border border-amber-100 bg-gradient-to-br from-amber-50/40 to-white p-5 shadow-sm flex items-center justify-between">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500">
@@ -479,7 +443,7 @@ export default function DashboardPage() {
                     </p>
                     <h3 className="text-xl font-black text-slate-900 mt-1 truncate max-w-[140px]">
                       {viewMode === "nearest"
-                        ? `${nearestRoster.length} / ${nearestMatch.capacity || 12}`
+                        ? `${nearestRoster.length} / ${nearestMatch.capacity || nearestMatch.max_players || 12}`
                         : attendanceKing.name}
                     </h3>
                     <p className="text-[11px] text-slate-400 font-medium mt-0.5">
@@ -491,7 +455,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* KARTA 3 */}
                 <div className="rounded-3xl border border-purple-100 bg-gradient-to-br from-purple-50/40 to-white p-5 shadow-sm flex items-center justify-between">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-purple-400">
@@ -509,7 +472,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* KARTA 4 */}
                 <div className="rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50/40 to-white p-5 shadow-sm flex items-center justify-between">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">
@@ -526,210 +488,198 @@ export default function DashboardPage() {
                     <Wallet className="h-6 w-6" />
                   </div>
                 </div>
-
               </div>
             </div>
           )}
 
-          {/* SPONSORZY Z ANIMOWANYM PRZESUWANIEM */}
-          <div className="rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm overflow-hidden">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 mb-3">
-              <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-              Sponsorzy i Partnerzy Zespołu
-            </span>
-
-            <style jsx>{`
-              @keyframes marquee {
-                0% { transform: translateX(0%); }
-                100% { transform: translateX(-50%); }
-              }
-              .animate-marquee {
-                display: flex;
-                width: max-content;
-                animation: marquee 25s linear infinite;
-              }
-              .animate-marquee:hover {
-                animation-play-state: paused;
-              }
-            `}</style>
-
-            <div className="relative w-full overflow-hidden">
-              <div className="animate-marquee gap-3 flex">
-                {[...sponsors, ...sponsors].map((s, index) => (
-                  <div key={index} className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-2.5 min-w-[200px] shrink-0">
-                    <div className={cn("flex h-9 w-9 items-center justify-center rounded-xl font-black text-xs shrink-0", s.color)}>
-                      {s.code}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-slate-900 truncate">{s.name}</p>
-                      <p className="text-[10px] text-slate-400 truncate">{s.desc}</p>
-                    </div>
-                  </div>
-                ))}
+          <div className="pt-4 border-t border-slate-200/80 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
+                  <Calendar className="h-5 w-5" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-black text-slate-900 tracking-tight">Harmonogram Meczów</h1>
+                  <p className="text-xs text-slate-500 font-medium">Zarządzaj terminami, składem i frekwencją zespołu.</p>
+                </div>
               </div>
+
+              {isAdmin && (
+                <Button
+                  onClick={() => setShowCreateModal(true)}
+                  className="rounded-2xl bg-blue-600 hover:bg-blue-700 font-bold text-xs gap-2 px-5 py-2.5 shadow-md shadow-blue-500/20 text-white cursor-pointer"
+                >
+                  <Plus className="h-4 w-4" />
+                  Utwórz nowy mecz
+                </Button>
+              )}
+            </div>
+
+            <div className="relative w-full max-w-md">
+              <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Szukaj po dacie, hali lub tytule meczu..."
+                className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-xs font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all"
+              />
             </div>
           </div>
 
-          {/* Zakładki / Filtry */}
-          <div className="flex items-center gap-2 pt-2">
-            <button
-              onClick={() => setStatusFilter("all")}
-              className={cn(
-                "rounded-xl px-4 py-2 text-xs font-bold transition-all",
-                statusFilter === "all" ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
-              )}
-            >
-              Wszystkie
-            </button>
-            <button
-              onClick={() => setStatusFilter("upcoming")}
-              className={cn(
-                "rounded-xl px-4 py-2 text-xs font-bold transition-all",
-                statusFilter === "upcoming" ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
-              )}
-            >
-              Nadchodzące
-            </button>
-            <button
-              onClick={() => setStatusFilter("past")}
-              className={cn(
-                "rounded-xl px-4 py-2 text-xs font-bold transition-all",
-                statusFilter === "past" ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
-              )}
-            >
-              Zakończone
-            </button>
+          <div className="flex items-center gap-2 pt-2 overflow-x-auto">
+            {[
+              { id: "all", label: "Wszystkie" },
+              { id: "upcoming", label: "Nadchodzące" },
+              { id: "past", label: "Zakończone" },
+              { id: "cancelled", label: "Odwołane" }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setStatusFilter(tab.id as any)}
+                className={cn(
+                  "rounded-xl px-4 py-2 text-xs font-bold transition-all shrink-0 cursor-pointer",
+                  statusFilter === tab.id
+                    ? tab.id === "cancelled" ? "bg-rose-600 text-white shadow-md shadow-rose-500/20" : "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                    : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          {/* Lista Meczów */}
           <div className="space-y-3">
             {isLoading ? (
               <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-xs text-blue-600 font-bold animate-pulse">
                 Ładowanie harmonogramu...
               </div>
-            ) : filteredMatches.length === 0 ? (
+            ) : sortedMatches.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-xs text-slate-400">
                 Brak meczów w tej kategorii.
               </div>
             ) : (
-              filteredMatches.map((match, idx) => {
+              sortedMatches.map((match: any, idx) => {
                 const roster = mainRoster(match)
                 const price = Number(match.price_per_player || 25)
-                const paidPlayersCount = roster.filter((p) => p.paid).length
+                const paidPlayersCount = roster.filter((p: any) => p.paid || p.is_paid).length
                 const totalCollected = paidPlayersCount * price
-                const isSettled = (match as any).is_settled
-                const isPast = match.status === "past"
+                const isSettled = match.is_settled
+                const isCancelled = match.status_id === 4 || match.matches_status?.name?.toLowerCase().includes("odwoł")
+                const isPast = match.date < todayStr || match.status_id === 3
                 const isUnread = !readMatchIds.includes(`match-${match.id}`)
+
+                const isAbsoluteNearest = match.id === nearestMatch?.id
+                const hasSubtitle = match.title && match.title !== match.date
 
                 return (
                   <div
                     key={`${match.id}-${idx}`}
                     onClick={() => handleSelectMatch(match)}
                     className={cn(
-                      "group relative flex flex-col sm:flex-row sm:items-center justify-between rounded-3xl border bg-white p-4 sm:p-5 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-pointer gap-4",
-                      isPast || isSettled ? "border-slate-200/70 bg-slate-50/50" : "border-slate-200/90"
+                      "group relative flex flex-col sm:flex-row sm:items-center justify-between rounded-3xl border p-4 sm:p-5 shadow-sm transition-all cursor-pointer gap-4",
+                      isCancelled
+                        ? "border-rose-300 bg-rose-100/60 hover:border-rose-400 text-rose-900"
+                        : isAbsoluteNearest
+                        ? "border-blue-400 bg-gradient-to-r from-blue-50/70 to-white ring-2 ring-blue-400/30 shadow-md shadow-blue-500/10"
+                        : isPast || isSettled ? "border-slate-200/70 bg-slate-50/50" : "bg-white border-slate-200/90 hover:border-blue-400 hover:shadow-md"
                     )}
                   >
+                    {isAbsoluteNearest && !isCancelled && (
+                      <span className="absolute -top-2.5 left-6 bg-blue-600 text-white font-black text-[9px] uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-sm">
+                        Najbliższy Mecz
+                      </span>
+                    )}
+
                     <div className="flex items-center gap-4">
                       <div className={cn(
                         "flex h-12 w-12 items-center justify-center rounded-2xl border shrink-0 relative",
-                        isPast || isSettled
-                          ? "bg-slate-100 text-slate-400 border-slate-200"
-                          : "bg-amber-50 text-amber-500 border-amber-100"
+                        isCancelled ? "bg-rose-200 text-rose-600 border-rose-300"
+                        : isAbsoluteNearest ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20"
+                        : isPast || isSettled ? "bg-slate-100 text-slate-400 border-slate-200" : "bg-amber-50 text-amber-500 border-amber-100"
                       )}>
-                        <Calendar className="h-6 w-6" />
-
+                        {isCancelled ? <Ban className="h-6 w-6 text-rose-600" /> : <Calendar className="h-6 w-6" />}
                         {isUnread && (
                           <span className="absolute -top-1 -right-1 flex h-3 w-3 rounded-full bg-rose-500 ring-2 ring-white animate-pulse" />
                         )}
                       </div>
 
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-base font-extrabold text-slate-900 group-hover:text-blue-600 transition-colors">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className={cn("text-base font-extrabold transition-colors", isCancelled ? "text-rose-900 line-through" : "text-slate-900 group-hover:text-blue-600")}>
                             {match.date}
                           </h3>
-                          <span
-                            className={cn(
-                              "rounded-md px-2 py-0.5 text-[10px] font-bold uppercase border",
-                              isSettled
-                                ? "bg-slate-100 text-slate-500 border-slate-200"
-                                : isPast
-                                ? "bg-slate-100 text-slate-500 border-slate-200"
-                                : "bg-amber-50 text-amber-600 border-amber-200"
-                            )}
-                          >
-                            {isSettled ? "Rozliczony" : isPast ? "Zakończony" : "Nadchodzący"}
+                          {hasSubtitle && (
+                            <span className={cn("text-xs font-bold px-2 py-0.5 rounded-lg border", isCancelled ? "text-rose-800 bg-rose-200/60 border-rose-300 line-through" : "text-blue-600 bg-blue-50 border-blue-100")}>
+                              {match.title}
+                            </span>
+                          )}
+                          <span className={cn(
+                            "rounded-md px-2 py-0.5 text-[10px] font-bold uppercase border",
+                            isCancelled ? "bg-rose-200 text-rose-800 border-rose-300 font-black"
+                            : isSettled ? "bg-slate-100 text-slate-500 border-slate-200"
+                            : isPast ? "bg-slate-100 text-slate-500 border-slate-200" : "bg-amber-50 text-amber-600 border-amber-200"
+                          )}>
+                            {isCancelled ? "Odwołany" : isSettled ? "Rozliczony" : isPast ? "Zakończony" : "Nadchodzący"}
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
-                          <MapPin className="h-3.5 w-3.5 text-blue-500" />
-                          <span>{match.location}</span>
+                        <div className="flex items-center gap-2 text-xs font-medium text-slate-400 flex-wrap">
+                          <span className={cn("flex items-center gap-1 font-bold px-2 py-0.5 rounded-lg border", isCancelled ? "text-rose-800 bg-rose-200/50 border-rose-300 line-through" : "text-slate-700 bg-slate-100 border-slate-200")}>
+                            <Timer className={cn("h-3 w-3", isCancelled ? "text-rose-600" : "text-blue-600")} />
+                            {match.time_start?.slice(0, 5) || "19:00"} - {match.time_end?.slice(0, 5) || "21:00"}
+                          </span>
                           <span>•</span>
-                          <span className="font-bold text-slate-600">{price} PLN / os.</span>
+                          <span className="flex items-center gap-1">
+                            <MapPin className={cn("h-3.5 w-3.5", isCancelled ? "text-rose-500" : "text-slate-400")} />
+                            <span className={isCancelled ? "text-rose-800 line-through" : ""}>{match.location}</span>
+                          </span>
+                          {!isCancelled && (
+                            <>
+                              <span>•</span>
+                              <span className="font-bold text-slate-600">{price} PLN / os.</span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 border-t sm:border-t-0 border-slate-100 pt-3 sm:pt-0">
+                      {!isCancelled && (
+                        <>
+                          <Button size="sm" variant="outline" onClick={(e) => copyMatchToClipboard(match, e)} className="rounded-xl text-[11px] font-bold gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">
+                            <Share2 className="h-3.5 w-3.5 text-blue-600" /> Udostępnij
+                          </Button>
 
-                      {/* Udostępnij */}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => copyMatchToClipboard(match, e)}
-                        className="rounded-xl text-[11px] font-bold gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50"
-                        title="Kopiuj na WhatsAppa"
-                      >
-                        <Share2 className="h-3.5 w-3.5 text-blue-600" />
-                        Udostępnij
-                      </Button>
+                          <Button size="sm" variant="outline" onClick={(e) => handleOpenBalancer(match, e)} className="rounded-xl text-[11px] font-bold gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">
+                            <Shuffle className="h-3.5 w-3.5 text-purple-600" /> Losuj A vs B
+                          </Button>
 
-                      {/* Losuj A vs B */}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => handleOpenBalancer(match, e)}
-                        className="rounded-xl text-[11px] font-bold gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50"
-                        title="Losuj skład A vs B"
-                      >
-                        <Shuffle className="h-3.5 w-3.5 text-purple-600" />
-                        Losuj A vs B
-                      </Button>
+                          <button onClick={(e) => handleOpenRosterPreview(match, e)} className="flex items-center gap-2 rounded-xl bg-blue-50/80 hover:bg-blue-100 px-3 py-1.5 border border-blue-200/80 text-xs font-bold text-blue-900 transition-all shadow-sm cursor-pointer">
+                            <Users className="h-4 w-4 text-blue-600" />
+                            <span>Skład: <strong>{roster.length}/{match.capacity || match.max_players || 12}</strong></span>
+                          </button>
 
-                      {/* SKŁAD */}
-                      <button
-                        onClick={(e) => handleOpenRosterPreview(match, e)}
-                        className="flex items-center gap-2 rounded-xl bg-blue-50/80 hover:bg-blue-100 px-3 py-1.5 border border-blue-200/80 text-xs font-bold text-blue-900 transition-all shadow-sm"
-                        title="Zobacz listę obecnych zawodników"
-                      >
-                        <Users className="h-4 w-4 text-blue-600" />
-                        <span>Skład: <strong>{roster.length}/{match.capacity || 12}</strong></span>
-                      </button>
+                          <div className="text-right min-w-[60px] mr-2">
+                            <p className="text-[10px] uppercase font-bold text-slate-400">Wpłaty</p>
+                            <p className={cn("text-xs font-extrabold", totalCollected > 0 ? "text-emerald-600" : "text-slate-400")}>{totalCollected} PLN</p>
+                          </div>
+                        </>
+                      )}
 
-                      <div className="text-right min-w-[60px]">
-                        <p className="text-[10px] uppercase font-bold text-slate-400">Wpłaty</p>
-                        <p className={cn(
-                          "text-xs font-extrabold",
-                          totalCollected > 0 ? "text-emerald-600" : "text-slate-400"
-                        )}>
-                          {totalCollected} PLN
-                        </p>
-                      </div>
+                      {isAdmin && !isCancelled && (
+                        <button onClick={(e) => handleCancelMatch(match.id, match.date, e)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 transition-all border border-rose-100 cursor-pointer" title="Odwołaj ten mecz">
+                          <Ban className="h-4 w-4" />
+                        </button>
+                      )}
 
-                      {/* USUWANIE MECZU DLA ADMINA */}
                       {isAdmin && (
-                        <button
-                          onClick={(e) => handleDeleteMatch(match.id, match.date, e)}
-                          className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-all border border-slate-200/60"
-                          title="Usuń mecz z całej bazy"
-                        >
+                        <button onClick={(e) => handleDeleteMatch(match.id, match.date, e)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:bg-slate-200 transition-all border border-slate-200 cursor-pointer" title="Usuń z bazy">
                           <Trash2 className="h-4 w-4" />
                         </button>
                       )}
 
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-all">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-all ml-1">
                         <ChevronRight className="h-5 w-5" />
                       </div>
                     </div>
@@ -738,11 +688,9 @@ export default function DashboardPage() {
               })
             )}
           </div>
-
         </main>
       </div>
 
-      {/* MODAL PODGLĄDU SKŁADU MECZU */}
       {selectedMatchRosterPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4 text-slate-900">
@@ -754,16 +702,16 @@ export default function DashboardPage() {
                 </h2>
                 <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{selectedMatchRosterPreview.location}</p>
               </div>
-              <button onClick={() => setSelectedMatchRosterPreview(null)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100">
+              <button onClick={() => setSelectedMatchRosterPreview(null)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs font-bold text-slate-500">
-                <span>Powołani gracze ({mainRoster(selectedMatchRosterPreview).length}/{selectedMatchRosterPreview.capacity || 12})</span>
+                <span>Powołani gracze ({mainRoster(selectedMatchRosterPreview).length}/{selectedMatchRosterPreview.capacity || selectedMatchRosterPreview.max_players || 12})</span>
                 <span className="text-emerald-600">
-                  Wpłacono: {mainRoster(selectedMatchRosterPreview).filter(p => p.paid).length * Number(selectedMatchRosterPreview.price_per_player || 25)} PLN
+                  Wpłacono: {mainRoster(selectedMatchRosterPreview).filter((p: any) => p.paid || p.is_paid).length * Number(selectedMatchRosterPreview.price_per_player || 25)} PLN
                 </span>
               </div>
 
@@ -771,24 +719,28 @@ export default function DashboardPage() {
                 {mainRoster(selectedMatchRosterPreview).length === 0 ? (
                   <p className="py-6 text-center text-xs font-semibold text-slate-400">Brak zapisanych graczy w głównym składzie.</p>
                 ) : (
-                  mainRoster(selectedMatchRosterPreview).map((p: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-50 border border-slate-100 text-xs font-bold">
-                      <div className="flex items-center gap-2.5">
-                        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-blue-100 text-blue-700 font-extrabold text-[11px]">
-                          {i + 1}
-                        </span>
-                        <span className="text-slate-900">{p.name || p.full_name}</span>
-                      </div>
+                  mainRoster(selectedMatchRosterPreview).map((p: any, i: number) => {
+                    const isCurrentUser = user?.id === p.id || user?.email === p.email || user?.name === p.full_name || user?.full_name === p.name
 
-                      <span className={cn(
-                        "inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black border",
-                        p.paid ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-slate-100 text-slate-400 border-slate-200"
-                      )}>
-                        {p.paid ? <Check className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
-                        {p.paid ? "Opłacono" : "Nieopłacone"}
-                      </span>
-                    </div>
-                  ))
+                    return (
+                      <div key={i} className={cn("flex items-center justify-between p-2.5 rounded-2xl border text-xs font-bold", isCurrentUser ? "bg-blue-50 border-blue-200 text-blue-900" : "bg-slate-50 border-slate-100")}>
+                        <div className="flex items-center gap-2.5">
+                          <span className={cn("flex h-7 w-7 items-center justify-center rounded-xl font-extrabold text-[11px]", isCurrentUser ? "bg-blue-600 text-white" : "bg-blue-100 text-blue-700")}>
+                            {i + 1}
+                          </span>
+                          <span>{p.name || p.full_name} {isCurrentUser && <span className="ml-1 text-[10px] uppercase text-blue-600 font-extrabold">(Ty)</span>}</span>
+                        </div>
+
+                        <span className={cn(
+                          "inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black border",
+                          (p.paid || p.is_paid) ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-slate-100 text-slate-400 border-slate-200"
+                        )}>
+                          {(p.paid || p.is_paid) ? <Check className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                          {(p.paid || p.is_paid) ? "Opłacono" : "Nieopłacone"}
+                        </span>
+                      </div>
+                    )
+                  })
                 )}
               </div>
 
@@ -796,45 +748,45 @@ export default function DashboardPage() {
                 <div className="pt-2 border-t border-slate-100 space-y-2">
                   <p className="text-xs font-bold text-purple-600">Lista rezerwowa ({waitlist(selectedMatchRosterPreview).length})</p>
                   <div className="space-y-1">
-                    {waitlist(selectedMatchRosterPreview).map((p: any, i: number) => (
-                      <div key={i} className="p-2 rounded-xl bg-purple-50/50 border border-purple-100 text-xs font-bold text-purple-900 flex justify-between">
-                        <span>{p.name || p.full_name}</span>
-                        <span className="text-[10px] uppercase text-purple-600">Rezerwa #{i + 1}</span>
-                      </div>
-                    ))}
+                    {waitlist(selectedMatchRosterPreview).map((p: any, i: number) => {
+                      const isCurrentUser = user?.id === p.id || user?.email === p.email || user?.name === p.full_name || user?.full_name === p.name
+                      return (
+                        <div key={i} className={cn("p-2 rounded-xl border text-xs font-bold flex justify-between", isCurrentUser ? "bg-purple-100 border-purple-300 text-purple-900" : "bg-purple-50/50 border-purple-100 text-purple-900")}>
+                          <span>{p.name || p.full_name} {isCurrentUser && <span className="ml-1 text-[10px] uppercase text-purple-600 font-extrabold">(Ty)</span>}</span>
+                          <span className="text-[10px] uppercase text-purple-600 font-extrabold">Rezerwa #{i + 1}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex justify-end">
-              <Button size="sm" onClick={() => setSelectedMatchRosterPreview(null)} className="rounded-xl text-xs font-bold bg-slate-900 text-white">
-                Zamknij
-              </Button>
+              <Button size="sm" onClick={() => setSelectedMatchRosterPreview(null)} className="rounded-xl text-xs font-bold bg-slate-900 text-white cursor-pointer">Zamknij</Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL TWORZENIA NOWEGO MECZU */}
       {showCreateModal && isAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4 my-8">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h2 className="text-lg font-black text-slate-900">Utwórz Nowy Mecz</h2>
-              <button onClick={() => setShowCreateModal(false)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100">
+              <button onClick={() => setShowCreateModal(false)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <form onSubmit={handleCreateMatch} className="space-y-3 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Nazwa / Tytuł wydarzenia</label>
+                <label className="block font-bold text-slate-700 mb-1">Tytuł / Podtytuł (opcjonalnie)</label>
                 <input
                   type="text"
-                  required
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="np. Mecz o złote majtki (zostaw puste = tylko data)"
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 font-medium outline-none focus:border-blue-500 focus:bg-white"
                 />
               </div>
@@ -894,7 +846,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={toggleAllPlayers}
-                    className="text-[11px] font-bold text-blue-600 hover:underline"
+                    className="text-[11px] font-bold text-blue-600 hover:underline cursor-pointer"
                   >
                     {selectedPlayerIds.length === availablePlayers.length ? "Odznacz wszystkich" : "Zaznacz wszystkich"}
                   </button>
@@ -937,10 +889,10 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex justify-end gap-2 pt-3">
-                <Button type="button" variant="ghost" onClick={() => setShowCreateModal(false)} className="rounded-xl text-xs font-bold">
+                <Button type="button" variant="ghost" onClick={() => setShowCreateModal(false)} className="rounded-xl text-xs font-bold cursor-pointer">
                   Anuluj
                 </Button>
-                <Button type="submit" disabled={isCreating} className="rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-white text-xs">
+                <Button type="submit" disabled={isCreating} className="rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-white text-xs cursor-pointer">
                   {isCreating ? "Tworzenie..." : "Zapisz mecz"}
                 </Button>
               </div>
@@ -949,22 +901,12 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* MODAL LOSOWANIA SKŁADÓW A vs B */}
       {selectedMatchForTeams && (
-        <TeamBalancerModal
-          match={selectedMatchForTeams}
-          onClose={() => setSelectedMatchForTeams(null)}
-        />
+        <TeamBalancerModal match={selectedMatchForTeams} onClose={() => setSelectedMatchForTeams(null)} />
       )}
 
-      {/* Modal szczegółów meczu */}
       {selectedMatch && (
-        <MatchDetail
-          match={selectedMatch}
-          currentUser={user}
-          onClose={() => setSelectedMatch(null)}
-          onChange={handleMatchChange}
-        />
+        <MatchDetail match={selectedMatch} currentUser={user} onClose={() => setSelectedMatch(null)} onChange={handleMatchChange} />
       )}
 
       {toast && (

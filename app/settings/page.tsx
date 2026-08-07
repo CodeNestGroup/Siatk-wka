@@ -7,19 +7,16 @@ import {
   Lock,
   Bell,
   CheckCircle2,
-  ArrowLeft,
   Save,
   KeyRound,
   Mail,
-  Shirt,
   CreditCard,
   Download,
   Smartphone,
-  ShieldAlert
+  AlertCircle
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { supabase } from "@/lib/supabase"
-import Link from "next/link"
 import { Button } from "@/components/ui/button"
 
 export default function SettingsPage() {
@@ -27,24 +24,24 @@ export default function SettingsPage() {
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
 
-  // Stany profilowe
+  // Stany profilowe (Pkt 7.0: usunięto pozycję i numer na koszulce)
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
-  const [position, setPosition] = useState("Przyjmujący")
-  const [shirtNumber, setShirtNumber] = useState("7")
 
-  // Stany bezpieczeństwa
+  // Stany bezpieczeństwa (Pkt 7.1)
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [passwordError, setPasswordError] = useState<string | null>(null)
 
-  // Stany płatności (dla admina/organizatora)
+  // Stany płatności (dla admina)
   const [blikNumber, setBlikNumber] = useState("+48 600 000 000")
   const [bankAccount, setBankAccount] = useState("12 3456 7890 0000 1111 2222 3333")
 
-  // Powiadomienia
+  // Powiadomienia (Pkt 7.2: usunięto SMS, zostawiono Email i Push)
   const [notifyEmail, setNotifyEmail] = useState(true)
-  const [notifySms, setNotifySms] = useState(false)
-  const [notifyReminder, setNotifyReminder] = useState(true)
+  const [notifyPush, setNotifyPush] = useState(true)
+
+  const passwordRegex = /^(?=.*[A-Z])(?=.*[!@#$&*]).{6,}$/
 
   useEffect(() => {
     async function loadUserData() {
@@ -62,7 +59,7 @@ export default function SettingsPage() {
 
       if (activeUser) {
         setUser(activeUser)
-        setFullName(activeUser.full_name || (activeUser.email === "admin@admin.pl" ? "Mateusz Podzorski" : ""))
+        setFullName(activeUser.full_name || activeUser.name || (activeUser.email === "admin@admin.pl" ? "Mateusz Podzorski" : ""))
         setEmail(activeUser.email || "")
       }
     }
@@ -78,28 +75,35 @@ export default function SettingsPage() {
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault()
     if (user) {
-      const updatedUser = { ...user, full_name: fullName, email, position, shirtNumber }
+      const updatedUser = { ...user, full_name: fullName, name: fullName, email }
       localStorage.setItem("volley_user", JSON.stringify(updatedUser))
       setUser(updatedUser)
+
+      // Aktualizacja w bazie Supabase
+      await supabase.from("players").update({ full_name: fullName, email }).eq("id", user.id)
+
       showNotify("Zapisano dane zawodnika!")
     }
   }
 
+  // Pkt 7.1: Bezpieczna zmiana hasła z pełną walidacją
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault()
+    setPasswordError(null)
+
     if (newPassword !== confirmPassword) {
-      alert("Nowe hasła nie są identyczne!")
+      setPasswordError("Nowe hasła nie są identyczne.")
       return
     }
-    if (newPassword.length < 6) {
-      alert("Hasło musi mieć co najmniej 6 znaków.")
+    if (!passwordRegex.test(newPassword)) {
+      setPasswordError("Hasło musi mieć min. 6 znaków, jedną wielką literę i znak specjalny (!@#$&*).")
       return
     }
 
-    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    const { error } = await supabase.from("players").update({ password: newPassword }).eq("id", user.id)
 
     if (error) {
-      showNotify("Błąd zmiany hasła w bazie Supabase.")
+      setPasswordError("Błąd zmiany hasła w bazie danych.")
     } else {
       setNewPassword("")
       setConfirmPassword("")
@@ -112,102 +116,97 @@ export default function SettingsPage() {
     showNotify("Zapisano parametry rozliczeń i konto BLIK!")
   }
 
-  const isAdmin = user?.email === "admin@admin.pl" || user?.role === "admin"
+  // Pkt 7.4: Dedykowany eksport wyłącznie własnych danych użytkownika
+  async function exportMyData() {
+    const { data: matches } = await supabase.from("matches").select("*")
+    let myMatchesCount = 0
+    let totalSpent = 0
+
+    matches?.forEach(m => {
+      if (Array.isArray(m.players)) {
+        const p = m.players.find((pl: any) => pl.name === fullName || pl.full_name === fullName)
+        if (p) {
+          myMatchesCount++
+          if (p.paid) totalSpent += Number(m.price_per_player || 25)
+        }
+      }
+    })
+
+    let csv = "Moje Imię,Rozegrane Mecze,Suma Wydanych Środków (PLN)\n"
+    csv += `"${fullName}",${myMatchesCount},${totalSpent}\n`
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    link.href = URL.createObjectURL(blob)
+    link.download = `moje_dane_${fullName.replace(/\s+/g, "_")}.csv`
+    link.click()
+    showNotify("Pobrano plik z Twoimi statystykami!")
+  }
+
+  const isAdmin = user?.email === "admin@admin.pl" || user?.role === "admin" || user?.is_admin || user?.role_id === 1
+
+  if (!user) return null
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} user={user} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <main className="mx-auto w-full max-w-4xl flex-1 space-y-8 px-4 py-8 lg:px-8">
+        <main className="mx-auto w-full max-w-4xl flex-1 space-y-6 px-6 py-8">
 
-          <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="h-4 w-4" />
-            Powrót do pulpitu
-          </Link>
-
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
-              <Settings className="h-6 w-6 text-primary" />
-              Ustawienia i Preferencje
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Zarządzaj swoimi danymi zawodnika, powiadomieniami oraz danymi rozliczeniowymi drużyny.
-            </p>
+          {/* Nagłówek spójny z resztą aplikacji */}
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
+              <Settings className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-xl font-black tracking-tight text-slate-900">Ustawienia i Preferencje</h1>
+              <p className="text-xs font-medium text-slate-500">Zarządzaj swoimi danymi zawodnika, powiadomieniami oraz kontem.</p>
+            </div>
           </div>
 
           {/* Sekcja 1: Dane Profilowe & Karta Zawodnika */}
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-6">
-            <div className="flex items-center gap-3 border-b border-border pb-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-6">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100">
                 <User className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-foreground">Profil i Karta Zawodnika</h2>
-                <p className="text-xs text-muted-foreground">Dane osobowe oraz pozycja w zespole siatkarskim</p>
+                <h2 className="text-sm font-black text-slate-900">Profil Zawodnika</h2>
+                <p className="text-xs text-slate-400 font-medium">Twoje dane osobowe w systemie</p>
               </div>
             </div>
 
             <form onSubmit={handleSaveProfile} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Imię i nazwisko</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Imię i nazwisko</label>
                   <input
                     type="text"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="np. Mateusz Podzorski"
-                    className="w-full rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring/30"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-blue-500 focus:bg-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Adres e-mail</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Adres e-mail</label>
                   <div className="relative">
-                    <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <input
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="email@example.com"
-                      className="w-full rounded-xl border border-input bg-background pl-10 pr-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring/30"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Pozycja na boisku</label>
-                  <select
-                    value={position}
-                    onChange={(e) => setPosition(e.target.value)}
-                    className="w-full rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring/30"
-                  >
-                    <option value="Przyjmujący">Przyjmujący</option>
-                    <option value="Rozgrywający">Rozgrywający</option>
-                    <option value="Atakujący">Atakujący</option>
-                    <option value="Środkowy">Środkowy</option>
-                    <option value="Libero">Libero</option>
-                    <option value="Uniwersalny">Uniwersalny / Wszechstronny</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Numer na koszulce</label>
-                  <div className="relative">
-                    <Shirt className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      type="number"
-                      value={shirtNumber}
-                      onChange={(e) => setShirtNumber(e.target.value)}
-                      placeholder="7"
-                      className="w-full rounded-xl border border-input bg-background pl-10 pr-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring/30"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 pl-10 pr-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-blue-500 focus:bg-white"
                     />
                   </div>
                 </div>
               </div>
 
               <div className="flex justify-end pt-2">
-                <Button type="submit" className="gap-2 rounded-xl">
+                <Button type="submit" className="gap-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white">
                   <Save className="h-4 w-4" />
                   Zapisz profil zawodnika
                 </Button>
@@ -215,50 +214,50 @@ export default function SettingsPage() {
             </form>
           </div>
 
-          {/* Sekcja 2: Dane do Szybkich Wpłat (BLIK / Konto) */}
+          {/* Sekcja 2: Dane do Szybkich Wpłat (dla Admina) */}
           {isAdmin && (
-            <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-6">
-              <div className="flex items-center gap-3 border-b border-border pb-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500">
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-6">
+              <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100">
                   <CreditCard className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-foreground">Dane do Rozliczeń i Wpisowego</h2>
-                  <p className="text-xs text-muted-foreground">Numer BLIK i konto bankowe wyświetlane graczon przy wpłatach za mecze</p>
+                  <h2 className="text-sm font-black text-slate-900">Dane do Rozliczeń i Wpisowego</h2>
+                  <p className="text-xs text-slate-400 font-medium">Numer BLIK i konto bankowe wyświetlane graczom przy wpłatach</p>
                 </div>
               </div>
 
               <form onSubmit={handleSaveFinanceSettings} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Telefon do przelewu BLIK</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Telefon do przelewu BLIK</label>
                     <div className="relative">
-                      <Smartphone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Smartphone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                       <input
                         type="text"
                         value={blikNumber}
                         onChange={(e) => setBlikNumber(e.target.value)}
                         placeholder="+48 600 000 000"
-                        className="w-full rounded-xl border border-input bg-background pl-10 pr-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring/30"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 pl-10 pr-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-blue-500 focus:bg-white"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Numer konta bankowego (IBAN)</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Numer konta bankowego (IBAN)</label>
                     <input
                       type="text"
                       value={bankAccount}
                       onChange={(e) => setBankAccount(e.target.value)}
                       placeholder="00 0000 0000 0000 0000 0000 0000"
-                      className="w-full rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring/30 font-mono text-xs"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2.5 text-xs font-mono text-slate-900 outline-none focus:border-blue-500 focus:bg-white"
                     />
                   </div>
                 </div>
 
                 <div className="flex justify-end pt-2">
-                  <Button type="submit" variant="outline" className="gap-2 rounded-xl border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10">
-                    <Save className="h-4 w-4" />
+                  <Button type="submit" variant="outline" className="gap-2 rounded-xl text-xs font-bold border-slate-200">
+                    <Save className="h-4 w-4 text-emerald-600" />
                     Zapisz dane do wpłat
                   </Button>
                 </div>
@@ -267,45 +266,53 @@ export default function SettingsPage() {
           )}
 
           {/* Sekcja 3: Bezpieczeństwo i Hasło */}
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-6">
-            <div className="flex items-center gap-3 border-b border-border pb-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-500">
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-6">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 border border-amber-100">
                 <Lock className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-foreground">Bezpieczeństwo i Hasło</h2>
-                <p className="text-xs text-muted-foreground">Zmień swoje hasło dostępowe do aplikacji</p>
+                <h2 className="text-sm font-black text-slate-900">Bezpieczeństwo i Hasło</h2>
+                <p className="text-xs text-slate-400 font-medium">Zmień swoje hasło dostępowe do aplikacji</p>
               </div>
             </div>
+
+            {passwordError && (
+              <div className="flex items-center gap-2 rounded-2xl bg-rose-50 p-3 text-xs font-bold text-rose-600 border border-rose-100">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{passwordError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleChangePassword} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Nowe hasło</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Nowe hasło</label>
                   <input
                     type="password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring/30"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-blue-500 focus:bg-white"
                   />
+                  <p className="mt-1 text-[10px] text-slate-400">Min. 6 znaków, jedna wielka litera, znak specjalny (!@#$&*).</p>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Powtórz nowe hasło</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Powtórz nowe hasło</label>
                   <input
                     type="password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring/30"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-blue-500 focus:bg-white"
                   />
                 </div>
               </div>
 
               <div className="flex justify-end pt-2">
-                <Button type="submit" variant="outline" className="gap-2 rounded-xl">
-                  <KeyRound className="h-4 w-4" />
+                <Button type="submit" variant="outline" className="gap-2 rounded-xl text-xs font-bold border-slate-200">
+                  <KeyRound className="h-4 w-4 text-amber-600" />
                   Zmień hasło
                 </Button>
               </div>
@@ -313,70 +320,58 @@ export default function SettingsPage() {
           </div>
 
           {/* Sekcja 4: Powiadomienia */}
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">
-            <div className="flex items-center gap-3 border-b border-border pb-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500">
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-4">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-purple-50 text-purple-600 border border-purple-100">
                 <Bell className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-foreground">Kanały Powiadomień</h2>
-                <p className="text-xs text-muted-foreground">Wybierz, w jaki sposób chcesz otrzymywać powiadomienia meczowe</p>
+                <h2 className="text-sm font-black text-slate-900">Kanały Powiadomień</h2>
+                <p className="text-xs text-slate-400 font-medium">Wybierz, w jaki sposób chcesz otrzymywać powiadomienia meczowe</p>
               </div>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-4 text-xs">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">Powiadomienia e-mail o meczach</p>
-                  <p className="text-xs text-muted-foreground">Otrzymuj zaproszenie natychmiast po utworzeniu nowego meczu</p>
+                  <p className="font-bold text-slate-900">Powiadomienia e-mail o meczach</p>
+                  <p className="text-[11px] text-slate-400">Otrzymuj zaproszenie natychmiast po utworzeniu nowego meczu</p>
                 </div>
                 <input
                   type="checkbox"
                   checked={notifyEmail}
                   onChange={(e) => setNotifyEmail(e.target.checked)}
-                  className="h-5 w-5 rounded border-input text-primary focus:ring-primary/30 cursor-pointer"
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 cursor-pointer"
                 />
               </div>
 
-              <div className="flex items-center justify-between border-t border-border/60 pt-4">
+              <div className="flex items-center justify-between border-t border-slate-100 pt-3">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">Powiadomienia SMS / Pilne powiadomienia</p>
-                  <p className="text-xs text-muted-foreground">Szybki alert na telefon w przypadku odwołania spotkania</p>
+                  <p className="font-bold text-slate-900">Powiadomienia Push w przeglądarce</p>
+                  <p className="text-[11px] text-slate-400">Szybki alert w aplikacji w przypadku odwołania spotkania</p>
                 </div>
                 <input
                   type="checkbox"
-                  checked={notifySms}
-                  onChange={(e) => setNotifySms(e.target.checked)}
-                  className="h-5 w-5 rounded border-input text-primary focus:ring-primary/30 cursor-pointer"
-                />
-              </div>
-
-              <div className="flex items-center justify-between border-t border-border/60 pt-4">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Przypomnienia o nieopłaconych składkach</p>
-                  <p className="text-xs text-muted-foreground">Przypomnienie 24h przed meczem o braku wpłaty BLIK</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifyReminder}
-                  onChange={(e) => setNotifyReminder(e.target.checked)}
-                  className="h-5 w-5 rounded border-input text-primary focus:ring-primary/30 cursor-pointer"
+                  checked={notifyPush}
+                  onChange={(e) => setNotifyPush(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 cursor-pointer"
                 />
               </div>
             </div>
           </div>
 
-          {/* Sekcja 5: Eksport Danych / Eksport do CSV */}
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+          {/* Sekcja 5: Eksport Własnych Danych */}
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                <Download className="h-4 w-4 text-primary" />
-                Eksport danych zespołu
+              <h3 className="text-xs font-black text-slate-900 flex items-center gap-2">
+                <Download className="h-4 w-4 text-blue-600" />
+                Eksport Twoich danych zawodnika
               </h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Pobierz historię meczów i listę obecności zawodników w formacie JSON / CSV.</p>
+              <p className="text-[11px] text-slate-400 mt-0.5 font-medium">Pobierz zestawienie swoich rozegranych meczów i poniesionych opłat w formacie CSV.</p>
             </div>
-            <Button variant="secondary" onClick={() => showNotify("Wygenerowano raport danych zespołu!")} className="rounded-xl gap-2 text-xs">
-              Pobierz Raport (.CSV)
+            <Button onClick={exportMyData} variant="outline" className="rounded-xl gap-2 text-xs font-bold border-slate-200">
+              <Download className="h-4 w-4 text-blue-600" />
+              Pobierz Moje Statystyki (.CSV)
             </Button>
           </div>
 
@@ -384,7 +379,7 @@ export default function SettingsPage() {
       </div>
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-4 py-2.5 text-sm font-medium text-background shadow-lg">
+        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-xl">
           <CheckCircle2 className="h-4 w-4 text-emerald-400" />
           {toast}
         </div>

@@ -46,7 +46,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   useEffect(() => {
     const initial: Record<string, boolean> = {}
     roster.forEach((p) => {
-      initial[p.id] = p.paid || false
+      initial[p.id] = p.paid || p.is_paid || false
     })
     setPaidStatusMap(initial)
     setIsSettled(!!match.is_settled)
@@ -78,7 +78,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   const paidCount = Object.values(paidStatusMap).filter(Boolean).length
   const totalCollectedNow = paidCount * price
 
-  // Finalizacja rozliczenia i trwały zapis w Supabase
+  // Finalizacja rozliczenia i trwały zapis w Supabase (naprawione pod match_registrations)
   async function handleSettleAndSave() {
     if (isSettled) return
     setIsSaving(true)
@@ -86,7 +86,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     // 1. Zbudowanie zaktualizowanej listy zawodników ze statusami paid
     const updatedPlayers = match.players.map((p) => {
       if (paidStatusMap[p.id] !== undefined) {
-        return { ...p, paid: paidStatusMap[p.id] }
+        return { ...p, paid: paidStatusMap[p.id], is_paid: paidStatusMap[p.id] }
       }
       return p
     })
@@ -101,11 +101,10 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     onChange(updatedMatch)
     setIsSettled(true)
 
-    // 3. Zapis statusu rozliczenia w tabeli matches (czysty payload dla Supabase)
+    // 3. Zapis statusu rozliczenia w tabeli matches (bez nieistniejącej kolumny players)
     const { error: matchErr } = await supabase
       .from("matches")
       .update({
-        players: updatedPlayers,
         is_settled: true
       })
       .eq("id", match.id)
@@ -117,7 +116,16 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
       return
     }
 
-    // 4. Automatyczne dodanie wpisu przychodu do tabeli transactions (Księga Rozliczeń)
+    // 4. Aktualizacja statusów is_paid w tabeli match_registrations dla każdego gracza
+    for (const [playerId, isPaid] of Object.entries(paidStatusMap)) {
+      await supabase
+        .from("match_registrations")
+        .update({ is_paid: isPaid })
+        .eq("match_id", match.id)
+        .eq("player_id", playerId)
+    }
+
+    // 5. Automatyczne dodanie wpisu przychodu do tabeli transactions (Księga Rozliczeń)
     const collectorName = currentUser?.full_name || currentUser?.email?.split("@")[0] || "Mateusz Podzorski"
     const matchTitle = match.title || `Zbiórka na hali (${match.date})`
 
@@ -150,7 +158,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
         {/* Zamknięcie */}
         <button
           onClick={onClose}
-          className="absolute right-5 top-5 rounded-xl p-2 text-muted-foreground hover:bg-secondary transition-colors"
+          className="absolute right-5 top-5 rounded-xl p-2 text-muted-foreground hover:bg-secondary transition-colors cursor-pointer"
         >
           <X className="h-5 w-5" />
         </button>
@@ -205,7 +213,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
               ) : (
                 <Button
                   onClick={() => setIsCollectingMode(true)}
-                  className="w-full rounded-2xl py-3 font-bold gap-2 bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20"
+                  className="w-full rounded-2xl py-3 font-bold gap-2 bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20 cursor-pointer"
                 >
                   <Banknote className="h-5 w-5" />
                   Zbierz gotówkę na hali
@@ -271,7 +279,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
                 <p className="text-[11px] text-muted-foreground">Odznaczaj zawodników, od których odbierasz pieniądze do ręki.</p>
               </div>
 
-              <Button size="sm" variant="outline" onClick={checkAll} className="text-[10px] rounded-xl font-bold">
+              <Button size="sm" variant="outline" onClick={checkAll} className="text-[10px] rounded-xl font-bold cursor-pointer">
                 Zaznacz wszystkich
               </Button>
             </div>
@@ -326,14 +334,14 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={() => setIsCollectingMode(false)} className="rounded-xl">
+              <Button variant="outline" size="sm" onClick={() => setIsCollectingMode(false)} className="rounded-xl cursor-pointer">
                 Anuluj
               </Button>
               <Button
                 size="sm"
                 onClick={handleSettleAndSave}
                 disabled={isSaving}
-                className="rounded-xl font-bold bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5"
+                className="rounded-xl font-bold bg-emerald-600 hover:bg-emerald-500 text-white gap-1.5 cursor-pointer"
               >
                 <Receipt className="h-4 w-4" />
                 {isSaving ? "Księgowanie..." : "Zatwierdź i rozlicz w Finansach"}

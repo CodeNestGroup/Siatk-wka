@@ -22,10 +22,11 @@ type Announcement = {
   id: string
   title: string
   content: string
-  category: "important" | "general" | "equipment"
+  category_id: number // Zaktualizowane pod nową bazę (klucz obcy do announcements_category)
   is_pinned: boolean
   author: string
   created_at: string
+  match_id?: string
 }
 
 export default function AnnouncementsPage() {
@@ -37,18 +38,15 @@ export default function AnnouncementsPage() {
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
 
-  // Sprawdzanie uprawnień admina
   const isAdmin = user?.role === "admin" || user?.is_admin || user?.email === "admin@admin.pl" || user?.name === "Mateusz Podzorski" || user?.full_name === "Mateusz Podzorski"
 
-  // Formularz ogłoszenia
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [newTitle, setNewTitle] = useState("")
   const [newContent, setNewContent] = useState("")
-  const [newCategory, setNewCategory] = useState<"important" | "general" | "equipment">("general")
+  const [newCategoryId, setNewCategoryId] = useState<number>(2) // Domyślnie kategoria ogólna (np. ID 2)
   const [newIsPinned, setNewIsPinned] = useState(false)
   const [sendPushNotification, setSendPushNotification] = useState(true)
 
-  // 1. Pobieranie użytkownika z localStorage i ogłoszeń z Supabase
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
     if (localUser) {
@@ -80,7 +78,6 @@ export default function AnnouncementsPage() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  // Obsługa wylogowania
   async function handleLogout() {
     localStorage.removeItem("volley_user")
     localStorage.clear()
@@ -90,7 +87,6 @@ export default function AnnouncementsPage() {
     window.location.href = "/login"
   }
 
-  // 2. Trwałe zapisywanie nowego ogłoszenia w Supabase
   async function handleCreateAnnouncement(e: React.FormEvent) {
     e.preventDefault()
     if (!newTitle.trim() || !newContent.trim()) return
@@ -100,7 +96,7 @@ export default function AnnouncementsPage() {
     const newAnnouncement = {
       title: newTitle,
       content: newContent,
-      category: newCategory,
+      category_id: Number(newCategoryId), // Zapisujemy category_id zgodnie ze schematem
       is_pinned: newIsPinned,
       author: authorName,
     }
@@ -129,11 +125,10 @@ export default function AnnouncementsPage() {
     setIsModalOpen(false)
     setNewTitle("")
     setNewContent("")
-    setNewCategory("general")
+    setNewCategoryId(2)
     setNewIsPinned(false)
   }
 
-  // 3. Usuwanie z bazy Supabase
   async function handleDelete(id: string) {
     setAnnouncements((prev) => prev.filter((a) => a.id !== id))
     const { error } = await supabase.from('announcements').delete().eq('id', id)
@@ -146,7 +141,6 @@ export default function AnnouncementsPage() {
     }
   }
 
-  // 4. Przypinanie w bazie Supabase
   async function togglePin(id: string, currentPinned: boolean) {
     setAnnouncements((prev) =>
       prev.map((a) => (a.id === id ? { ...a, is_pinned: !currentPinned } : a))
@@ -162,14 +156,20 @@ export default function AnnouncementsPage() {
     const matchesSearch =
       a.title.toLowerCase().includes(search.toLowerCase()) ||
       a.content.toLowerCase().includes(search.toLowerCase())
-    const matchesCat = selectedCategory === "all" || a.category === selectedCategory
+
+    // Mapowanie filtrowania po kategorii ID (np. 1 = ważne, 2 = ogólne, 3 = sprzęt)
+    let matchesCat = true
+    if (selectedCategory === "important") matchesCat = a.category_id === 1
+    if (selectedCategory === "general") matchesCat = a.category_id === 2
+    if (selectedCategory === "equipment") matchesCat = a.category_id === 3
+
     return matchesSearch && matchesCat
   })
 
   const sorted = [...filtered].sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned))
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -179,22 +179,19 @@ export default function AnnouncementsPage() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Top bar */}
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-card/80 px-4 py-3 backdrop-blur lg:px-8">
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/80 px-6 py-3.5 backdrop-blur-md">
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="rounded-lg p-2 text-muted-foreground hover:bg-secondary lg:hidden"
-            >
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
               <Megaphone className="h-5 w-5" />
-            </button>
-            <h1 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2">
-              <Megaphone className="h-5 w-5 text-primary" />
-              Tablica Ogłoszeń
-            </h1>
+            </div>
+            <div>
+              <h1 className="text-xl font-black tracking-tight text-slate-900">Tablica Ogłoszeń</h1>
+              <p className="text-xs font-medium text-slate-500">Ważne komunikaty i informacje dla całego zespołu.</p>
+            </div>
           </div>
 
           {isAdmin && (
-            <Button size="sm" onClick={() => setIsModalOpen(true)} className="gap-1.5 rounded-xl font-bold">
+            <Button size="sm" onClick={() => setIsModalOpen(true)} className="gap-2 rounded-2xl font-bold bg-blue-600 hover:bg-blue-700 text-white text-xs shadow-md shadow-blue-500/20">
               <Plus className="h-4 w-4" />
               Dodaj ogłoszenie
             </Button>
@@ -202,21 +199,21 @@ export default function AnnouncementsPage() {
         </header>
 
         {/* Treść */}
-        <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 lg:px-8">
+        <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-6 py-8">
 
           <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
             <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Szukaj w ogłoszeniach…"
-                className="w-full rounded-xl border border-input bg-card py-2 pl-9 pr-3 text-xs outline-none focus:ring-2 focus:ring-primary/30"
+                className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all"
               />
             </div>
 
-            <div className="flex items-center gap-1 rounded-xl border border-border bg-card p-1 w-full sm:w-auto overflow-x-auto">
+            <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-white p-1 w-full sm:w-auto overflow-x-auto shadow-sm">
               {[
                 { key: "all", label: "Wszystkie" },
                 { key: "important", label: "🚨 Ważne" },
@@ -227,10 +224,10 @@ export default function AnnouncementsPage() {
                   key={f.key}
                   onClick={() => setSelectedCategory(f.key)}
                   className={cn(
-                    "rounded-lg px-3 py-1 text-xs font-semibold transition-colors shrink-0",
+                    "rounded-xl px-3.5 py-1.5 text-xs font-bold transition-colors shrink-0",
                     selectedCategory === f.key
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "text-slate-500 hover:text-slate-900"
                   )}
                 >
                   {f.label}
@@ -242,88 +239,103 @@ export default function AnnouncementsPage() {
           {/* Lista Ogłoszeń */}
           <div className="space-y-4">
             {isLoading ? (
-              <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
-                <p className="text-xs text-primary font-bold animate-pulse">Ładowanie ogłoszeń z bazy...</p>
+              <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+                <p className="text-xs text-blue-600 font-bold animate-pulse">Ładowanie ogłoszeń z bazy...</p>
               </div>
             ) : sorted.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
-                <p className="text-xs text-muted-foreground">Brak ogłoszeń na tablicy.</p>
+              <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+                <p className="text-xs text-slate-400">Brak ogłoszeń na tablicy.</p>
               </div>
             ) : (
-              sorted.map((item) => (
-                <div
-                  key={item.id}
-                  className={cn(
-                    "rounded-2xl border bg-card p-5 space-y-3 transition-all relative overflow-hidden shadow-sm",
-                    item.is_pinned ? "border-amber-500/40 bg-amber-500/[0.02]" : "border-border"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {item.is_pinned && (
-                          <span className="flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-500 border border-amber-500/20">
-                            <Pin className="h-3 w-3 fill-amber-500" />
-                            Przypięte
-                          </span>
-                        )}
+              sorted.map((item) => {
+                const isMatchAlert = item.match_id || item.title.toLowerCase().includes("odwołany")
 
-                        <span
-                          className={cn(
-                            "rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border",
-                            item.category === "important" && "bg-rose-500/15 text-rose-400 border-rose-500/20",
-                            item.category === "general" && "bg-blue-500/15 text-blue-400 border-blue-500/20",
-                            item.category === "equipment" && "bg-emerald-500/15 text-emerald-400 border-emerald-500/20"
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => {
+                      if (isMatchAlert) {
+                        window.location.href = "/"
+                      }
+                    }}
+                    className={cn(
+                      "rounded-3xl border bg-white p-5 space-y-3 transition-all relative overflow-hidden shadow-sm",
+                      isMatchAlert ? "border-rose-300 bg-rose-50/40 hover:border-rose-400 cursor-pointer" : item.is_pinned ? "border-amber-400 bg-amber-50/20" : "border-slate-200/90 hover:border-slate-300"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {item.is_pinned && (
+                            <span className="flex items-center gap-1 rounded-lg bg-amber-100 px-2.5 py-0.5 text-[10px] font-black text-amber-700 border border-amber-200">
+                              <Pin className="h-3 w-3 fill-amber-700" />
+                              Przypięte
+                            </span>
                           )}
-                        >
-                          {item.category === "important" && "🚨 Ważne"}
-                          {item.category === "general" && "📢 Ogólne"}
-                          {item.category === "equipment" && "🏐 Sprzęt"}
-                        </span>
+
+                          <span
+                            className={cn(
+                              "rounded-lg px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider border",
+                              item.category_id === 1 && "bg-rose-100 text-rose-700 border-rose-200",
+                              item.category_id === 2 && "bg-blue-100 text-blue-700 border-blue-200",
+                              item.category_id === 3 && "bg-emerald-100 text-emerald-700 border-emerald-200"
+                            )}
+                          >
+                            {item.category_id === 1 && "🚨 Ważne"}
+                            {item.category_id === 2 && "📢 Ogólne"}
+                            {item.category_id === 3 && "🏐 Sprzęt"}
+                          </span>
+
+                          {isMatchAlert && (
+                            <span className="rounded-lg bg-rose-600 text-white px-2.5 py-0.5 text-[10px] font-black uppercase">
+                              Kliknij, aby zobaczyć harmonogram
+                            </span>
+                          )}
+                        </div>
+
+                        <h3 className="text-base font-extrabold text-slate-900 leading-snug">{item.title}</h3>
                       </div>
 
-                      <h3 className="text-base font-bold text-foreground leading-snug">{item.title}</h3>
+                      {isAdmin && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); togglePin(item.id, item.is_pinned); }}
+                            className={cn(
+                              "p-2 rounded-xl transition-colors",
+                              item.is_pinned ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-slate-400 hover:bg-slate-100"
+                            )}
+                            title={item.is_pinned ? "Odepnij" : "Przypnij"}
+                          >
+                            <Pin className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
+                            className="p-2 rounded-xl text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                            title="Usuń ogłoszenie"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
-                    {isAdmin && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => togglePin(item.id, item.is_pinned)}
-                          className={cn(
-                            "p-1.5 rounded-lg transition-colors",
-                            item.is_pinned ? "text-amber-400 hover:bg-amber-500/10" : "text-muted-foreground hover:bg-secondary"
-                          )}
-                          title={item.is_pinned ? "Odepnij" : "Przypnij"}
-                        >
-                          <Pin className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(item.id)}
-                          className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors"
-                          title="Usuń ogłoszenie"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                    <p className="text-xs text-slate-600 font-medium leading-relaxed whitespace-pre-line">
+                      {item.content}
+                    </p>
 
-                  <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
-                    {item.content}
-                  </p>
-
-                  <div className="flex items-center justify-between border-t border-border/60 pt-3 text-[11px] text-muted-foreground">
-                    <span className="flex items-center gap-1.5 font-medium">
-                      <User className="h-3.5 w-3.5 text-primary" />
-                      {item.author}
-                    </span>
-                    <span className="flex items-center gap-1 text-muted-foreground/80">
-                      <Calendar className="h-3.5 w-3.5" />
-                      {new Date(item.created_at).toLocaleDateString("pl-PL")}
-                    </span>
+                    <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-[11px] text-slate-400 font-medium">
+                      <span className="flex items-center gap-1.5">
+                        <User className="h-3.5 w-3.5 text-blue-600" />
+                        {item.author}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Calendar className="h-3.5 w-3.5" />
+                        {new Date(item.created_at).toLocaleDateString("pl-PL")}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
         </main>
@@ -331,84 +343,84 @@ export default function AnnouncementsPage() {
 
       {/* Modal Nowego Ogłoszenia */}
       {isModalOpen && isAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-3xl border border-border bg-card p-6 shadow-2xl space-y-4">
-            <h2 className="text-lg font-bold text-foreground">Nowe Ogłoszenie</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4 text-slate-900">
+            <h2 className="text-base font-black">Nowe Ogłoszenie</h2>
 
-            <form onSubmit={handleCreateAnnouncement} className="space-y-4">
+            <form onSubmit={handleCreateAnnouncement} className="space-y-4 text-xs">
               <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1">Tytuł ogłoszenia</label>
+                <label className="block font-bold text-slate-700 mb-1">Tytuł ogłoszenia</label>
                 <input
                   type="text"
                   required
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   placeholder="np. Zmiana godziny piątkowego treningu"
-                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 font-medium outline-none focus:border-blue-500 focus:bg-white"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1">Kategoria</label>
+                <label className="block font-bold text-slate-700 mb-1">Kategoria</label>
                 <select
-                  value={newCategory}
-                  onChange={(e: any) => setNewCategory(e.target.value)}
-                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                  value={newCategoryId}
+                  onChange={(e) => setNewCategoryId(Number(e.target.value))}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 font-medium outline-none focus:border-blue-500 focus:bg-white"
                 >
-                  <option value="general">📢 Ogólne</option>
-                  <option value="important">🚨 Ważne / Pilne</option>
-                  <option value="equipment">🏐 Sprzęt / Sala</option>
+                  <option value={2}>📢 Ogólne</option>
+                  <option value={1}>🚨 Ważne / Pilne</option>
+                  <option value={3}>🏐 Sprzęt / Sala</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1">Treść ogłoszenia</label>
+                <label className="block font-bold text-slate-700 mb-1">Treść ogłoszenia</label>
                 <textarea
                   required
                   rows={4}
                   value={newContent}
                   onChange={(e) => setNewContent(e.target.value)}
                   placeholder="Wpisz szczegóły ogłoszenia..."
-                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 font-medium outline-none focus:border-blue-500 focus:bg-white resize-none"
                 />
               </div>
 
-              <div className="space-y-2 pt-1 border-t border-border/60">
+              <div className="space-y-3 pt-2 border-t border-slate-100">
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     id="pinCheck"
                     checked={newIsPinned}
                     onChange={(e) => setNewIsPinned(e.target.checked)}
-                    className="rounded border-input text-primary"
+                    className="rounded border-slate-300 text-blue-600 h-4 w-4"
                   />
-                  <label htmlFor="pinCheck" className="text-xs font-medium text-muted-foreground cursor-pointer">
+                  <label htmlFor="pinCheck" className="font-bold text-slate-700 cursor-pointer">
                     Przypnij na samej górze tablicy
                   </label>
                 </div>
 
-                <div className="flex items-center justify-between rounded-xl bg-primary/10 border border-primary/20 p-3">
+                <div className="flex items-center justify-between rounded-2xl bg-blue-50/70 border border-blue-100 p-3">
                   <div className="flex items-center gap-2">
-                    <BellRing className="h-4 w-4 text-primary" />
+                    <BellRing className="h-4 w-4 text-blue-600" />
                     <div>
-                      <p className="text-xs font-bold text-foreground">Powiadomienie Push w aplikacji</p>
-                      <p className="text-[10px] text-muted-foreground">Wyślij powiadomienie do apki mobilnej zawodników</p>
+                      <p className="font-bold text-slate-900">Powiadomienie Push w aplikacji</p>
+                      <p className="text-[10px] text-slate-400">Wyślij powiadomienie do apki mobilnej zawodników</p>
                     </div>
                   </div>
                   <input
                     type="checkbox"
                     checked={sendPushNotification}
                     onChange={(e) => setSendPushNotification(e.target.checked)}
-                    className="h-4 w-4 rounded border-input text-primary"
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => setIsModalOpen(false)} className="rounded-xl">
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} className="rounded-xl text-xs font-bold">
                   Anuluj
                 </Button>
-                <Button type="submit" size="sm" className="rounded-xl font-bold gap-1.5">
+                <Button type="submit" className="rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white text-xs gap-1.5">
                   <Send className="h-3.5 w-3.5" />
                   Opublikuj ogłoszenie
                 </Button>
@@ -419,7 +431,7 @@ export default function AnnouncementsPage() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-4 py-2.5 text-xs font-semibold text-background shadow-lg">
+        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-xl">
           <CheckCircle2 className="h-4 w-4 text-emerald-400" />
           {toast}
         </div>

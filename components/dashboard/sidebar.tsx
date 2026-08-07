@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -14,7 +14,6 @@ import {
   LogOut,
   X,
   ChevronDown,
-  User,
   Sun,
   Moon
 } from "lucide-react"
@@ -31,76 +30,81 @@ type SidebarProps = {
 export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
   const pathname = usePathname()
   const [profileOpen, setProfileOpen] = useState(false)
-  const [isDark, setIsDark] = useState(true)
+  const [isDark, setIsDark] = useState(false)
 
-  // Stany powiadomień (czerwonych kropek) dla poszczególnych zakładek
   const [unreadMatches, setUnreadMatches] = useState(false)
   const [unreadPlayers, setUnreadPlayers] = useState(false)
   const [unreadFinances, setUnreadFinances] = useState(false)
 
-  // Inicjalizacja motywu
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme")
-    if (savedTheme) {
-      const dark = savedTheme === "dark"
-      setIsDark(dark)
-      if (dark) {
-        document.documentElement.classList.add("dark")
-      } else {
-        document.documentElement.classList.remove("dark")
-      }
+    const dark = savedTheme === "dark"
+    setIsDark(dark)
+    if (dark) {
+      document.documentElement.classList.add("dark")
     } else {
-      const isSystemDark = document.documentElement.classList.contains("dark")
-      setIsDark(isSystemDark)
+      document.documentElement.classList.remove("dark")
     }
   }, [])
 
-  // Sprawdzanie zmian w bazie Supabase i aktualizacja kropek
-  useEffect(() => {
-    checkUnreadBadges()
+  const checkUnreadBadges = useCallback(async () => {
+    const readMatches = JSON.parse(localStorage.getItem("volley_read_matches") || "[]")
+    const readPlayers = JSON.parse(localStorage.getItem("volley_read_players") || "[]")
+    const readTxs = JSON.parse(localStorage.getItem("volley_read_txs") || "[]")
+
+    // 1. MECZE
+    if (pathname === "/") {
+      setUnreadMatches(false)
+    } else {
+      const { data: matches } = await supabase.from("matches").select("id").limit(50).order("created_at", { ascending: false })
+      setUnreadMatches(!!matches?.some(m => !readMatches.includes(String(m.id))))
+    }
+
+    // 2. ZAWODNICY
+    if (pathname === "/players") {
+      setUnreadPlayers(false)
+    } else {
+      const { data: pending } = await supabase.from("players").select("id").or("player_status_id.eq.3,role_id.eq.3")
+      setUnreadPlayers(!!pending?.some(p => !readPlayers.includes(String(p.id))))
+    }
+
+    // 3. FINANSE
+    if (pathname === "/finances") {
+      setUnreadFinances(false)
+    } else {
+      const { data: txs } = await supabase.from("transactions").select("id").limit(50).order("created_at", { ascending: false })
+      setUnreadFinances(!!txs?.some(t => !readTxs.includes(String(t.id))))
+    }
   }, [pathname])
 
-  async function checkUnreadBadges() {
-    const savedRead = JSON.parse(localStorage.getItem("volley_read_sidebar_sections") || "[]")
+  useEffect(() => {
+    checkUnreadBadges()
+    window.addEventListener("update-badges", checkUnreadBadges)
+    return () => {
+      window.removeEventListener("update-badges", checkUnreadBadges)
+    }
+  }, [checkUnreadBadges])
 
-    // 1. Sprawdzamy czy są mecze w bazie
-    const { data: matches } = await supabase.from("matches").select("id").limit(1)
-    if (matches && matches.length > 0 && !savedRead.includes("/") && pathname !== "/") {
-      setUnreadMatches(true)
-    } else {
+  // Gdy wchodzisz w zakładkę, natychmiast oznacza jej WSZYSTKIE rekordy jako odczytane
+  async function handleNavClick(path: string) {
+    if (path === "/") {
       setUnreadMatches(false)
+      const { data } = await supabase.from("matches").select("id")
+      localStorage.setItem("volley_read_matches", JSON.stringify(data?.map(d => String(d.id)) || []))
     }
-
-    // 2. Sprawdzamy czy są gracze oczekujący na zatwierdzenie ('pending')
-    const { data: pendingPlayers } = await supabase.from("players").select("id").eq("role", "pending")
-    if (pendingPlayers && pendingPlayers.length > 0 && pathname !== "/players") {
-      setUnreadPlayers(true)
-    } else {
+    if (path === "/players") {
       setUnreadPlayers(false)
+      const { data } = await supabase.from("players").select("id").or("player_status_id.eq.3,role_id.eq.3")
+      localStorage.setItem("volley_read_players", JSON.stringify(data?.map(d => String(d.id)) || []))
     }
-
-    // 3. Sprawdzamy nieprzeczytane transakcje w Finansach
-    const { data: txs } = await supabase.from("transactions").select("id").limit(1)
-    if (txs && txs.length > 0 && !savedRead.includes("/finances") && pathname !== "/finances") {
-      setUnreadFinances(true)
-    } else {
+    if (path === "/finances") {
       setUnreadFinances(false)
+      const { data } = await supabase.from("transactions").select("id")
+      localStorage.setItem("volley_read_txs", JSON.stringify(data?.map(d => String(d.id)) || []))
     }
-  }
-
-  // Funkcja czyszcząca kropkę po wejściu w dany dział
-  function handleNavClick(path: string) {
-    const savedRead = JSON.parse(localStorage.getItem("volley_read_sidebar_sections") || "[]")
-    if (!savedRead.includes(path)) {
-      const updated = [...savedRead, path]
-      localStorage.setItem("volley_read_sidebar_sections", JSON.stringify(updated))
-    }
-
-    if (path === "/") setUnreadMatches(false)
-    if (path === "/players") setUnreadPlayers(false)
-    if (path === "/finances") setUnreadFinances(false)
 
     if (onClose) onClose()
+    window.dispatchEvent(new Event("update-badges")) // Odświeża dzwonek
   }
 
   function toggleTheme() {
@@ -117,19 +121,9 @@ export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
 
   async function handleLogoutClick() {
     localStorage.removeItem("volley_user")
-    localStorage.clear()
     sessionStorage.clear()
-
-    try {
-      await supabase.auth.signOut()
-    } catch (e) {
-      console.error("Błąd wylogowania Supabase:", e)
-    }
-
-    if (onLogout) {
-      onLogout()
-    }
-
+    try { await supabase.auth.signOut() } catch (e) { console.error(e) }
+    if (onLogout) onLogout()
     window.location.href = "/login"
   }
 
@@ -148,150 +142,75 @@ export function Sidebar({ open, onClose, user, onLogout }: SidebarProps) {
 
   return (
     <>
-      {/* Tło nakładki dla wersji mobilnej */}
-      {open && (
-        <div
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
-          onClick={onClose}
-        />
-      )}
+      {open && <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" onClick={onClose} />}
 
-      {/* Kontener Bocznego Paska Nawigacji */}
-      <aside
-        className={cn(
-          "fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col justify-between border-r border-border bg-card text-card-foreground transition-transform duration-300 overflow-hidden lg:sticky lg:top-0 lg:translate-x-0",
-          open ? "translate-x-0" : "-translate-x-full"
-        )}
-      >
-        {/* Górna sekcja: Logo + Nawigacja */}
+      <aside className={cn("fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col justify-between border-r border-slate-800 bg-[#0F172A] text-slate-100 transition-transform duration-300 overflow-hidden lg:sticky lg:top-0 lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
         <div className="flex flex-col min-h-0">
-          {/* Nagłówek Sidebara / Logo */}
-          <div className="flex h-16 items-center justify-between px-6 border-b border-border/60 shrink-0">
-            <Link href="/" className="flex items-center gap-3 group">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold shadow-md shadow-primary/20 transition-transform group-hover:scale-105">
+          <div className="flex h-16 items-center justify-between px-6 border-b border-slate-800/80 shrink-0">
+            <div className="flex items-center gap-3 group">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white font-bold shadow-md shadow-blue-500/20">
                 <Volleyball className="h-5 w-5" />
               </div>
               <div>
-                <span className="font-extrabold tracking-tight text-foreground text-sm">VolleyManager</span>
-                <span className="block text-[10px] text-muted-foreground font-semibold">ESCO Volleyball</span>
+                <span className="font-extrabold tracking-tight text-white text-sm">VolleyManager</span>
+                <span className="block text-[10px] text-slate-400 font-semibold">ESCO Volleyball</span>
               </div>
-            </Link>
-
-            <button
-              onClick={onClose}
-              className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground lg:hidden"
-            >
+            </div>
+            <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white lg:hidden">
               <X className="h-5 w-5" />
             </button>
           </div>
 
-          {/* Menu Nawigacyjne */}
           <nav className="space-y-1.5 p-4 overflow-y-auto">
             {navItems.map((item) => {
               const isActive = pathname === item.href
               const Icon = item.icon
-
               return (
-                <Link
+                <button
                   key={item.href}
-                  href={item.href}
-                  onClick={() => handleNavClick(item.href)}
-                  className={cn(
-                    "relative flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all duration-200",
-                    isActive
-                      ? "bg-primary text-primary-foreground shadow-sm shadow-primary/30 font-bold"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-                  )}
+                  onClick={() => {
+                    handleNavClick(item.href)
+                    window.location.href = item.href // Bezpośrednie przejście linkiem zastąpione buttonem dla asynchronicznej akcji
+                  }}
+                  className={cn("w-full relative flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all duration-200", isActive ? "bg-blue-600 text-white shadow-sm shadow-blue-500/30 font-bold" : "text-slate-400 hover:bg-slate-800/60 hover:text-white cursor-pointer")}
                 >
                   <div className="flex items-center gap-3">
-                    <Icon className={cn("h-4 w-4", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+                    <Icon className={cn("h-4 w-4", isActive ? "text-white" : "text-slate-400")} />
                     <span>{item.label}</span>
                   </div>
-
                   <div className="flex items-center gap-1.5">
-                    {/* PLAKIETKA BADGE */}
-                    {item.badge && (
-                      <span className={cn(
-                        "rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider",
-                        isActive
-                          ? "bg-primary-foreground/20 text-primary-foreground"
-                          : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
-                      )}>
-                        {item.badge}
-                      </span>
-                    )}
-
-                    {/* CZERWONA KROPKA POWIADOMIENIA PRZY ZAKŁADCE */}
-                    {item.hasDot && (
-                      <span className="h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-card animate-pulse" />
-                    )}
+                    {item.badge && <span className={cn("rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider", isActive ? "bg-white/20 text-white" : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20")}>{item.badge}</span>}
+                    {item.hasDot && <span className="h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-[#0F172A] animate-pulse" />}
                   </div>
-                </Link>
+                </button>
               )
             })}
           </nav>
         </div>
 
-        {/* Sekcja Profilu Użytkownika na dole */}
-        <div className="p-3 border-t border-border/60 bg-secondary/30 shrink-0">
+        <div className="p-3 border-t border-slate-800/80 bg-slate-900/40 shrink-0">
           {profileOpen && (
-            <div className="mb-2 space-y-1 rounded-2xl border border-border bg-popover p-2 shadow-xl backdrop-blur">
-              <Link
-                href="/settings"
-                onClick={onClose}
-                className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
-              >
-                <User className="h-3.5 w-3.5 text-primary" />
-                Mój profil i dane
-              </Link>
-
-              <Link
-                href="/finances"
-                onClick={onClose}
-                className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
-              >
-                <Wallet className="h-3.5 w-3.5 text-emerald-400" />
-                Moje finanse i wpłaty
-              </Link>
-
-              <button
-                onClick={toggleTheme}
-                className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-              >
-                <span className="flex items-center gap-2">
-                  {isDark ? <Moon className="h-3.5 w-3.5 text-amber-400" /> : <Sun className="h-3.5 w-3.5 text-amber-500" />}
-                  Motyw {isDark ? "Ciemny" : "Jasny"}
-                </span>
-                <span className="text-[10px] font-bold text-muted-foreground uppercase">{isDark ? "DARK" : "LIGHT"}</span>
+            <div className="mb-2 space-y-1 rounded-2xl border border-slate-800 bg-slate-900 p-2 shadow-xl">
+              <button onClick={toggleTheme} className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer">
+                <span className="flex items-center gap-2">{isDark ? <Moon className="h-3.5 w-3.5 text-amber-400" /> : <Sun className="h-3.5 w-3.5 text-amber-500" />} Motyw {isDark ? "Ciemny" : "Jasny"}</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase">{isDark ? "DARK" : "LIGHT"}</span>
               </button>
-
-              <div className="pt-1 border-t border-border/60">
-                <button
-                  type="button"
-                  onClick={handleLogoutClick}
-                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-rose-400 hover:bg-rose-500/10 transition-colors"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  Wyloguj się
+              <div className="pt-1 border-t border-slate-800">
+                <button type="button" onClick={handleLogoutClick} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer">
+                  <LogOut className="h-3.5 w-3.5" /> Wyloguj się
                 </button>
               </div>
             </div>
           )}
-
-          <button
-            onClick={() => setProfileOpen(!profileOpen)}
-            className="flex w-full items-center justify-between rounded-2xl p-2 hover:bg-secondary transition-colors"
-          >
+          <button onClick={() => setProfileOpen(!profileOpen)} className="flex w-full items-center justify-between rounded-2xl p-2 hover:bg-slate-800/60 transition-colors cursor-pointer">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/20 text-primary font-bold text-xs border border-primary/30">
-                {avatarLetter}
-              </div>
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600/20 text-blue-400 font-bold text-xs border border-blue-500/30">{avatarLetter}</div>
               <div className="min-w-0 text-left">
-                <p className="text-xs font-bold text-foreground truncate">{userName}</p>
-                <p className="text-[10px] text-muted-foreground truncate">{userRoleText}</p>
+                <p className="text-xs font-bold text-white truncate">{userName}</p>
+                <p className="text-[10px] text-slate-400 truncate">{userRoleText}</p>
               </div>
             </div>
-            <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform duration-200", profileOpen && "rotate-180")} />
+            <ChevronDown className={cn("h-4 w-4 text-slate-400 transition-transform duration-200", profileOpen && "rotate-180")} />
           </button>
         </div>
       </aside>

@@ -1,17 +1,28 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Users, Search, Trash2, Calendar, Plus, X, Mail, CheckCircle, Clock, CheckCircle2, UserCheck } from "lucide-react"
+import { Users, Search, Trash2, Calendar, Plus, X, Mail, CheckCircle, Clock, CheckCircle2 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
+import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
 import { supabase } from "@/lib/supabase"
 import { Badge } from "@/components/dashboard/ui-bits"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
+
+const sponsors = [
+  { code: "BSC", name: "Beskid Sport Center", desc: "Partner Sprzętowy", color: "bg-emerald-100 text-emerald-700" },
+  { code: "SKO", name: "Skoczów Park", desc: "Oficjalny Partner", color: "bg-amber-100 text-amber-700" },
+  { code: "VOLLEY", name: "VolleyStore", desc: "Sklep Siatkarski", color: "bg-purple-100 text-purple-700" },
+  { code: "AZ", name: "AZ-Cloud Solutions", desc: "Infrastruktura IT", color: "bg-blue-100 text-blue-700" },
+  { code: "ESCO", name: "ESCO Jaworze", desc: "Sponsor Tytularny", color: "bg-indigo-100 text-indigo-700" },
+]
 
 type GlobalPlayer = {
   id: string
   full_name: string
   email?: string
-  role?: string
+  player_status_id?: number
+  role_id?: number
   created_at?: string
   matches_count?: number
   total_paid?: number
@@ -45,6 +56,7 @@ export default function PlayersPage() {
   const isAdmin =
     user?.role === "admin" ||
     user?.is_admin ||
+    user?.role_id === 1 ||
     user?.email === "admin@admin.pl" ||
     user?.name === "Mateusz Podzorski" ||
     user?.full_name === "Mateusz Podzorski"
@@ -69,11 +81,10 @@ export default function PlayersPage() {
     window.location.href = "/login"
   }
 
-  // Pobieranie zawodników oraz ich statystyk z Supabase
+  // Pobieranie zawodników z uwzględnieniem player_status_id lub role_id jako pending
   async function fetchPlayers() {
     setIsLoading(true)
 
-    // 1. Pobranie graczy z Supabase
     const { data: dbPlayers, error: dbError } = await supabase
       .from('players')
       .select('*')
@@ -83,7 +94,6 @@ export default function PlayersPage() {
       console.error("Błąd pobierania graczy z Supabase:", dbError.message)
     }
 
-    // 2. Pobranie meczów i rejestracji/składów
     const { data: regData } = await supabase.from('match_registrations').select('*')
     const { data: matchesData } = await supabase.from('matches').select('*')
 
@@ -95,7 +105,6 @@ export default function PlayersPage() {
     const counts: Record<string, number> = {}
     const paidSums: Record<string, number> = {}
 
-    // A. Zliczanie z tabeli match_registrations
     regData?.forEach((reg: any) => {
       const pid = reg.player_id || reg.player || reg.player_name || reg.name
       if (!pid) return
@@ -108,7 +117,6 @@ export default function PlayersPage() {
       }
     })
 
-    // B. Zliczanie z tablicy `players` w tabeli `matches`
     matchesData?.forEach((m: any) => {
       if (Array.isArray(m.players)) {
         m.players.forEach((p: any) => {
@@ -118,7 +126,7 @@ export default function PlayersPage() {
           const key = String(pid).toLowerCase().trim()
           if (!regData || regData.length === 0) {
             counts[key] = (counts[key] || 0) + 1
-            if (p.paid) {
+            if (p.paid || p.is_paid) {
               paidSums[key] = (paidSums[key] || 0) + Number(m.price_per_player || 25)
             }
           }
@@ -146,13 +154,15 @@ export default function PlayersPage() {
           id: p.id,
           full_name: fullName,
           email: p.email || "Brak e-maila",
-          role: p.role,
+          player_status_id: p.player_status_id,
+          role_id: p.role_id,
           created_at: p.created_at,
           matches_count: matchesCount,
           total_paid: totalPaid,
         }
 
-        if (p.role === "pending") {
+        // Sprawdzamy status 3, role_id 3 (pending) lub pole tekstowe role
+        if (p.player_status_id === 3 || p.role_id === 3 || p.role === "pending") {
           pendingList.push(playerObj)
         } else {
           activeList.push(playerObj)
@@ -169,11 +179,11 @@ export default function PlayersPage() {
     setIsLoading(false)
   }
 
-  // Zatwierdzanie konta gracza (zmiana 'pending' -> 'user')
+  // Zatwierdzanie konta -> ustawiamy role_id na 2 (zwykły użytkownik) oraz status na 1/2
   async function approvePlayer(id: string) {
     const { error } = await supabase
       .from('players')
-      .update({ role: 'user' })
+      .update({ role_id: 2, player_status_id: 2 })
       .eq('id', id)
 
     if (error) {
@@ -183,7 +193,6 @@ export default function PlayersPage() {
     }
   }
 
-  // Odrzucenie konta gracza (usunięcie z bazy)
   async function rejectPlayer(id: string) {
     if (!confirm("Czy na pewno chcesz odrzucić i usunąć to zgłoszenie?")) return
 
@@ -196,7 +205,6 @@ export default function PlayersPage() {
     }
   }
 
-  // Zapis do Supabase (ręcznie dodany przez Admina)
   async function handleAddPlayer(e: React.FormEvent) {
     e.preventDefault()
     if (!newFullName.trim()) return
@@ -211,7 +219,8 @@ export default function PlayersPage() {
         {
           full_name: newFullName.trim(),
           email: emailToUse,
-          role: 'user'
+          player_status_id: 2,
+          role_id: 2
         }
       ])
 
@@ -228,7 +237,6 @@ export default function PlayersPage() {
     setIsSubmitting(false)
   }
 
-  // KOMPLEKSOWE USUWANIE ZAWODNIKA Z CAŁEJ BAZY (Tabel: players, match_registrations oraz kolumny JSONB players w matches)
   async function deletePlayer(id: string, e: React.MouseEvent) {
     e.stopPropagation()
 
@@ -239,10 +247,8 @@ export default function PlayersPage() {
 
     const pName = playerToDelete.full_name.toLowerCase().trim()
 
-    // 1. Usuwamy wpisy z tabeli match_registrations
     await supabase.from('match_registrations').delete().eq('player_id', id)
 
-    // 2. Czyszczenie zawodnika ze wszystkich meczów w tabeli matches (kolumna JSONB)
     const { data: matches } = await supabase.from('matches').select('*')
 
     if (matches && matches.length > 0) {
@@ -262,7 +268,6 @@ export default function PlayersPage() {
       }
     }
 
-    // 3. Usuwamy gracza z tabeli głównej players
     const { error } = await supabase.from('players').delete().eq('id', id)
 
     if (error) {
@@ -302,7 +307,7 @@ export default function PlayersPage() {
             match_date: m.date || "Brak daty",
             location: m.location || "Nieznana hala",
             status: found.role === "waitlist" ? "Rezerwa" : "Główny skład",
-            paid: !!found.paid,
+            paid: !!found.paid || !!found.is_paid,
             fee: Number(m.price_per_player || 25),
           })
         }
@@ -319,7 +324,7 @@ export default function PlayersPage() {
   )
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -328,40 +333,66 @@ export default function PlayersPage() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-background/80 px-4 py-3 backdrop-blur lg:px-8">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="search"
-              placeholder="Szukaj zawodnika lub e-mail..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-xl border border-input bg-card py-2 pl-9 pr-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30"
+        {/* GÓRNY PASEK ZE SPONSORAMI I DZWONKIEM */}
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/80 px-6 py-3.5 backdrop-blur-md">
+          <style jsx>{`
+            @keyframes marquee { 0% { transform: translateX(0%); } 100% { transform: translateX(-50%); } }
+            .animate-marquee { display: flex; width: max-content; animation: marquee 30s linear infinite; }
+            .animate-marquee:hover { animation-play-state: paused; }
+          `}</style>
+          <div className="flex-1 overflow-hidden">
+            <div className="animate-marquee gap-8 flex items-center">
+              {[...sponsors, ...sponsors].map((s, index) => (
+                <div key={index} className="flex items-center gap-2 shrink-0">
+                  <span className={cn("flex h-6 w-6 items-center justify-center rounded-lg font-black text-[9px]", s.color)}>{s.code}</span>
+                  <span className="text-xs font-extrabold text-slate-500">{s.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0 ml-6">
+            <NotificationsBell
+              onNotificationClick={(notif: NotificationItem) => {
+                // opcjonalna obsługa
+              }}
             />
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-4 py-6 lg:px-8">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-                <Users className="h-6 w-6 text-primary" />
-                Baza Zawodników
-              </h1>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Zarządzaj składem, sprawdzaj historię obecności i wpłat zawodników z bazy.
-              </p>
+        <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-4 py-8 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
+                <Users className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-foreground">Baza Zawodników</h1>
+                <p className="text-xs text-muted-foreground">
+                  Zarządzaj składem, sprawdzaj historię obecności i wpłat zawodników z bazy.
+                </p>
+              </div>
             </div>
 
             {isAdmin && (
-              <Button size="sm" className="gap-2 rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setIsAdding(true)}>
+              <Button size="sm" className="gap-2 rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer" onClick={() => setIsAdding(true)}>
                 <Plus className="h-4 w-4" />
                 Dodaj zawodnika do bazy
               </Button>
             )}
           </div>
 
-          {/* BANER ZATWIERDZANIA NOWYCH KONTA PRZEZ ADMINA */}
+          <div className="relative w-full max-w-md">
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="search"
+              placeholder="Szukaj zawodnika po imieniu lub e-mailu..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-2xl border border-input bg-card py-2.5 pl-10 pr-4 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30 shadow-sm transition-all"
+            />
+          </div>
+
           {isAdmin && pendingPlayers.length > 0 && (
             <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-3">
               <div className="flex items-center justify-between">
@@ -383,7 +414,7 @@ export default function PlayersPage() {
                       <Button
                         size="sm"
                         onClick={() => approvePlayer(p.id)}
-                        className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] gap-1 h-8"
+                        className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] gap-1 h-8 cursor-pointer"
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" /> Zatwierdź
                       </Button>
@@ -391,7 +422,7 @@ export default function PlayersPage() {
                         size="sm"
                         variant="ghost"
                         onClick={() => rejectPlayer(p.id)}
-                        className="rounded-xl hover:bg-destructive/10 text-destructive font-bold text-[11px] h-8"
+                        className="rounded-xl hover:bg-destructive/10 text-destructive font-bold text-[11px] h-8 cursor-pointer"
                       >
                         Odrzuć
                       </Button>
@@ -411,7 +442,7 @@ export default function PlayersPage() {
           ) : filteredPlayers.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
               <p className="text-xs text-muted-foreground">
-                Brak zawodników w bazie danych. Kliknij przycisk powyżej, aby dodać pierwszego gracza!
+                Brak zawodników odpowiadających kryteriom wyszukiwania.
               </p>
             </div>
           ) : (
@@ -426,47 +457,75 @@ export default function PlayersPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
-                  {filteredPlayers.map((player) => (
-                    <tr
-                      key={player.id}
-                      onClick={() => openPlayerHistory(player)}
-                      className="group transition-all hover:bg-secondary/30 cursor-pointer"
-                    >
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary font-black text-xs border border-primary/20">
-                            {player.full_name?.charAt(0).toUpperCase()}
-                          </span>
-                          <div>
-                            <p className="font-bold text-foreground group-hover:text-primary transition-colors">{player.full_name}</p>
-                            <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                              <Mail className="h-3 w-3 text-primary/70" />
-                              {player.email}
-                            </p>
+                  {filteredPlayers.map((player) => {
+                    const isCurrentUser =
+                      user?.id === player.id ||
+                      user?.email?.toLowerCase() === player.email?.toLowerCase() ||
+                      user?.full_name?.toLowerCase() === player.full_name?.toLowerCase() ||
+                      user?.name?.toLowerCase() === player.full_name?.toLowerCase()
+
+                    return (
+                      <tr
+                        key={player.id}
+                        onClick={() => openPlayerHistory(player)}
+                        className={cn(
+                          "group transition-all cursor-pointer",
+                          isCurrentUser
+                            ? "bg-blue-50/80 hover:bg-blue-100/80 dark:bg-blue-950/30 font-semibold"
+                            : "hover:bg-secondary/30"
+                        )}
+                      >
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <span className={cn(
+                              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-black text-xs border",
+                              isCurrentUser
+                                ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                                : "bg-primary/10 text-primary border-primary/20"
+                            )}>
+                              {player.full_name?.charAt(0).toUpperCase()}
+                            </span>
+                            <div>
+                              <p className={cn(
+                                "font-bold transition-colors flex items-center gap-1.5",
+                                isCurrentUser ? "text-blue-600 font-extrabold" : "text-foreground group-hover:text-primary"
+                              )}>
+                                <span>{player.full_name}</span>
+                                {isCurrentUser && (
+                                  <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                                    (Ty)
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                                <Mail className="h-3 w-3 text-primary/70" />
+                                {player.email}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <Badge tone={player.matches_count && player.matches_count > 0 ? "success" : "neutral"}>
-                          {player.matches_count || 0} {player.matches_count === 1 ? "mecz" : "meczy"}
-                        </Badge>
-                      </td>
-                      <td className="px-6 py-4 font-bold text-foreground">
-                        <span className="text-emerald-500">{player.total_paid || 0} PLN</span>
-                      </td>
-                      {isAdmin && (
-                        <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={(e) => deletePlayer(player.id, e)}
-                            className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-destructive/10 hover:text-destructive"
-                            aria-label="Usuń zawodnika"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
                         </td>
-                      )}
-                    </tr>
-                  ))}
+                        <td className="px-6 py-4">
+                          <Badge tone={player.matches_count && player.matches_count > 0 ? "success" : "neutral"}>
+                            {player.matches_count || 0} {player.matches_count === 1 ? "mecz" : "meczy"}
+                          </Badge>
+                        </td>
+                        <td className="px-6 py-4 font-bold text-foreground">
+                          <span className="text-emerald-500">{player.total_paid || 0} PLN</span>
+                        </td>
+                        {isAdmin && (
+                          <td className="px-6 py-4 text-right">
+                            <button
+                              onClick={(e) => deletePlayer(player.id, e)}
+                              className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-destructive/10 hover:text-destructive cursor-pointer"
+                              aria-label="Usuń zawodnika"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -474,13 +533,12 @@ export default function PlayersPage() {
         </main>
       </div>
 
-      {/* MODAL: Dodawanie zawodnika */}
       {isAdding && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-foreground/50 backdrop-blur-sm">
           <form onSubmit={handleAddPlayer} className="relative w-full max-w-md rounded-3xl bg-card p-6 shadow-2xl border border-border space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h2 className="text-base font-bold text-foreground">Dodaj nowego zawodnika do bazy</h2>
-              <button type="button" onClick={() => setIsAdding(false)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary">
+              <button type="button" onClick={() => setIsAdding(false)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary cursor-pointer">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -510,14 +568,13 @@ export default function PlayersPage() {
             </div>
 
             <div className="pt-2 flex justify-end gap-2 border-t border-border">
-              <Button type="button" variant="outline" size="sm" onClick={() => setIsAdding(false)} className="rounded-xl">Anuluj</Button>
-              <Button type="submit" size="sm" disabled={isSubmitting} className="rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white">{isSubmitting ? "Zapisywanie w bazie..." : "Zapisz w bazie"}</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setIsAdding(false)} className="rounded-xl cursor-pointer">Anuluj</Button>
+              <Button type="submit" size="sm" disabled={isSubmitting} className="rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer">{isSubmitting ? "Zapisywanie w bazie..." : "Zapisz w bazie"}</Button>
             </div>
           </form>
         </div>
       )}
 
-      {/* MODAL: Historia obecności */}
       {selectedPlayer && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-foreground/50 backdrop-blur-sm">
           <div className="relative w-full max-w-lg rounded-3xl bg-card p-6 shadow-2xl max-h-[85vh] flex flex-col border border-border">
@@ -526,7 +583,7 @@ export default function PlayersPage() {
                 <h2 className="text-base font-bold text-foreground">{selectedPlayer.full_name}</h2>
                 <p className="text-xs text-muted-foreground">{selectedPlayer.email}</p>
               </div>
-              <button onClick={() => setSelectedPlayer(null)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary">
+              <button onClick={() => setSelectedPlayer(null)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary cursor-pointer">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -561,7 +618,7 @@ export default function PlayersPage() {
             </div>
 
             <div className="mt-4 pt-3 border-t border-border flex justify-end">
-              <Button variant="outline" size="sm" onClick={() => setSelectedPlayer(null)} className="rounded-xl">Zamknij</Button>
+              <Button variant="outline" size="sm" onClick={() => setSelectedPlayer(null)} className="rounded-xl cursor-pointer">Zamknij</Button>
             </div>
           </div>
         </div>

@@ -9,13 +9,20 @@ import {
   Crown,
   Percent,
   Search,
-  ArrowLeft,
   Loader2
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
-import Link from "next/link"
+import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
 import { supabase } from "@/lib/supabase"
 import { cn } from "@/lib/utils"
+
+const sponsors = [
+  { code: "BSC", name: "Beskid Sport Center", desc: "Partner Sprzętowy", color: "bg-emerald-100 text-emerald-700" },
+  { code: "SKO", name: "Skoczów Park", desc: "Oficjalny Partner", color: "bg-amber-100 text-amber-700" },
+  { code: "VOLLEY", name: "VolleyStore", desc: "Sklep Siatkarski", color: "bg-purple-100 text-purple-700" },
+  { code: "AZ", name: "AZ-Cloud Solutions", desc: "Infrastruktura IT", color: "bg-blue-100 text-blue-700" },
+  { code: "ESCO", name: "ESCO Jaworze", desc: "Sponsor Tytularny", color: "bg-indigo-100 text-indigo-700" },
+]
 
 export default function StatsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -37,15 +44,36 @@ export default function StatsPage() {
     loadStatsData()
   }, [])
 
+  // Poprawione pobieranie z bazy uwzględniające relacje w Supabase (match_registrations)
   async function loadStatsData() {
     setIsLoading(true)
 
-    const [{ data: matchesData }, { data: playersData }] = await Promise.all([
+    const [{ data: matchesData }, { data: playersData }, { data: registrationsData }] = await Promise.all([
       supabase.from("matches").select("*"),
-      supabase.from("players").select("*")
+      supabase.from("players").select("*"),
+      supabase.from("match_registrations").select("*")
     ])
 
-    setMatches(matchesData || [])
+    // Doklejamy zarejestrowanych graczy z nowej tabeli do każdego meczu, żeby statystyki widziały obecność i wpłaty
+    const processedMatches = (matchesData || []).map((match: any) => {
+      const matchRegs = (registrationsData || []).filter((r: any) => r.match_id === match.id)
+      const matchPlayers = matchRegs.map((reg: any) => {
+        const foundPlayer = (playersData || []).find((p: any) => p.id === reg.player_id)
+        return {
+          id: reg.player_id,
+          name: foundPlayer?.full_name || foundPlayer?.name || "Zawodnik",
+          full_name: foundPlayer?.full_name || foundPlayer?.name || "Zawodnik",
+          paid: reg.is_paid || reg.paid
+        }
+      })
+
+      return {
+        ...match,
+        players: matchPlayers.length > 0 ? matchPlayers : (match.players || [])
+      }
+    })
+
+    setMatches(processedMatches)
     setPlayers(playersData || [])
     setIsLoading(false)
   }
@@ -59,8 +87,12 @@ export default function StatsPage() {
     window.location.href = "/login"
   }
 
-  // === PRZELICZANIE STATYSTYK ===
-  const totalMatches = matches.length
+  // Zliczanie statystyk z meczów rozegranych lub rozliczonych (status_id lub is_settled)
+  const completedMatches = useMemo(() => {
+    return matches.filter(m => m.status_id === 2 || m.status_id === 3 || m.is_settled === true || m.status === "past")
+  }, [matches])
+
+  const totalMatches = completedMatches.length
 
   const playerStats = useMemo(() => {
     const statsMap: Record<string, { name: string; matches: number; paidCount: number; unpaidCount: number }> = {}
@@ -72,7 +104,7 @@ export default function StatsPage() {
       }
     })
 
-    matches.forEach((m) => {
+    completedMatches.forEach((m) => {
       if (Array.isArray(m.players)) {
         m.players.forEach((p: any) => {
           const pName = p.name || p.full_name
@@ -83,7 +115,7 @@ export default function StatsPage() {
           }
 
           statsMap[pName].matches += 1
-          if (p.paid) {
+          if (p.paid || p.is_paid) {
             statsMap[pName].paidCount += 1
           } else {
             statsMap[pName].unpaidCount += 1
@@ -93,16 +125,16 @@ export default function StatsPage() {
     })
 
     return Object.values(statsMap).sort((a, b) => b.matches - a.matches)
-  }, [matches, players])
+  }, [completedMatches, players])
 
   const topPlayer = playerStats[0] || { name: "Brak danych", matches: 0 }
 
-  const totalRosterEntries = matches.reduce((acc, m) => acc + (Array.isArray(m.players) ? m.players.length : 0), 0)
+  const totalRosterEntries = completedMatches.reduce((acc, m) => acc + (Array.isArray(m.players) ? m.players.length : 0), 0)
   const avgAttendance = totalMatches > 0 ? (totalRosterEntries / totalMatches).toFixed(1) : "0"
 
-  const totalPaidEntries = matches.reduce((acc, m) => {
+  const totalPaidEntries = completedMatches.reduce((acc, m) => {
     if (Array.isArray(m.players)) {
-      return acc + m.players.filter((p: any) => p.paid).length
+      return acc + m.players.filter((p: any) => p.paid || p.is_paid).length
     }
     return acc
   }, 0)
@@ -111,6 +143,8 @@ export default function StatsPage() {
   const filteredPlayerStats = playerStats.filter((p) =>
     p.name.toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  if (!user) return null
 
   return (
     <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
@@ -122,29 +156,51 @@ export default function StatsPage() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <main className="mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8">
-
-          <Link href="/" className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-900 transition-colors">
-            <ArrowLeft className="h-4 w-4" />
-            Powrót do pulpitu
-          </Link>
-
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2.5">
-                <BarChart3 className="h-7 w-7 text-blue-600" />
-                Statystyki Zespołu
-              </h1>
-              <p className="mt-1 text-xs font-medium text-slate-500">
-                Podsumowanie występów, frekwencji i terminowości wpłat w obecnym sezonie.
-              </p>
+        {/* Ustandaryzowany górny pasek ze sponsorami i dzwoneczkiem */}
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/80 px-6 py-3.5 backdrop-blur-md">
+          <style jsx>{`
+            @keyframes marquee { 0% { transform: translateX(0%); } 100% { transform: translateX(-50%); } }
+            .animate-marquee { display: flex; width: max-content; animation: marquee 30s linear infinite; }
+            .animate-marquee:hover { animation-play-state: paused; }
+          `}</style>
+          <div className="flex-1 overflow-hidden">
+            <div className="animate-marquee gap-8 flex items-center">
+              {[...sponsors, ...sponsors].map((s, index) => (
+                <div key={index} className="flex items-center gap-2 shrink-0">
+                  <span className={cn("flex h-6 w-6 items-center justify-center rounded-lg font-black text-[9px]", s.color)}>{s.code}</span>
+                  <span className="text-xs font-extrabold text-slate-500">{s.name}</span>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* NOWE, CZYSTE KAFELKI PODSUMOWANIA (KPI) */}
+          <div className="flex items-center gap-3 shrink-0 ml-6">
+            <NotificationsBell
+              onNotificationClick={(notif: NotificationItem) => {
+                // obsługa powiadomień
+              }}
+            />
+          </div>
+        </header>
+
+        <main className="mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8">
+
+          {/* Nagłówek spójny z resztą aplikacji */}
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
+                <BarChart3 className="h-5 w-5" />
+              </div>
+              <div>
+                <h1 className="text-xl font-black tracking-tight text-slate-900">Statystyki Zespołu</h1>
+                <p className="text-xs font-medium text-slate-500">Podsumowanie występów, frekwencji i terminowości wpłat w obecnym sezonie.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Kafelki Podsumowania */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
-            {/* Lider Frekwencji - Złoty / Amber */}
             <div className="rounded-3xl border border-amber-200/80 bg-gradient-to-br from-amber-50/60 to-white p-5 shadow-sm flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600">Lider Frekwencji</p>
@@ -158,19 +214,17 @@ export default function StatsPage() {
               </div>
             </div>
 
-            {/* Rozegrane Sesje - Niebieski */}
             <div className="rounded-3xl border border-blue-200/80 bg-gradient-to-br from-blue-50/60 to-white p-5 shadow-sm flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-blue-600">Rozegrane Sesje</p>
                 <h3 className="mt-1 text-xl font-black text-slate-900">{totalMatches} Meczów</h3>
-                <p className="mt-0.5 text-[11px] font-medium text-slate-400">Łącznie w sezonie</p>
+                <p className="mt-0.5 text-[11px] font-medium text-slate-400">Rozliczone w sezonie</p>
               </div>
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 border border-blue-200/50">
                 <Calendar className="h-6 w-6" />
               </div>
             </div>
 
-            {/* Średnia Frekwencja - Fioletowy */}
             <div className="rounded-3xl border border-purple-200/80 bg-gradient-to-br from-purple-50/60 to-white p-5 shadow-sm flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-purple-600">Średnia Frekwencja</p>
@@ -182,7 +236,6 @@ export default function StatsPage() {
               </div>
             </div>
 
-            {/* Wpłacalność Składek - Zielony / Emerald */}
             <div className="rounded-3xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/60 to-white p-5 shadow-sm flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600">Wpłacalność Składek</p>
@@ -243,8 +296,13 @@ export default function StatsPage() {
                         const participationRate = totalMatches > 0 ? Math.round((p.matches / totalMatches) * 100) : 0
                         const isTop3 = idx < 3
 
+                        const isCurrentUser =
+                          user?.id === p.name ||
+                          user?.full_name?.toLowerCase() === p.name.toLowerCase() ||
+                          user?.name?.toLowerCase() === p.name.toLowerCase()
+
                         return (
-                          <tr key={p.name} className="hover:bg-slate-50/80 transition-colors">
+                          <tr key={p.name} className={cn("transition-colors", isCurrentUser ? "bg-blue-50/80 font-semibold" : "hover:bg-slate-50/80")}>
                             <td className="p-4 font-black">
                               {idx === 0 && <span className="inline-flex items-center gap-1 text-amber-500"><Crown className="h-4 w-4" /> #1</span>}
                               {idx === 1 && <span className="text-slate-400">#2</span>}
@@ -256,11 +314,13 @@ export default function StatsPage() {
                               <div className="flex items-center gap-3">
                                 <span className={cn(
                                   "flex h-8 w-8 items-center justify-center rounded-xl font-black text-xs border",
-                                  isTop3 ? "bg-amber-100 text-amber-700 border-amber-200" : "bg-slate-100 text-slate-500 border-slate-200/60"
+                                  isCurrentUser ? "bg-blue-600 text-white border-blue-600 shadow-sm" : isTop3 ? "bg-amber-100 text-amber-700 border-amber-200" : "bg-slate-100 text-slate-500 border-slate-200/60"
                                 )}>
                                   {p.name.charAt(0).toUpperCase()}
                                 </span>
-                                <span className="font-bold text-slate-900">{p.name}</span>
+                                <span className={cn("font-bold", isCurrentUser ? "text-blue-600 font-extrabold" : "text-slate-900")}>
+                                  {p.name} {isCurrentUser && <span className="ml-1 rounded-md bg-blue-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-blue-700">(Ty)</span>}
+                                </span>
                               </div>
                             </td>
 
