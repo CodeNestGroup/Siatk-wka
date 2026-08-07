@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 
@@ -26,21 +25,92 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Stany dla ekstremalnej Captcha
+  const [captchaCode, setCaptchaCode] = useState('');
+  const [userCaptchaInput, setUserCaptchaInput] = useState('');
+  const [captchaChars, setCaptchaChars] = useState<Array<{char: string, rotate: string, topOffset: number, fontSize: number, color: string}>>([]);
+  const [noiseElements, setNoiseElements] = useState<Array<{top: number, left: number, width: number, height: number, rotate: string, backgroundColor: string}>>([]);
+
+  // Generowanie ekstremalnie trudnej captchy znak po znaku
+  const generateCaptcha = () => {
+    const charsPool = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789abcdefghijkmnpqrstuvwxyz'; 
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += charsPool.charAt(Math.floor(Math.random() * charsPool.length));
+    }
+    setCaptchaCode(code);
+    setUserCaptchaInput('');
+
+    // Rozbijanie kodu na tablicę obiektów z losowymi transformacjami wizualnymi
+    const colorsList = ['#38bdf8', '#f43f5e', '#10b981', '#fbbf24', '#a855f7', '#ffffff'];
+    const formattedChars = code.split('').map((char) => ({
+      char,
+      rotate: `${Math.floor(Math.random() * 50) - 25}deg`, // Losowy kąt od -25 do 25 stopni
+      topOffset: Math.floor(Math.random() * 12) - 6, // Losowe "skakanie" góra-dół
+      fontSize: Math.floor(Math.random() * 6) + 20, // Losowa wielkość od 20 do 26
+      color: colorsList[Math.floor(Math.random() * colorsList.length)], // Losowy kolor każdego znaku
+    }));
+    setCaptchaChars(formattedChars);
+
+    // Generowanie gęstego szumu (linie oraz kropki/kwadraciki utrudniające OCR)
+    const noise = [];
+    // Linie zakłócające
+    for (let i = 0; i < 6; i++) {
+      noise.push({
+        top: Math.floor(Math.random() * 45),
+        left: Math.floor(Math.random() * 180),
+        width: Math.floor(Math.random() * 90) + 50,
+        height: Math.random() > 0.5 ? 2 : 3,
+        rotate: `${Math.floor(Math.random() * 120) - 60}deg`,
+        backgroundColor: colorsList[Math.floor(Math.random() * colorsList.length)],
+      });
+    }
+    // Drobne plamy/kropki szumu w tle
+    for (let i = 0; i < 10; i++) {
+      noise.push({
+        top: Math.floor(Math.random() * 50),
+        left: Math.floor(Math.random() * 220),
+        width: Math.floor(Math.random() * 6) + 4,
+        height: Math.floor(Math.random() * 6) + 4,
+        rotate: '0deg',
+        backgroundColor: '#64748b',
+      });
+    }
+    setNoiseElements(noise);
+  };
+
+  useEffect(() => {
+    generateCaptcha();
+  }, []);
+
   const handleRegister = async () => {
-    if (!name.trim() || !email.trim() || !phone.trim() || !password.trim() || !confirmPassword.trim()) {
-      Alert.alert('Błąd', 'Wypełnij wszystkie pola, w tym numer telefonu.');
+    if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
+      Alert.alert('Błąd', 'Wypełnij wszystkie wymagane pola.');
       return;
     }
     if (!email.includes('@')) {
       Alert.alert('Błąd', 'Podaj poprawny adres email.');
       return;
     }
-    if (password.length < 6) {
-      Alert.alert('Błąd', 'Hasło musi mieć minimum 6 znaków.');
+
+    const passwordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{6,}$/;
+    if (!passwordRegex.test(password)) {
+      Alert.alert(
+        'Błąd',
+        'Hasło musi mieć co najmniej 6 znaków, zawierać jedną wielką literę, jedną cyfrę oraz jeden znak specjalny.'
+      );
       return;
     }
+
     if (password !== confirmPassword) {
       Alert.alert('Błąd', 'Hasła nie są takie same.');
+      return;
+    }
+
+    // Walidacja dokładnego kodu (z uwzględnieniem wielkości liter)
+    if (!userCaptchaInput.trim() || userCaptchaInput.trim() !== captchaCode) {
+      Alert.alert('Błąd weryfikacji', 'Wpisany kod jest niepoprawny (uwzględnij wielkość liter). Spróbuj ponownie.');
+      generateCaptcha();
       return;
     }
 
@@ -51,28 +121,41 @@ export default function RegisterScreen() {
     const cleanPhone = phone.trim();
 
     try {
-      // 1. Sprawdzamy czy email już istnieje w tabeli players
-      const { data: existingUser, error: checkError } = await supabase
+      const { data: existingUsers, error: checkError } = await supabase
         .from('players')
-        .select('id')
-        .eq('email', cleanEmail)
-        .maybeSingle();
+        .select('id, email, full_name')
+        .or(`email.eq.${cleanEmail},full_name.eq.${cleanName}`);
 
-      if (existingUser) {
+      if (checkError) {
         setLoading(false);
-        Alert.alert('Błąd', 'Ten adres email jest już zajęty.');
+        Alert.alert('Błąd', 'Nie udało się zweryfikować unikalności danych.');
+        generateCaptcha();
         return;
       }
 
-      // 2. Bezpośredni zapis nowego gracza wraz z hasłem do tabeli players
+      if (existingUsers && existingUsers.length > 0) {
+        setLoading(false);
+        const emailTaken = existingUsers.some((u) => u.email === cleanEmail);
+        const nameTaken = existingUsers.some((u) => u.full_name === cleanName);
+
+        if (emailTaken && nameTaken) {
+          Alert.alert('Błąd', 'Ten adres email oraz nazwa są już zajęte.');
+        } else if (emailTaken) {
+          Alert.alert('Błąd', 'Ten adres email jest już zajęty.');
+        } else {
+          Alert.alert('Błąd', 'Ta nazwa użytkownika jest już zajęta.');
+        }
+        generateCaptcha();
+        return;
+      }
+
       const { data, error: insertError } = await supabase
         .from('players')
         .insert({
           full_name: cleanName,
           email: cleanEmail,
-          phone: cleanPhone,
-          password: password, // Zapisujemy hasło w kolumnie tabeli
-          role: 'user',
+          phone: cleanPhone || null,
+          password: password,
         })
         .select()
         .single();
@@ -80,23 +163,22 @@ export default function RegisterScreen() {
       if (insertError || !data) {
         setLoading(false);
         Alert.alert('Błąd rejestracji', insertError?.message || 'Nie udało się utworzyć konta.');
+        generateCaptcha();
         return;
-      }
-
-      // 3. Automatyczne logowanie po rejestracji - zapis w AsyncStorage
-      await AsyncStorage.setItem('current_player_id', data.id);
-      await AsyncStorage.setItem('current_player_data', JSON.stringify(data));
-      if (data.auth_user_id) {
-        await AsyncStorage.setItem('current_auth_user_id', data.auth_user_id);
       }
 
       setLoading(false);
       
-      // Przejście do widoku głównego
-      router.replace('/(tabs)');
+      Alert.alert(
+        'Rejestracja zakończona sukcesem',
+        'Twoje konto zostało utworzone i czeka na zatwierdzenie przez administratora.',
+        [{ text: 'OK', onPress: () => router.back() }]
+      );
+
     } catch (err) {
       setLoading(false);
       Alert.alert('Błąd', 'Wystąpił nieoczekiwany błąd podczas rejestracji.');
+      generateCaptcha();
     }
   };
 
@@ -104,7 +186,7 @@ export default function RegisterScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         <ScrollView
@@ -156,7 +238,7 @@ export default function RegisterScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Numer telefonu</Text>
+              <Text style={styles.label}>Numer telefonu (opcjonalnie)</Text>
               <TextInput
                 style={styles.input}
                 placeholder="np. 123456789"
@@ -171,7 +253,7 @@ export default function RegisterScreen() {
               <Text style={styles.label}>Hasło</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Minimum 6 znaków"
+                placeholder="Min. 6 znaków, duża litera, cyfra, znak"
                 placeholderTextColor={colors.mutedForeground}
                 secureTextEntry
                 value={password}
@@ -188,6 +270,66 @@ export default function RegisterScreen() {
                 secureTextEntry
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
+              />
+            </View>
+
+            {/* Ekstremalnie trudna Captcha (znaki generowane osobno z rotacją i szumem) */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Zabezpieczenie przed botami (przepisz kod)</Text>
+              <View style={styles.captchaBoxContainer}>
+                <View style={styles.captchaVisualBox}>
+                  {/* Elementy szumu w tle i na wierzchu */}
+                  {noiseElements.map((item, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.noiseItem,
+                        {
+                          top: item.top,
+                          left: item.left,
+                          width: item.width,
+                          height: item.height,
+                          backgroundColor: item.backgroundColor,
+                          transform: [{ rotate: item.rotate }],
+                        },
+                      ]}
+                    />
+                  ))}
+
+                  {/* Zniekształcone znaki renderowane pojedynczo */}
+                  <View style={styles.charsRow}>
+                    {captchaChars.map((item, index) => (
+                      <Text
+                        key={index}
+                        style={[
+                          styles.captchaChar,
+                          {
+                            color: item.color,
+                            fontSize: item.fontSize,
+                            transform: [
+                              { rotate: item.rotate },
+                              { translateY: item.topOffset },
+                            ],
+                          },
+                        ]}
+                      >
+                        {item.char}
+                      </Text>
+                    ))}
+                  </View>
+                </View>
+                <TouchableOpacity style={styles.refreshButton} onPress={generateCaptcha}>
+                  <Text style={styles.refreshButtonText}>🔄 Zmień</Text>
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={[styles.input, { marginTop: 8 }]}
+                placeholder="Wpisz dokładnie powyższy kod"
+                placeholderTextColor={colors.mutedForeground}
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={userCaptchaInput}
+                onChangeText={setUserCaptchaInput}
               />
             </View>
 
@@ -282,6 +424,54 @@ const styles = StyleSheet.create({
     paddingVertical: Platform.OS === 'ios' ? 14 : 12,
     fontSize: 16,
     backgroundColor: colors.muted,
+    color: colors.foreground,
+  },
+  captchaBoxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  captchaVisualBox: {
+    flex: 1,
+    height: 60,
+    backgroundColor: '#090d16',
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  charsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  captchaChar: {
+    fontWeight: '900',
+    marginHorizontal: 3,
+  },
+  noiseItem: {
+    position: 'absolute',
+    opacity: 0.5,
+    zIndex: 1,
+  },
+  refreshButton: {
+    backgroundColor: colors.muted,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: 60,
+  },
+  refreshButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.foreground,
   },
   button: {

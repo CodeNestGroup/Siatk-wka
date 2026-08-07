@@ -26,15 +26,15 @@ type Match = {
   max_players: number;
   capacity: number | null;
   price_per_player: number;
-  status: string | null;
+  status_id: number;
 };
 
 type Registration = {
   id: string;
   match_id: string;
   player_id: string;
-  status: 'main' | 'waitlist';
   is_paid: boolean;
+  created_at: string;
   players?: {
     full_name: string;
   } | {
@@ -90,6 +90,7 @@ export default function MatchDetailScreen() {
 
   const loadData = useCallback(async () => {
     if (!id) return;
+    
     const player = await getCurrentPlayer();
     setCurrentPlayer(player);
 
@@ -108,21 +109,22 @@ export default function MatchDetailScreen() {
 
     const { data: regsData, error: regsError } = await supabase
       .from('match_registrations')
-      .select('id, match_id, player_id, status, is_paid, players(full_name)')
-      .eq('match_id', id);
+      .select('id, match_id, player_id, is_paid, created_at, players(full_name)')
+      .eq('match_id', id)
+      .order('created_at', { ascending: true });
 
     if (!regsError) {
       setRegistrations(regsData ?? []);
+    } else {
+      console.error('Błąd pobierania rejestracji:', regsError.message);
     }
 
-    // Pobieranie powiadomień/ogłoszeń powiązanych z tym meczem
     const { data: annData, error: annError } = await supabase
       .from('announcements')
       .select('*')
       .eq('match_id', id);
 
     if (!annError && annData) {
-      // Sortowanie: najpierw przypięte (is_pinned = true), potem reszta po dacie
       const sortedAnnouncements = annData.sort((a, b) => {
         if (a.is_pinned && !b.is_pinned) return -1;
         if (!a.is_pinned && b.is_pinned) return 1;
@@ -162,26 +164,39 @@ export default function MatchDetailScreen() {
     );
   }
 
-  const isFinished = isDateInPast(match.date) || match.status === 'cancelled';
+  const isCancelled = match.status_id === 2;
+  const isFinished = isDateInPast(match.date) || isCancelled;
   const capacity = match.capacity ?? match.max_players;
-  const mainList = registrations.filter((r) => r.status === 'main');
-  const waitlist = registrations.filter((r) => r.status === 'waitlist');
-  const isFull = mainList.length >= capacity;
 
-  const myRegistration = registrations.find((r) => r.player_id === currentPlayer?.id);
+  const mainList = registrations.slice(0, capacity);
+  const waitlist = registrations.slice(capacity);
+  const isFull = registrations.length >= capacity;
+
+  const myRegistration = registrations.find(
+    (r) => String(r.player_id) === String(currentPlayer?.id)
+  );
+  
+  const isUserInMain = mainList.some((r) => String(r.player_id) === String(currentPlayer?.id));
+
   const isCancellable = canCancelMatch(match.date, match.time_start);
   const title = match.title?.trim() || 'Trening Siatkówki';
   const { weekday, day, month } = formatMatchDate(match.date);
 
   const handleSignUp = async () => {
-    if (!currentPlayer) return;
-    const status = isFull ? 'waitlist' : 'main';
+    if (!currentPlayer) {
+      Alert.alert('Błąd', 'Nie zidentyfikowano zalogowanego gracza.');
+      return;
+    }
+
+    if (isCancelled) {
+      Alert.alert('Błąd', 'Nie można zapisać się na odwołany mecz.');
+      return;
+    }
 
     setActionLoading(true);
     const { error } = await supabase.from('match_registrations').insert({
       match_id: match.id,
       player_id: currentPlayer.id,
-      status,
     });
     setActionLoading(false);
 
@@ -192,12 +207,8 @@ export default function MatchDetailScreen() {
     loadData();
   };
 
-  const handleCancel = async () => {
-    if (!currentPlayer) return;
-    if (!isCancellable) {
-      Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
-      return;
-    }
+  const executeCancellation = async () => {
+    if (!currentPlayer || !match) return;
 
     setActionLoading(true);
     const { error } = await supabase
@@ -212,6 +223,34 @@ export default function MatchDetailScreen() {
       return;
     }
     loadData();
+  };
+
+  const handleCancel = () => {
+    if (!currentPlayer) return;
+
+    if (isCancelled) {
+      Alert.alert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
+      return;
+    }
+
+    if (!isCancellable) {
+      Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+      return;
+    }
+
+    // Okienko potwierdzenia wypisania się
+    Alert.alert(
+      'Wypisz się z meczu',
+      'Czy na pewno chcesz wypisać się z tego meczu?',
+      [
+        { text: 'Nie', style: 'cancel' },
+        {
+          text: 'Tak, wypisz się',
+          style: 'destructive',
+          onPress: executeCancellation,
+        },
+      ]
+    );
   };
 
   return (
@@ -238,9 +277,14 @@ export default function MatchDetailScreen() {
               🕒 {formatTime(match.time_start)} – {formatTime(match.time_end)}
             </Text>
             <Text style={styles.infoText}>
-              👥 Zapisanych: <Text style={styles.bold}>{mainList.length}/{capacity}</Text> |{' '}
+              👥 Zapisanych: <Text style={styles.bold}>{registrations.length}/{capacity}</Text> |{' '}
               {Number(match.price_per_player)} PLN
             </Text>
+            {isCancelled && (
+              <Text style={[styles.infoText, { color: '#DC2626', fontWeight: '700', marginTop: 2 }]}>
+                ⚠️ Mecz odwołany
+              </Text>
+            )}
           </View>
         </View>
 
@@ -249,7 +293,7 @@ export default function MatchDetailScreen() {
             {myRegistration ? (
               <View style={styles.registeredRow}>
                 <Text style={styles.statusTextInfo}>
-                  {myRegistration.status === 'waitlist'
+                  {!isUserInMain
                     ? '⏳ Jesteś na liście rezerwowej'
                     : '✅ Jesteś zapisany w składzie głównym'}
                 </Text>
@@ -279,7 +323,6 @@ export default function MatchDetailScreen() {
           </View>
         )}
 
-        {/* Informacja o statusie płatności dla zakończonego meczu, jeśli użytkownik był zapisany */}
         {isFinished && currentPlayer && myRegistration && (
           <View style={styles.finishedPaymentContainer}>
             <Text
@@ -288,7 +331,9 @@ export default function MatchDetailScreen() {
                 { color: myRegistration.is_paid ? '#16A34A' : colors.destructive },
               ]}
             >
-              {myRegistration.is_paid
+              {isCancelled
+                ? '✕ Mecz został odwołany'
+                : myRegistration.is_paid
                 ? '✓ Mecz zakończony – Twój udział został opłacony'
                 : '✕ Mecz zakończony – Twój udział nie został opłacony'}
             </Text>
@@ -331,7 +376,7 @@ export default function MatchDetailScreen() {
               <Text style={styles.emptySubText}>Brak zapisanych graczy.</Text>
             ) : (
               mainList.map((item, index) => {
-                const isMe = item.player_id === currentPlayer?.id;
+                const isMe = String(item.player_id) === String(currentPlayer?.id);
                 const playerName = getPlayerName(item.players);
                 return (
                   <View key={item.id} style={[styles.playerRow, isMe && styles.playerRowHighlight]}>
@@ -349,7 +394,7 @@ export default function MatchDetailScreen() {
               <Text style={styles.emptySubText}>Brak osób na rezerwie.</Text>
             ) : (
               waitlist.map((item, index) => {
-                const isMe = item.player_id === currentPlayer?.id;
+                const isMe = String(item.player_id) === String(currentPlayer?.id);
                 const playerName = getPlayerName(item.players);
                 return (
                   <View key={item.id} style={[styles.playerRow, isMe && styles.playerRowHighlight]}>

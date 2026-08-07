@@ -25,7 +25,7 @@ export default function LoginScreen() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(true); // Domyślnie zaznaczone
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
@@ -50,6 +50,16 @@ export default function LoginScreen() {
         return;
       }
 
+      // 7.0 Sprawdzenie czy admin potwierdził rejestrację (player_status_id === 3 oznacza 'pending')
+      if (data.role_id === 3) {
+        setLoading(false);
+        Alert.alert(
+          'Konto oczekuje na zatwierdzenie',
+          'Twoje konto nie zostało jeszcze zatwierdzone przez administratora. Spróbuj ponownie później.'
+        );
+        return;
+      }
+
       // Zapisujemy sesję do AsyncStorage
       await AsyncStorage.setItem(CURRENT_PLAYER_KEY, data.id);
       await AsyncStorage.setItem(REMEMBER_ME_KEY, rememberMe ? 'true' : 'false');
@@ -67,7 +77,8 @@ export default function LoginScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -123,6 +134,7 @@ export default function LoginScreen() {
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleLogin}
               disabled={loading}
+              activeOpacity={0.8}
             >
               <Text style={styles.buttonText}>
                 {loading ? 'Logowanie...' : 'Zaloguj się'}

@@ -32,6 +32,11 @@ export default function ProfilScreen() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [roleName, setRoleName] = useState('');
+  const [playerStatusName, setPlayerStatusName] = useState('');
+
+  // Stan widoczności wrażliwych danych (telefon i email)
+  const [showSensitiveData, setShowSensitiveData] = useState(false);
 
   // Zmiana hasła
   const [oldPassword, setOldPassword] = useState('');
@@ -39,7 +44,7 @@ export default function ProfilScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
 
-  // Prefs odpowiadające kolumnom w bazie danych players
+  // Prefs powiadomień
   const [prefs, setPrefs] = useState<NotificationPrefs>({
     notif_announcements: true,
     notif_match_reminders: true,
@@ -62,10 +67,14 @@ export default function ProfilScreen() {
 
       setPlayerId(storedPlayerId);
 
-      // Pobieramy dane gracza wraz z preferencjami powiadomień
+      // Pobieramy dane gracza wraz z rolą oraz statusem gracza
       const { data, error } = await supabase
         .from('players')
-        .select('*')
+        .select(`
+          *,
+          roles:role_id ( name ),
+          player_status:player_status_id ( name )
+        `)
         .eq('id', storedPlayerId)
         .single();
 
@@ -78,7 +87,12 @@ export default function ProfilScreen() {
       setEmail(data.email ?? '');
       setPhone(data.phone ?? 'Brak numeru');
 
-      // Ustawiamy stany przełączników na podstawie bazy danych
+      const fetchedRole = (data as any).roles?.name || 'user';
+      setRoleName(fetchedRole.toUpperCase());
+
+      const fetchedStatus = (data as any).player_status?.name || 'aktywny';
+      setPlayerStatusName(fetchedStatus);
+
       setPrefs({
         notif_announcements: data.notif_announcements ?? true,
         notif_match_reminders: data.notif_match_reminders ?? true,
@@ -95,11 +109,8 @@ export default function ProfilScreen() {
     if (!playerId) return;
 
     const newValue = !prefs[key];
-
-    // Optymistyczna zmiana stanu w interfejsie
     setPrefs((prev) => ({ ...prev, [key]: newValue }));
 
-    // Zapis w bazie danych (czysty SQL UPDATE na tabeli players)
     const { error } = await supabase
       .from('players')
       .update({ [key]: newValue })
@@ -107,7 +118,6 @@ export default function ProfilScreen() {
 
     if (error) {
       Alert.alert('Błąd', 'Nie udało się zapisać ustawienia powiadomień.');
-      // Przywrócenie stanu w razie błędu
       setPrefs((prev) => ({ ...prev, [key]: !newValue }));
     }
   };
@@ -197,6 +207,9 @@ export default function ProfilScreen() {
     );
   }
 
+  const maskedPhone = phone ? phone.replace(/.(?=.{4})/g, '*') : 'Brak numeru';
+  const maskedEmail = email ? email.replace(/(^[\w\.]{2})(.*)(@.*)/, '$1***$3') : '';
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
       <ScrollView
@@ -211,8 +224,30 @@ export default function ProfilScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Dane profilu</Text>
 
+          {/* Nowoczesna sekcja nagłówkowa gracza (Full name + rola + status) */}
+          <View style={styles.profileHeaderBox}>
+            <View style={styles.profileAvatarPlaceholder}>
+              <Text style={styles.profileAvatarText}>
+                {fullName ? fullName.charAt(0).toUpperCase() : 'P'}
+              </Text>
+            </View>
+            <View style={styles.profileInfoWrap}>
+              <Text style={styles.profileFullName} numberOfLines={1}>
+                {fullName || 'Gracz'}
+              </Text>
+              <View style={styles.badgesRow}>
+                <View style={styles.roleBadge}>
+                  <Text style={styles.roleBadgeText}>{roleName}</Text>
+                </View>
+                <View style={styles.statusBadge}>
+                  <Text style={styles.statusBadgeText}>{playerStatusName}</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Nazwa</Text>
+            <Text style={styles.label}>Nazwa (Full name)</Text>
             <TextInput
               style={[styles.input, styles.inputReadOnly]}
               value={fullName}
@@ -224,7 +259,7 @@ export default function ProfilScreen() {
             <Text style={styles.label}>Telefon</Text>
             <TextInput
               style={[styles.input, styles.inputReadOnly]}
-              value={phone}
+              value={showSensitiveData ? phone : maskedPhone}
               editable={false}
             />
           </View>
@@ -233,10 +268,21 @@ export default function ProfilScreen() {
             <Text style={styles.label}>Adres email</Text>
             <TextInput
               style={[styles.input, styles.inputReadOnly]}
-              value={email}
+              value={showSensitiveData ? email : maskedEmail}
               editable={false}
             />
           </View>
+
+          <TouchableOpacity
+            style={styles.revealButton}
+            onPressIn={() => setShowSensitiveData(true)}
+            onPressOut={() => setShowSensitiveData(false)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.revealButtonText}>
+              {showSensitiveData ? '🔓 Dane odsłonięte' : '🔒 Przytrzymaj, aby zobaczyć telefon i email'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Sekcja: Zmiana hasła */}
@@ -291,7 +337,7 @@ export default function ProfilScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Sekcja: Powiadomienia spięta z bazą danych */}
+        {/* Sekcja: Powiadomienia */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Powiadomienia</Text>
 
@@ -373,7 +419,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: colors.foreground,
-    marginTop: 16, // Zwiększone, żeby tytuł był niżej
+    marginTop: 16,
   },
   headerSubtitle: {
     fontSize: 14,
@@ -396,6 +442,69 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 
+  profileHeaderBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.muted,
+    padding: 14,
+    borderRadius: radius.lg,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  profileAvatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  profileAvatarText: {
+    color: colors.primaryForeground,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  profileInfoWrap: {
+    flex: 1,
+  },
+  profileFullName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: 6,
+  },
+  badgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  roleBadge: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+  },
+  roleBadgeText: {
+    color: colors.primaryForeground,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  statusBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  statusBadgeText: {
+    color: '#16A34A',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
   inputGroup: { marginBottom: 14 },
   label: {
     fontSize: 13,
@@ -416,6 +525,21 @@ const styles = StyleSheet.create({
   inputReadOnly: {
     color: colors.mutedForeground,
     opacity: 0.8,
+  },
+
+  revealButton: {
+    backgroundColor: colors.muted,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  revealButtonText: {
+    color: colors.foreground,
+    fontSize: 13,
+    fontWeight: '600',
   },
 
   button: {

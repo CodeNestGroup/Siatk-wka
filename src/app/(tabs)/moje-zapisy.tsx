@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
-import { formatMatchDate, formatTime } from '@/lib/format';
+import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
 
 type MatchInfo = {
@@ -24,26 +24,22 @@ type MatchInfo = {
   time_end: string;
   location: string;
   price_per_player: number;
+  max_players: number;
+  capacity: number | null;
+  status_id: number;
 };
 
 type MyRegistration = {
   id: string;
-  status: string;
+  match_id: string;
+  player_id: string;
   is_paid: boolean;
+  created_at: string;
   matches: MatchInfo | null;
+  registrationStatus?: 'main' | 'waitlist';
 };
 
-type TabType = 'active' | 'unpaid_past' | 'paid_past';
-
-function isMatchPast(matchDateStr: string, matchTimeStartStr: string): boolean {
-  try {
-    const matchDateTime = new Date(`${matchDateStr}T${matchTimeStartStr}`);
-    const now = new Date();
-    return matchDateTime.getTime() < now.getTime();
-  } catch {
-    return false;
-  }
-}
+type TabType = 'active' | 'past';
 
 function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
   try {
@@ -73,36 +69,38 @@ function RegistrationCard({
 
   const { weekday, day, month } = formatMatchDate(reg.matches.date);
   const title = reg.matches.title?.trim() || 'Trening Siatkówki';
+  const isWaitlist = reg.registrationStatus === 'waitlist';
+  const isCancelled = reg.matches.status_id === 2;
 
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[styles.card, isCancelled && styles.cardCancelled]}
       activeOpacity={0.8}
       onPress={() => reg.matches && onPress(reg.matches.id)}
     >
-      <View style={styles.dateBox}>
-        <Text style={styles.dateDay}>{day}</Text>
-        <Text style={styles.dateMonth}>{month}</Text>
+      <View style={[styles.dateBox, isCancelled && styles.dateBoxCancelled]}>
+        <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>{day}</Text>
+        <Text style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]}>{month}</Text>
       </View>
 
       <View style={styles.cardBody}>
         <View style={styles.cardTopRow}>
-          <Text style={styles.matchTitle} numberOfLines={1}>
+          <Text style={[styles.matchTitle, isCancelled && styles.matchTitleCancelled]} numberOfLines={1}>
             {title}
           </Text>
           <View
             style={[
               styles.badge,
-              { backgroundColor: reg.status === 'waitlist' ? '#FEF3C7' : '#DCFCE7' },
+              { backgroundColor: isWaitlist ? '#FEF3C7' : '#DCFCE7' },
             ]}
           >
             <Text
               style={[
                 styles.badgeText,
-                { color: reg.status === 'waitlist' ? '#D97706' : '#16A34A' },
+                { color: isWaitlist ? '#D97706' : '#16A34A' },
               ]}
             >
-              {reg.status === 'waitlist' ? 'Lista rezerwowa' : 'Zapisany'}
+              {isWaitlist ? 'Lista rezerwowa' : 'Zapisany'}
             </Text>
           </View>
         </View>
@@ -114,28 +112,29 @@ function RegistrationCard({
         </Text>
 
         <View style={styles.footerRow}>
-          {activeTab === 'active' ? (
-            <View />
-          ) : (
-            <Text
-              style={[
-                styles.paymentStatus,
-                { color: reg.is_paid ? '#16A34A' : colors.destructive },
-              ]}
-            >
-              {reg.is_paid ? '✓ Opłacone' : '✕ Nieopłacone'}
-            </Text>
-          )}
+          <Text
+            style={[
+              styles.paymentStatus,
+              { color: reg.is_paid ? '#16A34A' : colors.mutedForeground },
+            ]}
+          >
+            {reg.is_paid ? '✓ Opłacone' : 'Brak statusu płatności'}
+          </Text>
           <Text style={styles.footerText}>{Number(reg.matches.price_per_player)} PLN</Text>
         </View>
 
-        {activeTab === 'active' && (
+        {activeTab === 'active' && !isCancelled && (
           <TouchableOpacity
             style={styles.cancelButton}
             onPress={() => onCancel(reg)}
             disabled={cancelling}
+            activeOpacity={0.7}
           >
-            <Text style={styles.cancelButtonText}>Wypisz się</Text>
+            {cancelling ? (
+              <ActivityIndicator size="small" color="#DC2626" />
+            ) : (
+              <Text style={styles.cancelButtonText}>Wypisz się z meczu</Text>
+            )}
           </TouchableOpacity>
         )}
       </View>
@@ -161,23 +160,68 @@ export default function MojeZapisyScreen() {
 
       if (!player) {
         setRegistrations([]);
+        setLoading(false);
         return;
       }
 
-      const { data, error } = await supabase
+      const { data: userRegs, error: regError } = await supabase
         .from('match_registrations')
         .select(
-          'id, status, is_paid, matches(id, title, date, time_start, time_end, location, price_per_player)'
+          'id, match_id, player_id, is_paid, created_at, matches(id, title, date, time_start, time_end, location, price_per_player, max_players, capacity, status_id)'
         )
-        .eq('player_id', player.id)
-        .order('created_at', { ascending: false });
+        .eq('player_id', player.id);
 
-      if (error) {
-        setErrorMsg(error.message);
-      } else {
-        setErrorMsg(null);
-        setRegistrations((data as any) ?? []);
+      if (regError) {
+        setErrorMsg(regError.message);
+        setLoading(false);
+        return;
       }
+
+      if (!userRegs || userRegs.length === 0) {
+        setRegistrations([]);
+        setErrorMsg(null);
+        setLoading(false);
+        return;
+      }
+
+      const matchIds = userRegs.map((r) => r.match_id);
+      const { data: allRegsForMatches, error: allRegsError } = await supabase
+        .from('match_registrations')
+        .select('match_id, player_id, created_at')
+        .in('match_id', matchIds)
+        .order('created_at', { ascending: true });
+
+      if (allRegsError) {
+        console.error('Błąd pobierania list meczowych:', allRegsError);
+      }
+
+      const allRegs = allRegsForMatches ?? [];
+
+      const processed: MyRegistration[] = userRegs.map((reg: any) => {
+        const match: MatchInfo | null = Array.isArray(reg.matches) ? reg.matches[0] ?? null : reg.matches;
+
+        if (!match) {
+          return {
+            ...reg,
+            matches: null,
+          } as MyRegistration;
+        }
+
+        const matchAllRegs = allRegs.filter((r) => r.match_id === match.id);
+        const capacityLimit = match.capacity ?? match.max_players ?? 10;
+        const mainList = matchAllRegs.slice(0, capacityLimit);
+
+        const isInMain = mainList.some((r) => r.player_id === player.id);
+
+        return {
+          ...reg,
+          matches: match,
+          registrationStatus: isInMain ? 'main' : 'waitlist',
+        } as MyRegistration;
+      });
+
+      setErrorMsg(null);
+      setRegistrations(processed);
     } catch (e: any) {
       setErrorMsg(e?.message || 'Wystąpił nieznany błąd');
     } finally {
@@ -197,54 +241,74 @@ export default function MojeZapisyScreen() {
     setRefreshing(false);
   };
 
+  const executeCancellation = async (regId: string) => {
+    setCancellingId(regId);
+    const { error } = await supabase
+      .from('match_registrations')
+      .delete()
+      .eq('id', regId);
+    setCancellingId(null);
+
+    if (error) {
+      Alert.alert('Błąd', error.message);
+      return;
+    }
+    await loadData();
+  };
+
   const handleCancel = (reg: MyRegistration) => {
     if (reg.matches) {
+      if (reg.matches.status_id === 2) {
+        Alert.alert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
+        return;
+      }
       if (!canCancelMatch(reg.matches.date, reg.matches.time_start)) {
         Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
         return;
       }
     }
 
-    Alert.alert('Wypisać się?', 'Na pewno chcesz wypisać się z tego meczu?', [
-      { text: 'Anuluj', style: 'cancel' },
-      {
-        text: 'Wypisz się',
-        style: 'destructive',
-        onPress: async () => {
-          setCancellingId(reg.id);
-          const { error } = await supabase
-            .from('match_registrations')
-            .delete()
-            .eq('id', reg.id);
-          setCancellingId(null);
-
-          if (error) {
-            Alert.alert('Błąd', error.message);
-            return;
-          }
-          await loadData();
+    Alert.alert(
+      'Wypisz się z meczu',
+      'Czy na pewno chcesz wypisać się z tego meczu?',
+      [
+        { text: 'Nie', style: 'cancel' },
+        {
+          text: 'Tak, wypisz się',
+          style: 'destructive',
+          onPress: () => executeCancellation(reg.id),
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const handlePressMatch = (matchId: string) => {
     router.push(`/(match)/${matchId}`);
   };
 
-  const filteredRegistrations = registrations.filter((reg) => {
-    if (!reg.matches) return false;
-    const isPast = isMatchPast(reg.matches.date, reg.matches.time_start);
+  const filteredRegistrations = registrations
+    .filter((reg) => {
+      if (!reg.matches) return false;
+      const isPastDate = isDateInPast(reg.matches.date);
+      const isPast = isPastDate;
 
-    if (activeTab === 'active') {
-      return !isPast;
-    } else if (activeTab === 'unpaid_past') {
-      return isPast && !reg.is_paid;
-    } else if (activeTab === 'paid_past') {
-      return isPast && reg.is_paid;
-    }
-    return false;
-  });
+      if (activeTab === 'active') {
+        return !isPast;
+      } else {
+        return isPast;
+      }
+    })
+    .sort((a, b) => {
+      if (!a.matches || !b.matches) return 0;
+      const timeA = new Date(`${a.matches.date}T${a.matches.time_start}`).getTime();
+      const timeB = new Date(`${b.matches.date}T${b.matches.time_start}`).getTime();
+
+      if (activeTab === 'active') {
+        return timeA - timeB;
+      } else {
+        return timeB - timeA;
+      }
+    });
 
   if (loading) {
     return (
@@ -288,27 +352,17 @@ export default function MojeZapisyScreen() {
                 activeOpacity={0.7}
               >
                 <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>
-                  Zapisany
+                  Nadchodzące
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.tabButton, activeTab === 'unpaid_past' && styles.tabButtonActive]}
-                onPress={() => setActiveTab('unpaid_past')}
+                style={[styles.tabButton, activeTab === 'past' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('past')}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.tabText, activeTab === 'unpaid_past' && styles.tabTextActive]}>
-                  Nie opłacone i zakończone
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.tabButton, activeTab === 'paid_past' && styles.tabButtonActive]}
-                onPress={() => setActiveTab('paid_past')}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.tabText, activeTab === 'paid_past' && styles.tabTextActive]}>
-                  Opłacone i zakończone
+                <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>
+                  Zakończone / Odwołane
                 </Text>
               </TouchableOpacity>
             </View>
@@ -319,9 +373,7 @@ export default function MojeZapisyScreen() {
             <Text style={styles.emptyText}>
               {activeTab === 'active'
                 ? 'Brak nadchodzących zapisów.'
-                : activeTab === 'unpaid_past'
-                ? 'Brak nieopłaconych i zakończonych meczów.'
-                : 'Brak opłaconych i zakończonych meczów.'}
+                : 'Brak zakończonych lub odwołanych zapisów.'}
             </Text>
           </View>
         }
@@ -381,7 +433,6 @@ const styles = StyleSheet.create({
   tabButton: {
     flex: 1,
     paddingVertical: 10,
-    paddingHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radius.md,
@@ -390,7 +441,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   tabText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.mutedForeground,
     textAlign: 'center',
@@ -407,7 +458,10 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 12,
     ...shadow.card,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
+  cardCancelled: { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' },
   dateBox: {
     width: 56,
     height: 56,
@@ -417,8 +471,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 14,
   },
+  dateBoxCancelled: { backgroundColor: '#FEE2E2' },
   dateDay: { fontSize: 20, fontWeight: '700', color: colors.accentForeground },
-  dateMonth: { fontSize: 11, color: colors.accentForeground },
+  dateDayCancelled: { color: '#DC2626' },
+  dateMonth: { fontSize: 11, color: colors.accentForeground, textTransform: 'uppercase' },
+  dateMonthCancelled: { color: '#DC2626' },
 
   cardBody: { flex: 1 },
   cardTopRow: {
@@ -429,6 +486,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   matchTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.foreground },
+  matchTitleCancelled: { textDecorationLine: 'line-through', color: '#DC2626' },
   badge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.sm },
   badgeText: { fontSize: 11, fontWeight: '700' },
 
@@ -449,13 +507,14 @@ const styles = StyleSheet.create({
 
   cancelButton: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.destructive,
+    borderColor: '#FCA5A5',
   },
-  cancelButtonText: { color: colors.destructive, fontSize: 12, fontWeight: '700' },
+  cancelButtonText: { fontSize: 12, fontWeight: '700', color: '#DC2626' },
 
   emptyState: { paddingVertical: 40, alignItems: 'center' },
   emptyText: { fontSize: 14, color: colors.mutedForeground },

@@ -11,10 +11,22 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatRelativeDate } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
+
+// Konfiguracja obsługi powiadomień zgodna z nowym API expo-notifications
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 
 type MatchDetails = {
   id: string;
@@ -23,40 +35,45 @@ type MatchDetails = {
   time_start: string;
   time_end: string;
   location: string;
-  status: string | null;
+  status_id: number;
+};
+
+type AnnouncementCategory = {
+  id: number;
+  name: string;
 };
 
 type Announcement = {
   id: string;
   title: string;
   content: string;
-  category: string;
+  category_id: number | null;
   is_pinned: boolean;
   author: string;
   created_at: string;
   match_id: string | null;
+  announcements_category?: AnnouncementCategory | null;
   matches?: MatchDetails | null;
 };
 
 type CategoryMeta = { bg: string; fg: string; icon: string; label: string };
 
 const CATEGORY_META: Record<string, CategoryMeta> = {
-  general: { bg: '#E0E7FF', fg: colors.primary, icon: 'i', label: 'Ogólne' },
-  new: { bg: '#DCFCE7', fg: '#16A34A', icon: '＋', label: 'Nowe' },
-  cancelled: { bg: '#FEE2E2', fg: '#DC2626', icon: '✕', label: 'Odwołane' },
-  change: { bg: '#FEF3C7', fg: '#D97706', icon: '↻', label: 'Zmiana' },
-  urgent: { bg: '#FEE2E2', fg: '#DC2626', icon: '!', label: 'Ważne' },
+  'ważne': { bg: '#FEE2E2', fg: '#DC2626', icon: '!', label: 'Ważne' },
+  'ogólne': { bg: '#E0E7FF', fg: colors.primary, icon: 'i', label: 'Ogólne' },
+  'spotkanie odwołane': { bg: '#FEE2E2', fg: '#DC2626', icon: '✕', label: 'Spotkanie odwołane' },
+  'zaproszenie na spotkanie': { bg: '#DCFCE7', fg: '#16A34A', icon: '＋', label: 'Zaproszenie na spotkanie' },
 };
 
-const DEFAULT_META: CategoryMeta = CATEGORY_META.general;
+const DEFAULT_META: CategoryMeta = { bg: '#F1F5F9', fg: colors.foreground, icon: '•', label: 'Ogólne' };
 
-function getCategoryMeta(category: string): CategoryMeta {
-  if (!category) return DEFAULT_META;
-  return CATEGORY_META[category.toLowerCase()] ?? {
+function getCategoryMeta(categoryName?: string | null): CategoryMeta {
+  if (!categoryName) return DEFAULT_META;
+  return CATEGORY_META[categoryName.toLowerCase()] ?? {
     bg: '#F1F5F9',
     fg: colors.foreground,
     icon: '•',
-    label: category.charAt(0).toUpperCase() + category.slice(1),
+    label: categoryName,
   };
 }
 
@@ -81,6 +98,49 @@ function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolea
   }
 }
 
+async function scheduleMatchNotification(match: MatchDetails) {
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    let finalStatus = status;
+    if (finalStatus !== 'granted') {
+      const { status: requestedStatus } = await Notifications.requestPermissionsAsync();
+      finalStatus = requestedStatus;
+    }
+    if (finalStatus !== 'granted') return;
+
+    const matchDateTime = new Date(`${match.date}T${match.time_start}`);
+    const triggerTime = new Date(matchDateTime.getTime() - 2 * 60 * 60 * 1000);
+
+    if (triggerTime.getTime() <= Date.now()) return;
+
+    const identifier = `match-${match.id}`;
+    await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Nadchodzi mecz! 🏐',
+        body: `Masz zaplanowany trening "${match.title?.trim() || 'Siatkówka'}" o godzinie ${match.time_start.slice(0, 5)} w lokalizacji: ${match.location}`,
+        sound: true,
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: triggerTime,
+      },
+    });
+  } catch (e) {
+    console.error('Błąd planowania powiadomienia:', e);
+  }
+}
+
+async function cancelMatchNotification(matchId: string) {
+  try {
+    const identifier = `match-${matchId}`;
+    await Notifications.cancelScheduledNotificationAsync(identifier);
+  } catch (e) {
+    console.error('Błąd usuwania powiadomienia:', e);
+  }
+}
+
 function AnnouncementCard({
   item,
   userRegistrations,
@@ -94,13 +154,14 @@ function AnnouncementCard({
   onRegisterMatch: (matchId: string) => void;
   onPressMatch: (matchId: string) => void;
 }) {
-  const meta = getCategoryMeta(item.category);
+  const categoryName = item.announcements_category?.name;
+  const meta = getCategoryMeta(categoryName);
   const match = item.matches;
   const isRegistered = match ? userRegistrations.includes(match.id) : false;
 
   const isPast = match ? isMatchPast(match.date, match.time_start) : false;
   const isCancelled =
-    (match && match.status === 'cancelled') || item.category.toLowerCase() === 'cancelled';
+    (match && match.status_id === 2) || categoryName?.toLowerCase() === 'spotkanie odwołane';
 
   return (
     <View style={styles.card}>
@@ -129,11 +190,26 @@ function AnnouncementCard({
             </Text>
 
             <View style={styles.actionButtonsRow}>
-              {isRegistered ? (
+              {isCancelled ? (
                 <>
                   <TouchableOpacity
                     style={styles.viewMatchBtn}
                     onPress={() => onPressMatch(match.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.viewMatchBtnText}>Szczegóły meczu</Text>
+                  </TouchableOpacity>
+
+                  <View style={styles.statusBadgeCancelled}>
+                    <Text style={styles.statusBadgeCancelledText}>Odwołany</Text>
+                  </View>
+                </>
+              ) : isRegistered ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.viewMatchBtn}
+                    onPress={() => onPressMatch(match.id)}
+                    activeOpacity={0.7}
                   >
                     <Text style={styles.viewMatchBtnText}>Szczegóły meczu</Text>
                   </TouchableOpacity>
@@ -141,8 +217,9 @@ function AnnouncementCard({
                   <TouchableOpacity
                     style={styles.cancelMatchBtn}
                     onPress={() => onCancelRegistration(match.id)}
+                    activeOpacity={0.7}
                   >
-                    <Text style={styles.cancelMatchBtnText}>Wypisz się</Text>
+                    <Text style={styles.cancelMatchBtnText}>Wypisz się z meczu</Text>
                   </TouchableOpacity>
                 </>
               ) : (
@@ -150,26 +227,22 @@ function AnnouncementCard({
                   <TouchableOpacity
                     style={styles.viewMatchBtn}
                     onPress={() => onPressMatch(match.id)}
+                    activeOpacity={0.7}
                   >
                     <Text style={styles.viewMatchBtnText}>Szczegóły meczu</Text>
                   </TouchableOpacity>
 
-                  {!isPast && !isCancelled && (
+                  {!isPast && (
                     <TouchableOpacity
                       style={styles.registerMatchBtn}
                       onPress={() => onRegisterMatch(match.id)}
+                      activeOpacity={0.7}
                     >
                       <Text style={styles.registerMatchBtnText}>Zapisz się</Text>
                     </TouchableOpacity>
                   )}
 
-                  {isCancelled && (
-                    <View style={styles.statusBadgeCancelled}>
-                      <Text style={styles.statusBadgeCancelledText}>Odwołany</Text>
-                    </View>
-                  )}
-
-                  {isPast && !isCancelled && (
+                  {isPast && (
                     <View style={styles.statusBadgePast}>
                       <Text style={styles.statusBadgePastText}>Zakończony</Text>
                     </View>
@@ -194,30 +267,36 @@ export default function AnnouncementsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [filter, setFilter] = useState<string>('all');
+  const [filter, setFilter] = useState<number | 'all'>('all');
 
   const loadData = async () => {
     try {
       const player = await getCurrentPlayer();
       setCurrentPlayer(player);
 
+      const annQuery = supabase
+        .from('announcements')
+        .select(`
+          *,
+          announcements_category (
+            id,
+            name
+          ),
+          matches (
+            id,
+            title,
+            date,
+            time_start,
+            time_end,
+            location,
+            status_id
+          )
+        `)
+        .order('is_pinned', { ascending: false })
+        .order('created_at', { ascending: false });
+
       const [{ data: annData, error: annError }, regDataRes] = await Promise.all([
-        supabase
-          .from('announcements')
-          .select(`
-            *,
-            matches (
-              id,
-              title,
-              date,
-              time_start,
-              time_end,
-              location,
-              status
-            )
-          `)
-          .order('is_pinned', { ascending: false })
-          .order('created_at', { ascending: false }),
+        annQuery,
         player
           ? supabase.from('match_registrations').select('match_id').eq('player_id', player.id)
           : Promise.resolve({ data: null, error: null }),
@@ -227,13 +306,28 @@ export default function AnnouncementsScreen() {
         setErrorMsg(annError.message);
       } else {
         setErrorMsg(null);
-        setAnnouncements(annData ?? []);
+        const mappedAnnouncements: Announcement[] = (annData ?? []).map((item: any) => ({
+          ...item,
+          matches: Array.isArray(item.matches) ? item.matches[0] ?? null : item.matches,
+        }));
+        setAnnouncements(mappedAnnouncements);
       }
 
       if (regDataRes && !regDataRes.error && regDataRes.data) {
         setUserRegistrations(regDataRes.data.map((r: { match_id: string }) => r.match_id));
       } else {
         setUserRegistrations([]);
+      }
+
+      if (player && annData) {
+        const announcementIds = annData.map((a: any) => a.id);
+        if (announcementIds.length > 0) {
+          await supabase
+            .from('player_announcements')
+            .update({ is_read: true, read_at: new Date().toISOString() })
+            .eq('player_id', player.id)
+            .eq('is_read', false);
+        }
       }
     } catch (e: any) {
       setErrorMsg(e?.message || 'Wystąpił nieznany błąd');
@@ -268,7 +362,10 @@ export default function AnnouncementsScreen() {
         Alert.alert('Błąd', 'Nie można zapisać się na miniony mecz.');
         return;
       }
-      if (match.status === 'cancelled' || targetAnnouncement?.category.toLowerCase() === 'cancelled') {
+      if (
+        match.status_id === 2 ||
+        targetAnnouncement?.announcements_category?.name?.toLowerCase() === 'spotkanie odwołane'
+      ) {
         Alert.alert('Błąd', 'Nie można zapisać się na odwołany mecz.');
         return;
       }
@@ -284,58 +381,83 @@ export default function AnnouncementsScreen() {
       return;
     }
 
-    setUserRegistrations((prev) => [...prev, matchId]);
+    setUserRegistrations((prev: string[]) => [...prev, matchId]);
+
+    if (match) {
+      scheduleMatchNotification(match);
+    }
   };
 
-  const handleCancelRegistration = async (matchId: string) => {
+  const executeCancellation = async (matchId: string) => {
+    if (!currentPlayer) return;
+
+    const { error } = await supabase
+      .from('match_registrations')
+      .delete()
+      .eq('match_id', matchId)
+      .eq('player_id', currentPlayer.id);
+
+    if (error) {
+      Alert.alert('Błąd', error.message);
+      return;
+    }
+
+    setUserRegistrations((prev: string[]) => prev.filter((id) => id !== matchId));
+    cancelMatchNotification(matchId);
+  };
+
+  const handleCancelRegistration = (matchId: string) => {
     if (!currentPlayer) return;
 
     const targetAnnouncement = announcements.find((a) => a.matches?.id === matchId);
     const match = targetAnnouncement?.matches;
+
+    if (match && match.status_id === 2) {
+      Alert.alert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
+      return;
+    }
 
     if (match && !canCancelMatch(match.date, match.time_start)) {
       Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
       return;
     }
 
-    Alert.alert('Wypisać się?', 'Na pewno chcesz wypisać się z tego meczu?', [
-      { text: 'Anuluj', style: 'cancel' },
-      {
-        text: 'Wypisz się',
-        style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase
-            .from('match_registrations')
-            .delete()
-            .eq('match_id', matchId)
-            .eq('player_id', currentPlayer.id);
-
-          if (error) {
-            Alert.alert('Błąd', error.message);
-            return;
-          }
-
-          setUserRegistrations((prev) => prev.filter((id) => id !== matchId));
+    Alert.alert(
+      'Wypisz się z meczu',
+      'Czy na pewno chcesz wypisać się z tego meczu?',
+      [
+        { text: 'Nie', style: 'cancel' },
+        {
+          text: 'Tak, wypisz się',
+          style: 'destructive',
+          onPress: () => executeCancellation(matchId),
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const handlePressMatch = (matchId: string) => {
     router.push(`/(match)/${matchId}`);
   };
 
+  const uniqueCategoriesMap = new Map<number, string>();
+  announcements.forEach((a) => {
+    if (a.announcements_category) {
+      uniqueCategoriesMap.set(a.announcements_category.id, a.announcements_category.name);
+    }
+  });
+
   const availableFilters = [
-    { key: 'all', label: 'Wszystkie' },
-    ...Array.from(new Set(announcements.map((a) => a.category).filter(Boolean))).map((cat) => ({
-      key: cat,
-      label: getCategoryMeta(cat).label,
+    { key: 'all' as const, label: 'Wszystkie' },
+    ...Array.from(uniqueCategoriesMap.entries()).map(([id, name]) => ({
+      key: id,
+      label: name,
     })),
   ];
 
   const filtered = announcements.filter((a) => {
-    const matchesFilter = filter === 'all' || a.category === filter;
-    return matchesFilter;
+    if (filter === 'all') return true;
+    return a.category_id === filter;
   });
 
   if (loading) {
@@ -375,7 +497,7 @@ export default function AnnouncementsScreen() {
               <FlatList
                 horizontal
                 data={availableFilters}
-                keyExtractor={(f) => f.key}
+                keyExtractor={(f) => String(f.key)}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.filterRow}
                 renderItem={({ item }) => {
@@ -439,7 +561,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginTop: 10, 
+    marginTop: 10,
     marginBottom: 20,
   },
   headerTitle: { fontSize: 24, fontWeight: '700', color: colors.foreground },
@@ -504,55 +626,58 @@ const styles = StyleSheet.create({
   cardAuthor: { fontSize: 11, color: colors.mutedForeground, marginTop: 6, fontStyle: 'italic' },
 
   matchActionBox: {
-    marginTop: 10,
+    marginTop: 12,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingTop: 8,
+    paddingTop: 10,
   },
-  matchInfoText: { fontSize: 12, color: colors.mutedForeground, marginBottom: 8, fontWeight: '500' },
+  matchInfoText: { fontSize: 12, color: colors.foreground, marginBottom: 10, fontWeight: '600' },
   actionButtonsRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 8,
+    gap: 10,
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
+  viewMatchBtn: {
+    backgroundColor: colors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  viewMatchBtnText: { fontSize: 12, fontWeight: '700', color: colors.accentForeground },
   cancelMatchBtn: {
     backgroundColor: '#FEE2E2',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: '#FCA5A5',
   },
-  cancelMatchBtnText: { fontSize: 11, fontWeight: '700', color: '#DC2626' },
-  viewMatchBtn: {
-    backgroundColor: colors.accent,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.sm,
-  },
-  viewMatchBtnText: { fontSize: 11, fontWeight: '700', color: colors.accentForeground },
+  cancelMatchBtnText: { fontSize: 12, fontWeight: '700', color: '#DC2626' },
   registerMatchBtn: {
     backgroundColor: colors.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: radius.md,
   },
-  registerMatchBtnText: { fontSize: 11, fontWeight: '700', color: colors.primaryForeground },
+  registerMatchBtnText: { fontSize: 12, fontWeight: '700', color: colors.primaryForeground },
   statusBadgeCancelled: {
     backgroundColor: '#FEE2E2',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.md,
   },
-  statusBadgeCancelledText: { fontSize: 11, fontWeight: '700', color: '#DC2626' },
+  statusBadgeCancelledText: { fontSize: 12, fontWeight: '700', color: '#DC2626' },
   statusBadgePast: {
     backgroundColor: '#F1F5F9',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.md,
   },
-  statusBadgePastText: { fontSize: 11, fontWeight: '700', color: colors.mutedForeground },
+  statusBadgePastText: { fontSize: 12, fontWeight: '700', color: colors.mutedForeground },
 
   emptyState: { paddingVertical: 40, alignItems: 'center' },
   emptyText: { fontSize: 14, color: colors.mutedForeground },
