@@ -6,6 +6,7 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -33,6 +34,40 @@ type MatchItem = {
 
 type TabType = 'upcoming' | 'past';
 
+// Własny komponent CustomAlert w spójnym stylu aplikacji (pozostawiony do komunikatów o błędach itp.)
+type CustomAlertProps = {
+  visible: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+};
+
+function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={alertStyles.overlay}>
+        <View style={alertStyles.alertBox}>
+          <View style={alertStyles.indicator} />
+          <Text style={alertStyles.title}>{title}</Text>
+          <Text style={alertStyles.message}>{message}</Text>
+          <TouchableOpacity
+            style={alertStyles.button}
+            onPress={onClose}
+            activeOpacity={0.8}
+          >
+            <Text style={alertStyles.buttonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
   try {
     const matchDateTime = new Date(`${matchDateStr}T${matchTimeStartStr}`);
@@ -52,6 +87,17 @@ export default function ScheduleScreen() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('upcoming');
 
+  // Stan dla własnego alertu
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+
+  const showAlert = (title: string, message: string) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertVisible(true);
+  };
+
   const loadSchedule = useCallback(async () => {
     setLoading(true);
     const player = await getCurrentPlayer();
@@ -62,7 +108,7 @@ export default function ScheduleScreen() {
       .select('*');
 
     if (matchesError || !matchesData) {
-      console.error('Nie udało się pobrać listy meczów:', matchesError?.message);
+      showAlert('Błąd', 'Nie udało się pobrać listy meczów: ' + (matchesError?.message || ''));
       setLoading(false);
       return;
     }
@@ -121,7 +167,7 @@ export default function ScheduleScreen() {
       .eq('player_id', currentPlayer.id);
 
     if (error) {
-      console.error('Błąd wypisywania:', error.message);
+      showAlert('Błąd', 'Nie udało się wypisać z meczu: ' + error.message);
     }
     setActionLoadingId(null);
     loadSchedule();
@@ -129,7 +175,7 @@ export default function ScheduleScreen() {
 
   const handleQuickAction = async (match: MatchItem) => {
     if (!currentPlayer) {
-      console.error('Nie wczytano profilu gracza.');
+      showAlert('Błąd', 'Nie wczytano profilu gracza.');
       return;
     }
 
@@ -137,11 +183,12 @@ export default function ScheduleScreen() {
 
     if (match.isRegistered) {
       if (!canCancelMatch(match.date, match.time_start)) {
-        console.error('Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+        showAlert('Uwaga', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
         return;
       }
 
-      executeCancellation(match);
+      // Bezpośrednie wypisanie bez wyświetlania modala z potwierdzeniem
+      await executeCancellation(match);
     } else {
       setActionLoadingId(match.id);
       const { error } = await supabase.from('match_registrations').insert({
@@ -149,7 +196,9 @@ export default function ScheduleScreen() {
         player_id: currentPlayer.id,
       });
 
-      if (error) console.error('Błąd zapisu:', error.message);
+      if (error) {
+        showAlert('Błąd', 'Nie udało się zapisać na mecz: ' + error.message);
+      }
 
       setActionLoadingId(null);
       loadSchedule();
@@ -178,6 +227,13 @@ export default function ScheduleScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+      <CustomAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        onClose={() => setAlertVisible(false)}
+      />
+
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Terminarz Meczów</Text>
       </View>
@@ -254,6 +310,60 @@ export default function ScheduleScreen() {
     </SafeAreaView>
   );
 }
+
+const alertStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  alertBox: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: 24,
+    alignItems: 'center',
+    overflow: 'hidden',
+    ...shadow.card,
+  },
+  indicator: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  message: {
+    fontSize: 14,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  button: {
+    width: '100%',
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    ...shadow.button,
+  },
+  buttonText: {
+    color: colors.primaryForeground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },

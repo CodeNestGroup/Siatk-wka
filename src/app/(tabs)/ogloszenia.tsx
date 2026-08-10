@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -66,6 +67,40 @@ const CATEGORY_META: Record<string, CategoryMeta> = {
 };
 
 const DEFAULT_META: CategoryMeta = { bg: '#F1F5F9', fg: colors.foreground, icon: '•', label: 'Ogólne' };
+
+// Własny komponent CustomAlert w spójnym stylu aplikacji
+type CustomAlertProps = {
+  visible: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+};
+
+function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={alertStyles.overlay}>
+        <View style={alertStyles.alertBox}>
+          <View style={alertStyles.indicator} />
+          <Text style={alertStyles.title}>{title}</Text>
+          <Text style={alertStyles.message}>{message}</Text>
+          <TouchableOpacity
+            style={alertStyles.button}
+            onPress={onClose}
+            activeOpacity={0.8}
+          >
+            <Text style={alertStyles.buttonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 function getCategoryMeta(categoryName?: string | null): CategoryMeta {
   if (!categoryName) return DEFAULT_META;
@@ -271,6 +306,27 @@ export default function AnnouncementsScreen() {
 
   const [filter, setFilter] = useState<number | 'all'>('all');
 
+  // Stany dla własnego custom alertu
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertCallback, setAlertCallback] = useState<(() => void) | null>(null);
+
+  const showAlert = (title: string, message: string, onCloseCallback?: () => void) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertCallback(() => onCloseCallback || null);
+    setAlertVisible(true);
+  };
+
+  const handleAlertClose = () => {
+    setAlertVisible(false);
+    if (alertCallback) {
+      alertCallback();
+      setAlertCallback(null);
+    }
+  };
+
   const loadData = async () => {
     try {
       const player = await getCurrentPlayer();
@@ -363,7 +419,7 @@ export default function AnnouncementsScreen() {
 
   const handleRegisterMatch = async (matchId: string) => {
     if (!currentPlayer) {
-      console.error('Nie znaleziono profilu gracza.');
+      showAlert('Błąd', 'Nie znaleziono profilu gracza.');
       return;
     }
 
@@ -372,14 +428,14 @@ export default function AnnouncementsScreen() {
 
     if (match) {
       if (isMatchPast(match.date, match.time_start)) {
-        console.error('Nie można zapisać się na miniony mecz.');
+        showAlert('Błąd', 'Nie można zapisać się na miniony mecz.');
         return;
       }
       if (
         match.status_id === 2 ||
         targetAnnouncement?.announcements_category?.name?.toLowerCase() === 'spotkanie odwołane'
       ) {
-        console.error('Nie można zapisać się na odwołany mecz.');
+        showAlert('Błąd', 'Nie można zapisać się na odwołany mecz.');
         return;
       }
     }
@@ -390,7 +446,7 @@ export default function AnnouncementsScreen() {
     });
 
     if (error) {
-      console.error('Błąd zapisu:', error.message);
+      showAlert('Błąd', error.message);
       return;
     }
 
@@ -411,7 +467,7 @@ export default function AnnouncementsScreen() {
       .eq('player_id', currentPlayer.id);
 
     if (error) {
-      console.error('Błąd:', error.message);
+      showAlert('Błąd', error.message);
       return;
     }
 
@@ -426,12 +482,12 @@ export default function AnnouncementsScreen() {
     const match = targetAnnouncement?.matches;
 
     if (match && match.status_id === 2) {
-      console.error('Nie można wypisać się z odwołanego meczu.');
+      showAlert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
       return;
     }
 
     if (match && !canCancelMatch(match.date, match.time_start)) {
-      console.error('Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+      showAlert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
       return;
     }
 
@@ -472,6 +528,12 @@ export default function AnnouncementsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
+      <CustomAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        onClose={handleAlertClose}
+      />
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
@@ -547,6 +609,60 @@ export default function AnnouncementsScreen() {
     </SafeAreaView>
   );
 }
+
+const alertStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  alertBox: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: 24,
+    alignItems: 'center',
+    overflow: 'hidden',
+    ...shadow.card,
+  },
+  indicator: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  message: {
+    fontSize: 14,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  button: {
+    width: '100%',
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    ...shadow.button,
+  },
+  buttonText: {
+    color: colors.primaryForeground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },

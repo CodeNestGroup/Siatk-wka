@@ -8,8 +8,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   Switch,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +20,40 @@ import { supabase } from '@/lib/supabase';
 const CURRENT_PLAYER_KEY = 'current_player_id';
 const REMEMBER_ME_KEY = 'remember_me_status';
 
+// Własny komponent CustomAlert w stylu aplikacji
+type CustomAlertProps = {
+  visible: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+};
+
+function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={alertStyles.overlay}>
+        <View style={alertStyles.alertBox}>
+          <View style={alertStyles.indicator} />
+          <Text style={alertStyles.title}>{title}</Text>
+          <Text style={alertStyles.message}>{message}</Text>
+          <TouchableOpacity
+            style={alertStyles.button}
+            onPress={onClose}
+            activeOpacity={0.8}
+          >
+            <Text style={alertStyles.buttonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function LoginScreen() {
   const router = useRouter();
 
@@ -28,9 +62,30 @@ export default function LoginScreen() {
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
 
+  // Stany dla własnego custom alertu
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertCallback, setAlertCallback] = useState<(() => void) | null>(null);
+
+  const showAlert = (title: string, message: string, onCloseCallback?: () => void) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertCallback(() => onCloseCallback || null);
+    setAlertVisible(true);
+  };
+
+  const handleAlertClose = () => {
+    setAlertVisible(false);
+    if (alertCallback) {
+      alertCallback();
+      setAlertCallback(null);
+    }
+  };
+
   const handleLogin = async () => {
     if (!email.trim() || !password) {
-      Alert.alert('Błąd', 'Wypełnij pole e-mail oraz hasło.');
+      showAlert('Błąd', 'Wypełnij pole e-mail oraz hasło.');
       return;
     }
 
@@ -46,14 +101,14 @@ export default function LoginScreen() {
 
       if (error || !data) {
         setLoading(false);
-        Alert.alert('Błąd logowania', 'Nieprawidłowy e-mail lub hasło.');
+        showAlert('Błąd logowania', 'Nieprawidłowy e-mail lub hasło.');
         return;
       }
 
-      // 7.0 Sprawdzenie czy admin potwierdził rejestrację (player_status_id === 3 oznacza 'pending')
+      // Sprawdzenie czy admin potwierdził rejestrację (player_status_id === 3 oznacza 'pending')
       if (data.role_id === 3) {
         setLoading(false);
-        Alert.alert(
+        showAlert(
           'Konto oczekuje na zatwierdzenie',
           'Twoje konto nie zostało jeszcze zatwierdzone przez administratora. Spróbuj ponownie później.'
         );
@@ -69,12 +124,18 @@ export default function LoginScreen() {
       router.replace('/(tabs)');
     } catch (err) {
       setLoading(false);
-      Alert.alert('Błąd', 'Wystąpił nieoczekiwany błąd podczas logowania.');
+      showAlert('Błąd', 'Wystąpił nieoczekiwany błąd podczas logowania.');
     }
   };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
+      <CustomAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        onClose={handleAlertClose}
+      />
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -153,6 +214,60 @@ export default function LoginScreen() {
     </SafeAreaView>
   );
 }
+
+const alertStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  alertBox: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: 24,
+    alignItems: 'center',
+    overflow: 'hidden',
+    ...shadow.card,
+  },
+  indicator: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  message: {
+    fontSize: 14,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  button: {
+    width: '100%',
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    ...shadow.button,
+  },
+  buttonText: {
+    color: colors.primaryForeground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },

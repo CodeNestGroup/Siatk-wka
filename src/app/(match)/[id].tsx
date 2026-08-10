@@ -6,8 +6,8 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -60,6 +60,40 @@ type Announcement = {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// Własny komponent CustomAlert w stylu aplikacji
+type CustomAlertProps = {
+  visible: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+};
+
+function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={alertStyles.overlay}>
+        <View style={alertStyles.alertBox}>
+          <View style={alertStyles.indicator} />
+          <Text style={alertStyles.title}>{title}</Text>
+          <Text style={alertStyles.message}>{message}</Text>
+          <TouchableOpacity
+            style={alertStyles.button}
+            onPress={onClose}
+            activeOpacity={0.8}
+          >
+            <Text style={alertStyles.buttonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
   try {
     const matchDateTime = new Date(`${matchDateStr}T${matchTimeStartStr}`);
@@ -101,6 +135,27 @@ export default function MatchDetailScreen() {
   const [activeTab, setActiveTab] = useState<0 | 1>(0);
   const horizontalScrollRef = useRef<ScrollView>(null);
 
+  // Stany dla własnego custom alertu
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertCallback, setAlertCallback] = useState<(() => void) | null>(null);
+
+  const showAlert = (title: string, message: string, onCloseCallback?: () => void) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertCallback(() => onCloseCallback || null);
+    setAlertVisible(true);
+  };
+
+  const handleAlertClose = () => {
+    setAlertVisible(false);
+    if (alertCallback) {
+      alertCallback();
+      setAlertCallback(null);
+    }
+  };
+
   const loadData = useCallback(async () => {
     if (!id) return;
     
@@ -114,8 +169,7 @@ export default function MatchDetailScreen() {
       .single();
 
     if (matchError || !matchData) {
-      Alert.alert('Błąd', 'Nie udało się pobrać szczegółów meczu.');
-      router.back();
+      showAlert('Błąd', 'Nie udało się pobrać szczegółów meczu.', () => router.back());
       return;
     }
     setMatch(matchData);
@@ -209,12 +263,12 @@ export default function MatchDetailScreen() {
 
   const handleSignUp = async () => {
     if (!currentPlayer) {
-      Alert.alert('Błąd', 'Nie zidentyfikowano zalogowanego gracza.');
+      showAlert('Błąd', 'Nie zidentyfikowano zalogowanego gracza.');
       return;
     }
 
     if (isCancelled) {
-      Alert.alert('Błąd', 'Nie można zapisać się na odwołany mecz.');
+      showAlert('Błąd', 'Nie można zapisać się na odwołany mecz.');
       return;
     }
 
@@ -226,7 +280,7 @@ export default function MatchDetailScreen() {
     setActionLoading(false);
 
     if (error) {
-      Alert.alert('Błąd', error.message);
+      showAlert('Błąd', error.message);
       return;
     }
     loadData();
@@ -236,12 +290,12 @@ export default function MatchDetailScreen() {
     if (!currentPlayer || !match) return;
 
     if (isCancelled) {
-      Alert.alert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
+      showAlert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
       return;
     }
 
     if (!isCancellable) {
-      Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+      showAlert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
       return;
     }
 
@@ -254,7 +308,7 @@ export default function MatchDetailScreen() {
     setActionLoading(false);
 
     if (error) {
-      Alert.alert('Błąd', error.message);
+      showAlert('Błąd', error.message);
       return;
     }
     loadData();
@@ -262,6 +316,12 @@ export default function MatchDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
+      <CustomAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        onClose={handleAlertClose}
+      />
       <View style={styles.topSection}>
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
@@ -450,6 +510,60 @@ export default function MatchDetailScreen() {
     </SafeAreaView>
   );
 }
+
+const alertStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  alertBox: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: 24,
+    alignItems: 'center',
+    overflow: 'hidden',
+    ...shadow.card,
+  },
+  indicator: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  message: {
+    fontSize: 14,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  button: {
+    width: '100%',
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    ...shadow.button,
+  },
+  buttonText: {
+    color: colors.primaryForeground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },

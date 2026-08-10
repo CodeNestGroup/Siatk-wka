@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -40,6 +41,40 @@ type MyRegistration = {
 };
 
 type TabType = 'active' | 'past';
+
+// Własny komponent CustomAlert w spójnym stylu aplikacji
+type CustomAlertProps = {
+  visible: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+};
+
+function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={alertStyles.overlay}>
+        <View style={alertStyles.alertBox}>
+          <View style={alertStyles.indicator} />
+          <Text style={alertStyles.title}>{title}</Text>
+          <Text style={alertStyles.message}>{message}</Text>
+          <TouchableOpacity
+            style={alertStyles.button}
+            onPress={onClose}
+            activeOpacity={0.8}
+          >
+            <Text style={alertStyles.buttonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
   try {
@@ -185,6 +220,27 @@ export default function MojeZapisyScreen() {
   const [selectedRange, setSelectedRange] = useState<'week' | 'month' | 'quarter' | 'year' | 'all' | null>(null);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
+  // Stany dla własnego custom alertu
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertCallback, setAlertCallback] = useState<(() => void) | null>(null);
+
+  const showAlert = (title: string, message: string, onCloseCallback?: () => void) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertCallback(() => onCloseCallback || null);
+    setAlertVisible(true);
+  };
+
+  const handleAlertClose = () => {
+    setAlertVisible(false);
+    if (alertCallback) {
+      alertCallback();
+      setAlertCallback(null);
+    }
+  };
+
   const loadData = async () => {
     try {
       const player = await getCurrentPlayer();
@@ -282,7 +338,7 @@ export default function MojeZapisyScreen() {
     setCancellingId(null);
 
     if (error) {
-      console.error('Błąd wypisu:', error.message);
+      showAlert('Błąd', error.message);
       return;
     }
     await loadData();
@@ -291,11 +347,11 @@ export default function MojeZapisyScreen() {
   const handleCancel = (reg: MyRegistration) => {
     if (reg.matches) {
       if (reg.matches.status_id === 2) {
-        console.error('Nie można wypisać się z odwołanego meczu.');
+        showAlert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
         return;
       }
       if (!canCancelMatch(reg.matches.date, reg.matches.time_start)) {
-        console.error('Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+        showAlert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
         return;
       }
     }
@@ -387,7 +443,7 @@ export default function MojeZapisyScreen() {
     setBulkActionLoading(false);
 
     if (error) {
-      console.error('Błąd masowego wypisu:', error.message);
+      showAlert('Błąd', error.message);
       return;
     }
 
@@ -407,6 +463,12 @@ export default function MojeZapisyScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
+      <CustomAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        onClose={handleAlertClose}
+      />
       <FlatList
         data={filteredRegistrations}
         keyExtractor={(item) => item.id}
@@ -550,6 +612,60 @@ export default function MojeZapisyScreen() {
     </SafeAreaView>
   );
 }
+
+const alertStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  alertBox: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: 24,
+    alignItems: 'center',
+    overflow: 'hidden',
+    ...shadow.card,
+  },
+  indicator: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  message: {
+    fontSize: 14,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  button: {
+    width: '100%',
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    ...shadow.button,
+  },
+  buttonText: {
+    color: colors.primaryForeground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },

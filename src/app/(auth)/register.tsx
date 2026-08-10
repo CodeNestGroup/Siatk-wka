@@ -8,12 +8,46 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
+
+// Własny komponent CustomAlert w stylu aplikacji
+type CustomAlertProps = {
+  visible: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+};
+
+function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={alertStyles.overlay}>
+        <View style={alertStyles.alertBox}>
+          <View style={alertStyles.indicator} />
+          <Text style={alertStyles.title}>{title}</Text>
+          <Text style={alertStyles.message}>{message}</Text>
+          <TouchableOpacity
+            style={alertStyles.button}
+            onPress={onClose}
+            activeOpacity={0.8}
+          >
+            <Text style={alertStyles.buttonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -24,6 +58,27 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Stany dla własnego custom alertu
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertCallback, setAlertCallback] = useState<(() => void) | null>(null);
+
+  const showAlert = (title: string, message: string, onCloseCallback?: () => void) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertCallback(() => onCloseCallback || null);
+    setAlertVisible(true);
+  };
+
+  const handleAlertClose = () => {
+    setAlertVisible(false);
+    if (alertCallback) {
+      alertCallback();
+      setAlertCallback(null);
+    }
+  };
 
   // Stany dla ekstremalnej Captcha
   const [captchaCode, setCaptchaCode] = useState('');
@@ -85,17 +140,17 @@ export default function RegisterScreen() {
 
   const handleRegister = async () => {
     if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
-      Alert.alert('Błąd', 'Wypełnij wszystkie wymagane pola.');
+      showAlert('Błąd', 'Wypełnij wszystkie wymagane pola.');
       return;
     }
     if (!email.includes('@')) {
-      Alert.alert('Błąd', 'Podaj poprawny adres email.');
+      showAlert('Błąd', 'Podaj poprawny adres email.');
       return;
     }
 
     const passwordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{6,}$/;
     if (!passwordRegex.test(password)) {
-      Alert.alert(
+      showAlert(
         'Błąd',
         'Hasło musi mieć co najmniej 6 znaków, zawierać jedną wielką literę, jedną cyfrę oraz jeden znak specjalny.'
       );
@@ -103,13 +158,13 @@ export default function RegisterScreen() {
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Błąd', 'Hasła nie są takie same.');
+      showAlert('Błąd', 'Hasła nie są takie same.');
       return;
     }
 
     // Walidacja dokładnego kodu (z uwzględnieniem wielkości liter)
     if (!userCaptchaInput.trim() || userCaptchaInput.trim() !== captchaCode) {
-      Alert.alert('Błąd weryfikacji', 'Wpisany kod jest niepoprawny (uwzględnij wielkość liter). Spróbuj ponownie.');
+      showAlert('Błąd weryfikacji', 'Wpisany kod jest niepoprawny (uwzględnij wielkość liter). Spróbuj ponownie.');
       generateCaptcha();
       return;
     }
@@ -128,7 +183,7 @@ export default function RegisterScreen() {
 
       if (checkError) {
         setLoading(false);
-        Alert.alert('Błąd', 'Nie udało się zweryfikować unikalności danych.');
+        showAlert('Błąd', 'Nie udało się zweryfikować unikalności danych.');
         generateCaptcha();
         return;
       }
@@ -139,11 +194,11 @@ export default function RegisterScreen() {
         const nameTaken = existingUsers.some((u) => u.full_name === cleanName);
 
         if (emailTaken && nameTaken) {
-          Alert.alert('Błąd', 'Ten adres email oraz nazwa są już zajęte.');
+          showAlert('Błąd', 'Ten adres email oraz nazwa są już zajęte.');
         } else if (emailTaken) {
-          Alert.alert('Błąd', 'Ten adres email jest już zajęty.');
+          showAlert('Błąd', 'Ten adres email jest już zajęty.');
         } else {
-          Alert.alert('Błąd', 'Ta nazwa użytkownika jest już zajęta.');
+          showAlert('Błąd', 'Ta nazwa użytkownika jest już zajęta.');
         }
         generateCaptcha();
         return;
@@ -162,28 +217,34 @@ export default function RegisterScreen() {
 
       if (insertError || !data) {
         setLoading(false);
-        Alert.alert('Błąd rejestracji', insertError?.message || 'Nie udało się utworzyć konta.');
+        showAlert('Błąd rejestracji', insertError?.message || 'Nie udało się utworzyć konta.');
         generateCaptcha();
         return;
       }
 
       setLoading(false);
       
-      Alert.alert(
+      showAlert(
         'Rejestracja zakończona sukcesem',
         'Twoje konto zostało utworzone i czeka na zatwierdzenie przez administratora.',
-        [{ text: 'OK', onPress: () => router.back() }]
+        () => router.back()
       );
 
     } catch (err) {
       setLoading(false);
-      Alert.alert('Błąd', 'Wystąpił nieoczekiwany błąd podczas rejestracji.');
+      showAlert('Błąd', 'Wystąpił nieoczekiwany błąd podczas rejestracji.');
       generateCaptcha();
     }
   };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
+      <CustomAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        onClose={handleAlertClose}
+      />
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -359,6 +420,60 @@ export default function RegisterScreen() {
     </SafeAreaView>
   );
 }
+
+const alertStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  alertBox: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: 24,
+    alignItems: 'center',
+    overflow: 'hidden',
+    ...shadow.card,
+  },
+  indicator: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  message: {
+    fontSize: 14,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  button: {
+    width: '100%',
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    ...shadow.button,
+  },
+  buttonText: {
+    color: colors.primaryForeground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },

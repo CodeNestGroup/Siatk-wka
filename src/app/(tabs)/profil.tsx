@@ -7,9 +7,9 @@ import {
   StyleSheet,
   ScrollView,
   Switch,
-  Alert,
   ActivityIndicator,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -20,8 +20,108 @@ import { supabase } from '@/lib/supabase';
 type NotificationPrefs = {
   notif_announcements: boolean;
   notif_match_reminders: boolean;
-  notif_payments: boolean;
 };
+
+// Własny komponent CustomAlert w spójnym stylu aplikacji
+type CustomAlertProps = {
+  visible: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+};
+
+function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={alertStyles.overlay}>
+        <View style={alertStyles.alertBox}>
+          <View style={alertStyles.indicator} />
+          <Text style={alertStyles.title}>{title}</Text>
+          <Text style={alertStyles.message}>{message}</Text>
+          <TouchableOpacity
+            style={alertStyles.button}
+            onPress={onClose}
+            activeOpacity={0.8}
+          >
+            <Text style={alertStyles.buttonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// Komponent CustomConfirm do pytań tak/nie (np. wylogowanie)
+type CustomConfirmProps = {
+  visible: boolean;
+  title: string;
+  message: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+  confirmText?: string;
+  cancelText?: string;
+  destructive?: boolean;
+};
+
+function CustomConfirm({
+  visible,
+  title,
+  message,
+  onCancel,
+  onConfirm,
+  confirmText = 'Tak',
+  cancelText = 'Anuluj',
+  destructive = false,
+}: CustomConfirmProps) {
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onCancel}
+    >
+      <View style={alertStyles.overlay}>
+        <View style={alertStyles.alertBox}>
+          <View style={alertStyles.indicator} />
+          <Text style={alertStyles.title}>{title}</Text>
+          <Text style={alertStyles.message}>{message}</Text>
+          <View style={alertStyles.confirmButtonsRow}>
+            <TouchableOpacity
+              style={[alertStyles.confirmButton, alertStyles.cancelButton]}
+              onPress={onCancel}
+              activeOpacity={0.8}
+            >
+              <Text style={alertStyles.cancelButtonText}>{cancelText}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                alertStyles.confirmButton,
+                destructive ? alertStyles.destructiveButton : alertStyles.primaryButton,
+              ]}
+              onPress={onConfirm}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={
+                  destructive
+                    ? alertStyles.destructiveButtonText
+                    : alertStyles.primaryButtonText
+                }
+              >
+                {confirmText}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 export default function ProfilScreen() {
   const router = useRouter();
@@ -48,8 +148,31 @@ export default function ProfilScreen() {
   const [prefs, setPrefs] = useState<NotificationPrefs>({
     notif_announcements: true,
     notif_match_reminders: true,
-    notif_payments: false,
   });
+
+  // Stany dla własnych modali komunikatów
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertCallback, setAlertCallback] = useState<(() => void) | null>(null);
+
+  const showAlert = (title: string, message: string, onCloseCallback?: () => void) => {
+    setAlertTitle(title);
+    setAlertMessage(message);
+    setAlertCallback(() => onCloseCallback || null);
+    setAlertVisible(true);
+  };
+
+  const handleAlertClose = () => {
+    setAlertVisible(false);
+    if (alertCallback) {
+      alertCallback();
+      setAlertCallback(null);
+    }
+  };
+
+  // Stan dla modala potwierdzenia wylogowania
+  const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
 
   useEffect(() => {
     loadPlayerData();
@@ -79,7 +202,7 @@ export default function ProfilScreen() {
         .single();
 
       if (error || !data) {
-        Alert.alert('Błąd', 'Nie udało się pobrać danych profilu.');
+        showAlert('Błąd', 'Nie udało się pobrać danych profilu.');
         return;
       }
 
@@ -96,7 +219,6 @@ export default function ProfilScreen() {
       setPrefs({
         notif_announcements: data.notif_announcements ?? true,
         notif_match_reminders: data.notif_match_reminders ?? true,
-        notif_payments: data.notif_payments ?? false,
       });
     } catch (e) {
       console.error(e);
@@ -117,22 +239,22 @@ export default function ProfilScreen() {
       .eq('id', playerId);
 
     if (error) {
-      Alert.alert('Błąd', 'Nie udało się zapisać ustawienia powiadomień.');
+      showAlert('Błąd', 'Nie udało się zapisać ustawienia powiadomień.');
       setPrefs((prev) => ({ ...prev, [key]: !newValue }));
     }
   };
 
   const handleChangePassword = async () => {
     if (!oldPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
-      Alert.alert('Błąd', 'Wypełnij wszystkie pola dotyczące hasła.');
+      showAlert('Błąd', 'Wypełnij wszystkie pola dotyczące hasła.');
       return;
     }
     if (newPassword.length < 6) {
-      Alert.alert('Błąd', 'Nowe hasło musi mieć minimum 6 znaków.');
+      showAlert('Błąd', 'Nowe hasło musi mieć minimum 6 znaków.');
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert('Błąd', 'Nowe hasła nie są takie same.');
+      showAlert('Błąd', 'Nowe hasła nie są takie same.');
       return;
     }
     if (!playerId) return;
@@ -148,7 +270,7 @@ export default function ProfilScreen() {
 
       if (fetchError || !player || player.password !== oldPassword) {
         setChangingPassword(false);
-        Alert.alert('Błąd', 'Stare hasło jest niepoprawne.');
+        showAlert('Błąd', 'Stare hasło jest niepoprawne.');
         return;
       }
 
@@ -160,43 +282,39 @@ export default function ProfilScreen() {
       setChangingPassword(false);
 
       if (updateError) {
-        Alert.alert('Błąd', updateError.message);
+        showAlert('Błąd', updateError.message);
         return;
       }
 
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      Alert.alert('Sukces', 'Hasło zostało zmienione.');
+      showAlert('Sukces', 'Hasło zostało zmienione.');
     } catch (e: any) {
       setChangingPassword(false);
-      Alert.alert('Błąd', e.message || 'Wystąpił nieoczekiwany błąd.');
+      showAlert('Błąd', e.message || 'Wystąpił nieoczekiwany błąd.');
     }
   };
 
-  const handleLogout = async () => {
-    Alert.alert('Wylogowanie', 'Czy na pewno chcesz się wylogować?', [
-      { text: 'Anuluj', style: 'cancel' },
-      {
-        text: 'Wyloguj',
-        style: 'destructive',
-        onPress: async () => {
-          if (playerId) {
-            await supabase
-              .from('players')
-              .update({ push_token: null })
-              .eq('id', playerId);
-          }
+  const handleLogoutPress = () => {
+    setLogoutConfirmVisible(true);
+  };
 
-          await AsyncStorage.removeItem('current_player_id');
-          await AsyncStorage.removeItem('remember_me_status');
-          await AsyncStorage.removeItem('current_player_data');
-          await AsyncStorage.removeItem('current_auth_user_id');
+  const executeLogout = async () => {
+    setLogoutConfirmVisible(false);
+    if (playerId) {
+      await supabase
+        .from('players')
+        .update({ push_token: null })
+        .eq('id', playerId);
+    }
 
-          router.replace('/(auth)');
-        },
-      },
-    ]);
+    await AsyncStorage.removeItem('current_player_id');
+    await AsyncStorage.removeItem('remember_me_status');
+    await AsyncStorage.removeItem('current_player_data');
+    await AsyncStorage.removeItem('current_auth_user_id');
+
+    router.replace('/(auth)');
   };
 
   if (loadingUser) {
@@ -212,6 +330,24 @@ export default function ProfilScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
+      <CustomAlert
+        visible={alertVisible}
+        title={alertTitle}
+        message={alertMessage}
+        onClose={handleAlertClose}
+      />
+
+      <CustomConfirm
+        visible={logoutConfirmVisible}
+        title="Wylogowanie"
+        message="Czy na pewno chcesz się wylogować?"
+        cancelText="Anuluj"
+        confirmText="Wyloguj"
+        destructive
+        onCancel={() => setLogoutConfirmVisible(false)}
+        onConfirm={executeLogout}
+      />
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -372,29 +508,12 @@ export default function ProfilScreen() {
               thumbColor="#fff"
             />
           </View>
-
-          <View style={styles.prefDivider} />
-
-          <View style={styles.prefRow}>
-            <View style={styles.prefTextWrap}>
-              <Text style={styles.prefLabel}>Płatności po meczu</Text>
-              <Text style={styles.prefDescription}>
-                Przypomnij o nieopłaconym meczu po jego zakończeniu
-              </Text>
-            </View>
-            <Switch
-              value={prefs.notif_payments}
-              onValueChange={() => togglePref('notif_payments')}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor="#fff"
-            />
-          </View>
         </View>
 
         {/* Przycisk Wyloguj */}
         <TouchableOpacity
           style={styles.logoutButton}
-          onPress={handleLogout}
+          onPress={handleLogoutPress}
           activeOpacity={0.8}
         >
           <Text style={styles.logoutButtonText}>Wyloguj się</Text>
@@ -403,6 +522,100 @@ export default function ProfilScreen() {
     </SafeAreaView>
   );
 }
+
+const alertStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  alertBox: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: 24,
+    alignItems: 'center',
+    overflow: 'hidden',
+    ...shadow.card,
+  },
+  indicator: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  message: {
+    fontSize: 14,
+    color: colors.mutedForeground,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  button: {
+    width: '100%',
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    ...shadow.button,
+  },
+  buttonText: {
+    color: colors.primaryForeground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  confirmButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  confirmButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: colors.muted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  cancelButtonText: {
+    color: colors.foreground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  primaryButton: {
+    backgroundColor: colors.primary,
+    ...shadow.button,
+  },
+  primaryButtonText: {
+    color: colors.primaryForeground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  destructiveButton: {
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+  },
+  destructiveButtonText: {
+    color: '#b91c1c',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
