@@ -238,7 +238,6 @@ export default function MatchDetailScreen() {
       return;
     }
 
-    // Okienko potwierdzenia wypisania się
     Alert.alert(
       'Wypisz się z meczu',
       'Czy na pewno chcesz wypisać się z tego meczu?',
@@ -320,23 +319,6 @@ export default function MatchDetailScreen() {
                 </Text>
               </TouchableOpacity>
             )}
-          </View>
-        )}
-
-        {isFinished && currentPlayer && myRegistration && (
-          <View style={styles.finishedPaymentContainer}>
-            <Text
-              style={[
-                styles.finishedPaymentText,
-                { color: myRegistration.is_paid ? '#16A34A' : colors.destructive },
-              ]}
-            >
-              {isCancelled
-                ? '✕ Mecz został odwołany'
-                : myRegistration.is_paid
-                ? '✓ Mecz zakończony – Twój udział został opłacony'
-                : '✕ Mecz zakończony – Twój udział nie został opłacony'}
-            </Text>
           </View>
         )}
       </View>
@@ -524,20 +506,6 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: { color: colors.destructive, fontSize: 12, fontWeight: '700' },
   lockedText: { fontSize: 11, color: colors.mutedForeground, fontStyle: 'italic' },
-
-  finishedPaymentContainer: {
-    marginTop: 12,
-    padding: 10,
-    borderRadius: radius.md,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-  },
-  finishedPaymentText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
 
   navSection: {
     flexDirection: 'row',

@@ -177,8 +177,6 @@ export default function ScheduleScreen() {
     .sort((a, b) => {
       const timeA = new Date(`${a.date}T${a.time_start}`).getTime();
       const timeB = new Date(`${b.date}T${b.time_start}`).getTime();
-
-      // W zakładce "Nadchodzące" oraz "Zakończone / Odwołane" sortujemy zawsze od najbliższych do najdalszych czasowo
       return timeA - timeB;
     });
 
@@ -207,7 +205,7 @@ export default function ScheduleScreen() {
           style={[styles.tabButton, activeTab === 'past' && styles.tabButtonActive]}
           onPress={() => setActiveTab('past')}
         >
-          <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>Zakończone / Odwołane</Text>
+          <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>Zakończone</Text>
         </TouchableOpacity>
       </View>
 

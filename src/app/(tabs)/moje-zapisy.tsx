@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Alert,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -56,14 +56,20 @@ function RegistrationCard({
   reg,
   onCancel,
   onPress,
+  onLongPress,
   cancelling,
   activeTab,
+  isSelectionMode,
+  isSelected,
 }: {
   reg: MyRegistration;
   onCancel: (reg: MyRegistration) => void;
   onPress: (matchId: string) => void;
+  onLongPress: () => void;
   cancelling: boolean;
   activeTab: TabType;
+  isSelectionMode: boolean;
+  isSelected: boolean;
 }) {
   if (!reg.matches) return null;
 
@@ -74,10 +80,29 @@ function RegistrationCard({
 
   return (
     <TouchableOpacity
-      style={[styles.card, isCancelled && styles.cardCancelled]}
+      style={[
+        styles.card,
+        isCancelled && styles.cardCancelled,
+        isSelectionMode && isSelected && { borderColor: colors.primary, borderWidth: 2, backgroundColor: '#eff6ff' },
+      ]}
       activeOpacity={0.8}
-      onPress={() => reg.matches && onPress(reg.matches.id)}
+      onPress={() => {
+        if (isSelectionMode) {
+          onLongPress();
+        } else {
+          reg.matches && onPress(reg.matches.id);
+        }
+      }}
+      onLongPress={onLongPress}
     >
+      {isSelectionMode && (
+        <View style={styles.checkboxContainer}>
+          <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
+            {isSelected && <Text style={styles.checkmark}>✓</Text>}
+          </View>
+        </View>
+      )}
+
       <View style={[styles.dateBox, isCancelled && styles.dateBoxCancelled]}>
         <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>{day}</Text>
         <Text style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]}>{month}</Text>
@@ -112,31 +137,33 @@ function RegistrationCard({
         </Text>
 
         <View style={styles.footerRow}>
-          <Text
-            style={[
-              styles.paymentStatus,
-              { color: reg.is_paid ? '#16A34A' : colors.mutedForeground },
-            ]}
-          >
-            {reg.is_paid ? '✓ Opłacone' : 'Brak statusu płatności'}
-          </Text>
-          <Text style={styles.footerText}>{Number(reg.matches.price_per_player)} PLN</Text>
-        </View>
+          <View>
+            <Text
+              style={[
+                styles.paymentStatus,
+                { color: reg.is_paid ? '#16A34A' : colors.mutedForeground },
+              ]}
+            >
+              {reg.is_paid ? '✓ Opłacone' : 'Brak statusu płatności'}
+            </Text>
+            <Text style={styles.footerText}>{Number(reg.matches.price_per_player)} PLN</Text>
+          </View>
 
-        {activeTab === 'active' && !isCancelled && (
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => onCancel(reg)}
-            disabled={cancelling}
-            activeOpacity={0.7}
-          >
-            {cancelling ? (
-              <ActivityIndicator size="small" color="#DC2626" />
-            ) : (
-              <Text style={styles.cancelButtonText}>Wypisz się z meczu</Text>
-            )}
-          </TouchableOpacity>
-        )}
+          {activeTab === 'active' && !isCancelled && !isSelectionMode && (
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => onCancel(reg)}
+              disabled={cancelling}
+              activeOpacity={0.7}
+            >
+              {cancelling ? (
+                <ActivityIndicator size="small" color="#DC2626" />
+              ) : (
+                <Text style={styles.cancelButtonText}>Wypisz się</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -152,6 +179,11 @@ export default function MojeZapisyScreen() {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabType>('active');
+
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedRegIds, setSelectedRegIds] = useState<string[]>([]);
+  const [selectedRange, setSelectedRange] = useState<'week' | 'month' | 'quarter' | 'year' | 'all' | null>(null);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
   const loadData = async () => {
     try {
@@ -250,7 +282,7 @@ export default function MojeZapisyScreen() {
     setCancellingId(null);
 
     if (error) {
-      Alert.alert('Błąd', error.message);
+      console.error('Błąd wypisu:', error.message);
       return;
     }
     await loadData();
@@ -259,27 +291,16 @@ export default function MojeZapisyScreen() {
   const handleCancel = (reg: MyRegistration) => {
     if (reg.matches) {
       if (reg.matches.status_id === 2) {
-        Alert.alert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
+        console.error('Nie można wypisać się z odwołanego meczu.');
         return;
       }
       if (!canCancelMatch(reg.matches.date, reg.matches.time_start)) {
-        Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+        console.error('Nie można wypisać się na mniej niż 2 godziny przed meczem.');
         return;
       }
     }
 
-    Alert.alert(
-      'Wypisz się z meczu',
-      'Czy na pewno chcesz wypisać się z tego meczu?',
-      [
-        { text: 'Nie', style: 'cancel' },
-        {
-          text: 'Tak, wypisz się',
-          style: 'destructive',
-          onPress: () => executeCancellation(reg.id),
-        },
-      ]
-    );
+    executeCancellation(reg.id);
   };
 
   const handlePressMatch = (matchId: string) => {
@@ -310,6 +331,72 @@ export default function MojeZapisyScreen() {
       }
     });
 
+  const toggleSelectReg = (regId: string) => {
+    if (selectedRegIds.includes(regId)) {
+      setSelectedRegIds(selectedRegIds.filter((id) => id !== regId));
+    } else {
+      setSelectedRegIds([...selectedRegIds, regId]);
+    }
+  };
+
+  const handleLongPressCard = (regId: string) => {
+    if (activeTab !== 'active') return;
+    if (!isSelectionMode) {
+      setIsSelectionMode(true);
+      setSelectedRegIds([regId]);
+    } else {
+      toggleSelectReg(regId);
+    }
+  };
+
+  const handleRangeSelect = (range: 'week' | 'month' | 'quarter' | 'year' | 'all') => {
+    setSelectedRange(range);
+    const now = new Date();
+    const idsToSelect: string[] = [];
+
+    filteredRegistrations.forEach((reg) => {
+      if (!reg.matches || reg.matches.status_id === 2) return;
+      const matchDate = new Date(reg.matches.date);
+      const diffTime = matchDate.getTime() - now.getTime();
+      const diffDays = diffTime / (1000 * 3600 * 24);
+
+      let matchesCriteria = false;
+      if (range === 'week' && diffDays >= 0 && diffDays <= 7) matchesCriteria = true;
+      else if (range === 'month' && diffDays >= 0 && diffDays <= 30) matchesCriteria = true;
+      else if (range === 'quarter' && diffDays >= 0 && diffDays <= 90) matchesCriteria = true;
+      else if (range === 'year' && diffDays >= 0 && diffDays <= 365) matchesCriteria = true;
+      else if (range === 'all' && diffDays >= 0) matchesCriteria = true;
+
+      if (matchesCriteria) {
+        idsToSelect.push(reg.id);
+      }
+    });
+
+    setSelectedRegIds(idsToSelect);
+  };
+
+  const handleBulkCancel = async () => {
+    if (selectedRegIds.length === 0) return;
+
+    setBulkActionLoading(true);
+    const { error } = await supabase
+      .from('match_registrations')
+      .delete()
+      .in('id', selectedRegIds);
+
+    setBulkActionLoading(false);
+
+    if (error) {
+      console.error('Błąd masowego wypisu:', error.message);
+      return;
+    }
+
+    setIsSelectionMode(false);
+    setSelectedRegIds([]);
+    setSelectedRange(null);
+    await loadData();
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
@@ -331,7 +418,7 @@ export default function MojeZapisyScreen() {
         ListHeaderComponent={
           <View>
             <Text style={styles.headerTitle}>Moje zapisy</Text>
-            <Text style={styles.headerSubtitle}>Mecze, na które się zapisałeś</Text>
+            <Text style={styles.headerSubtitle}>Mecze, na które się zapisałeś (przytrzymaj kafelek, aby zaznaczyć wiele)</Text>
 
             {errorMsg && (
               <View style={styles.errorBox}>
@@ -345,10 +432,76 @@ export default function MojeZapisyScreen() {
               </View>
             )}
 
+            {isSelectionMode && activeTab === 'active' && (
+              <View style={styles.selectionToolbar}>
+                <Text style={styles.toolbarTitle}>Wybierz zakres dat:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.rangeScroll}>
+                  <TouchableOpacity
+                    style={[styles.rangeChip, selectedRange === 'week' && styles.rangeChipActive]}
+                    onPress={() => handleRangeSelect('week')}
+                  >
+                    <Text style={[styles.rangeText, selectedRange === 'week' && styles.rangeTextActive]}>Tydzień</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.rangeChip, selectedRange === 'month' && styles.rangeChipActive]}
+                    onPress={() => handleRangeSelect('month')}
+                  >
+                    <Text style={[styles.rangeText, selectedRange === 'month' && styles.rangeTextActive]}>Miesiąc</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.rangeChip, selectedRange === 'quarter' && styles.rangeChipActive]}
+                    onPress={() => handleRangeSelect('quarter')}
+                  >
+                    <Text style={[styles.rangeText, selectedRange === 'quarter' && styles.rangeTextActive]}>Kwartał</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.rangeChip, selectedRange === 'year' && styles.rangeChipActive]}
+                    onPress={() => handleRangeSelect('year')}
+                  >
+                    <Text style={[styles.rangeText, selectedRange === 'year' && styles.rangeTextActive]}>Rok</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.rangeChip, selectedRange === 'all' && styles.rangeChipActive]}
+                    onPress={() => handleRangeSelect('all')}
+                  >
+                    <Text style={[styles.rangeText, selectedRange === 'all' && styles.rangeTextActive]}>Wszystko</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+
+                <View style={styles.toolbarActionsRow}>
+                  <TouchableOpacity
+                    style={[styles.bulkCancelBtn, bulkActionLoading && { opacity: 0.6 }]}
+                    onPress={handleBulkCancel}
+                    disabled={selectedRegIds.length === 0 || bulkActionLoading}
+                  >
+                    {bulkActionLoading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.bulkCancelText}>Wypisz zaznaczone ({selectedRegIds.length})</Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.closeSelectionBtn}
+                    onPress={() => {
+                      setIsSelectionMode(false);
+                      setSelectedRegIds([]);
+                      setSelectedRange(null);
+                    }}
+                  >
+                    <Text style={styles.closeSelectionText}>Zamknij</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
             <View style={styles.tabsContainer}>
               <TouchableOpacity
                 style={[styles.tabButton, activeTab === 'active' && styles.tabButtonActive]}
-                onPress={() => setActiveTab('active')}
+                onPress={() => {
+                  setActiveTab('active');
+                  setIsSelectionMode(false);
+                  setSelectedRegIds([]);
+                }}
                 activeOpacity={0.7}
               >
                 <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>
@@ -358,11 +511,15 @@ export default function MojeZapisyScreen() {
 
               <TouchableOpacity
                 style={[styles.tabButton, activeTab === 'past' && styles.tabButtonActive]}
-                onPress={() => setActiveTab('past')}
+                onPress={() => {
+                  setActiveTab('past');
+                  setIsSelectionMode(false);
+                  setSelectedRegIds([]);
+                }}
                 activeOpacity={0.7}
               >
                 <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>
-                  Zakończone / Odwołane
+                  Zakończone
                 </Text>
               </TouchableOpacity>
             </View>
@@ -373,7 +530,7 @@ export default function MojeZapisyScreen() {
             <Text style={styles.emptyText}>
               {activeTab === 'active'
                 ? 'Brak nadchodzących zapisów.'
-                : 'Brak zakończonych lub odwołanych zapisów.'}
+                : 'Brak zakończonych zapisów.'}
             </Text>
           </View>
         }
@@ -382,8 +539,11 @@ export default function MojeZapisyScreen() {
             reg={item}
             onCancel={handleCancel}
             onPress={handlePressMatch}
+            onLongPress={() => handleLongPressCard(item.id)}
             cancelling={cancellingId === item.id}
             activeTab={activeTab}
+            isSelectionMode={isSelectionMode && activeTab === 'active'}
+            isSelected={selectedRegIds.includes(item.id)}
           />
         )}
       />
@@ -403,7 +563,67 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32 },
 
   headerTitle: { fontSize: 24, fontWeight: '700', color: colors.foreground, marginTop: 16 },
-  headerSubtitle: { fontSize: 14, color: colors.mutedForeground, marginTop: 4, marginBottom: 16 },
+  headerSubtitle: { fontSize: 13, color: colors.mutedForeground, marginTop: 4, marginBottom: 16 },
+
+  selectionToolbar: {
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    padding: 10,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  toolbarTitle: { fontSize: 12, fontWeight: '700', color: colors.foreground, marginBottom: 6 },
+  rangeScroll: { marginBottom: 8 },
+  rangeChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.sm,
+    backgroundColor: colors.muted,
+    marginRight: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  rangeChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  rangeText: { fontSize: 11, fontWeight: '600', color: colors.mutedForeground },
+  rangeTextActive: { color: colors.primaryForeground, fontWeight: '700' },
+  toolbarActionsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  bulkCancelBtn: {
+    backgroundColor: colors.destructive,
+    borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    flex: 1,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  bulkCancelText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  closeSelectionBtn: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  closeSelectionText: { color: colors.foreground, fontSize: 12, fontWeight: '600' },
+
+  checkboxContainer: { marginRight: 10, justifyContent: 'center' },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.card,
+  },
+  checkboxChecked: { backgroundColor: colors.primary },
+  checkmark: { color: '#fff', fontSize: 12, fontWeight: '700' },
 
   errorBox: {
     backgroundColor: '#FEE2E2',
@@ -460,6 +680,7 @@ const styles = StyleSheet.create({
     ...shadow.card,
     borderWidth: 1,
     borderColor: colors.border,
+    alignItems: 'center',
   },
   cardCancelled: { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' },
   dateBox: {
@@ -497,24 +718,23 @@ const styles = StyleSheet.create({
   footerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: 8,
-    marginBottom: 10,
   },
   footerText: { fontSize: 12, color: colors.mutedForeground },
-  paymentStatus: { fontSize: 12, fontWeight: '700' },
+  paymentStatus: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
 
   cancelButton: {
-    alignSelf: 'flex-start',
     backgroundColor: '#FEE2E2',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: '#FCA5A5',
   },
-  cancelButtonText: { fontSize: 12, fontWeight: '700', color: '#DC2626' },
+  cancelButtonText: { fontSize: 11, fontWeight: '700', color: '#DC2626' },
 
   emptyState: { paddingVertical: 40, alignItems: 'center' },
   emptyText: { fontSize: 14, color: colors.mutedForeground },
