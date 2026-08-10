@@ -1,46 +1,45 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
+  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  RefreshControl,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
-import * as Notifications from 'expo-notifications';
+import { useRouter } from 'expo-router';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
-import { formatRelativeDate } from '@/lib/format';
+import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
 
-// Konfiguracja obsługi powiadomień zgodna z nowym API expo-notifications
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
-
-type MatchDetails = {
+type Match = {
   id: string;
   title: string | null;
   date: string;
   time_start: string;
   time_end: string;
   location: string;
+  max_players: number;
+  capacity: number | null;
+  price_per_player: number;
   status_id: number;
 };
 
-type AnnouncementCategory = {
-  id: number;
-  name: string;
+type Registration = {
+  id: string;
+  match_id: string;
+  player_id: string;
+  is_paid: boolean;
+  created_at: string;
+  players?: {
+    full_name: string;
+  } | {
+    full_name: string;
+  }[] | null;
 };
 
 type Announcement = {
@@ -49,43 +48,17 @@ type Announcement = {
   content: string;
   category_id: number | null;
   is_pinned: boolean;
-  author: string;
+  author_id: string;
   created_at: string;
-  match_id: string | null;
-  announcements_category?: AnnouncementCategory | null;
-  matches?: MatchDetails | null;
+  match_id?: string | null;
+  players?: {
+    full_name: string;
+  } | {
+    full_name: string;
+  }[] | null;
 };
 
-type CategoryMeta = { bg: string; fg: string; icon: string; label: string };
-
-const CATEGORY_META: Record<string, CategoryMeta> = {
-  'ważne': { bg: '#FEE2E2', fg: '#DC2626', icon: '!', label: 'Ważne' },
-  'ogólne': { bg: '#E0E7FF', fg: colors.primary, icon: 'i', label: 'Ogólne' },
-  'spotkanie odwołane': { bg: '#FEE2E2', fg: '#DC2626', icon: '✕', label: 'Spotkanie odwołane' },
-  'zaproszenie na spotkanie': { bg: '#DCFCE7', fg: '#16A34A', icon: '＋', label: 'Zaproszenie na spotkanie' },
-};
-
-const DEFAULT_META: CategoryMeta = { bg: '#F1F5F9', fg: colors.foreground, icon: '•', label: 'Ogólne' };
-
-function getCategoryMeta(categoryName?: string | null): CategoryMeta {
-  if (!categoryName) return DEFAULT_META;
-  return CATEGORY_META[categoryName.toLowerCase()] ?? {
-    bg: '#F1F5F9',
-    fg: colors.foreground,
-    icon: '•',
-    label: categoryName,
-  };
-}
-
-function isMatchPast(matchDateStr: string, matchTimeStartStr: string): boolean {
-  try {
-    const matchDateTime = new Date(`${matchDateStr}T${matchTimeStartStr}`);
-    const now = new Date();
-    return matchDateTime.getTime() < now.getTime();
-  } catch {
-    return false;
-  }
-}
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
   try {
@@ -98,587 +71,615 @@ function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolea
   }
 }
 
-async function scheduleMatchNotification(match: MatchDetails) {
-  try {
-    const { status } = await Notifications.getPermissionsAsync();
-    let finalStatus = status;
-    if (finalStatus !== 'granted') {
-      const { status: requestedStatus } = await Notifications.requestPermissionsAsync();
-      finalStatus = requestedStatus;
-    }
-    if (finalStatus !== 'granted') return;
-
-    const matchDateTime = new Date(`${match.date}T${match.time_start}`);
-    const triggerTime = new Date(matchDateTime.getTime() - 2 * 60 * 60 * 1000);
-
-    if (triggerTime.getTime() <= Date.now()) return;
-
-    const identifier = `match-${match.id}`;
-    await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
-
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'Nadchodzi mecz! 🏐',
-        body: `Masz zaplanowany trening "${match.title?.trim() || 'Siatkówka'}" o godzinie ${match.time_start.slice(0, 5)} w lokalizacji: ${match.location}`,
-        sound: true,
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: triggerTime,
-      },
-    });
-  } catch (e) {
-    console.error('Błąd planowania powiadomienia:', e);
+function getPlayerName(playersField: Registration['players']): string {
+  if (!playersField) return 'Nieznany gracz';
+  if (Array.isArray(playersField)) {
+    return playersField[0]?.full_name || 'Nieznany gracz';
   }
+  return playersField.full_name || 'Nieznany gracz';
 }
 
-async function cancelMatchNotification(matchId: string) {
-  try {
-    const identifier = `match-${matchId}`;
-    await Notifications.cancelScheduledNotificationAsync(identifier);
-  } catch (e) {
-    console.error('Błąd usuwania powiadomienia:', e);
+function getAuthorName(playersField: Announcement['players']): string {
+  if (!playersField) return 'Administrator';
+  if (Array.isArray(playersField)) {
+    return playersField[0]?.full_name || 'Administrator';
   }
+  return playersField.full_name || 'Administrator';
 }
 
-function AnnouncementCard({
-  item,
-  userRegistrations,
-  onCancelRegistration,
-  onRegisterMatch,
-  onPressMatch,
-}: {
-  item: Announcement;
-  userRegistrations: string[];
-  onCancelRegistration: (matchId: string) => void;
-  onRegisterMatch: (matchId: string) => void;
-  onPressMatch: (matchId: string) => void;
-}) {
-  const categoryName = item.announcements_category?.name;
-  const meta = getCategoryMeta(categoryName);
-  const match = item.matches;
-  const isRegistered = match ? userRegistrations.includes(match.id) : false;
-
-  const isPast = match ? isMatchPast(match.date, match.time_start) : false;
-  const isCancelled =
-    (match && match.status_id === 2) || categoryName?.toLowerCase() === 'spotkanie odwołane';
-
-  return (
-    <View style={styles.card}>
-      <View style={[styles.iconCircle, { backgroundColor: meta.bg }]}>
-        <Text style={[styles.iconText, { color: meta.fg }]}>{meta.icon}</Text>
-      </View>
-
-      <View style={styles.cardBody}>
-        <View style={styles.cardTopRow}>
-          <Text style={[styles.badgeLabel, { color: meta.fg }]}>{meta.label}</Text>
-          <Text style={styles.cardDate}>{formatRelativeDate(item.created_at)}</Text>
-        </View>
-
-        <View style={styles.titleRow}>
-          {item.is_pinned && <Text style={styles.pinIcon}>📌</Text>}
-          <Text style={styles.cardTitle}>{item.title}</Text>
-        </View>
-
-        <Text style={styles.cardDescription}>{item.content}</Text>
-        <Text style={styles.cardAuthor}>— {item.author}</Text>
-
-        {match && (
-          <View style={styles.matchActionBox}>
-            <Text style={styles.matchInfoText} numberOfLines={1}>
-              🏐 Mecz: {match.title?.trim() || 'Trening'} ({match.date})
-            </Text>
-
-            <View style={styles.actionButtonsRow}>
-              {isCancelled ? (
-                <>
-                  <TouchableOpacity
-                    style={styles.viewMatchBtn}
-                    onPress={() => onPressMatch(match.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.viewMatchBtnText}>Szczegóły meczu</Text>
-                  </TouchableOpacity>
-
-                  <View style={styles.statusBadgeCancelled}>
-                    <Text style={styles.statusBadgeCancelledText}>Odwołany</Text>
-                  </View>
-                </>
-              ) : isRegistered ? (
-                <>
-                  <TouchableOpacity
-                    style={styles.viewMatchBtn}
-                    onPress={() => onPressMatch(match.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.viewMatchBtnText}>Szczegóły meczu</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.cancelMatchBtn}
-                    onPress={() => onCancelRegistration(match.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.cancelMatchBtnText}>Wypisz się z meczu</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <TouchableOpacity
-                    style={styles.viewMatchBtn}
-                    onPress={() => onPressMatch(match.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.viewMatchBtnText}>Szczegóły meczu</Text>
-                  </TouchableOpacity>
-
-                  {!isPast && (
-                    <TouchableOpacity
-                      style={styles.registerMatchBtn}
-                      onPress={() => onRegisterMatch(match.id)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.registerMatchBtnText}>Zapisz się</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  {isPast && (
-                    <View style={styles.statusBadgePast}>
-                      <Text style={styles.statusBadgePastText}>Zakończony</Text>
-                    </View>
-                  )}
-                </>
-              )}
-            </View>
-          </View>
-        )}
-      </View>
-    </View>
-  );
-}
-
-export default function AnnouncementsScreen() {
+export default function NearestMatchScreen() {
   const router = useRouter();
+
+  const [match, setMatch] = useState<Match | null>(null);
+  const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [userRegistrations, setUserRegistrations] = useState<string[]>([]);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
-
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const [filter, setFilter] = useState<number | 'all'>('all');
+  const [activeTab, setActiveTab] = useState<0 | 1>(0);
+  const horizontalScrollRef = useRef<ScrollView>(null);
 
-  const loadData = async () => {
-    try {
-      const player = await getCurrentPlayer();
-      setCurrentPlayer(player);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    const player = await getCurrentPlayer();
+    setCurrentPlayer(player);
 
-      const annQuery = supabase
-        .from('announcements')
-        .select(`
-          *,
-          announcements_category (
-            id,
-            name
-          ),
-          matches (
-            id,
-            title,
-            date,
-            time_start,
-            time_end,
-            location,
-            status_id
-          )
-        `)
-        .order('is_pinned', { ascending: false })
-        .order('created_at', { ascending: false });
+    const todayStr = new Date().toISOString().split('T')[0];
 
-      const [{ data: annData, error: annError }, regDataRes] = await Promise.all([
-        annQuery,
-        player
-          ? supabase.from('match_registrations').select('match_id').eq('player_id', player.id)
-          : Promise.resolve({ data: null, error: null }),
-      ]);
+    const { data: matchData, error: matchError } = await supabase
+      .from('matches')
+      .select('*')
+      .gte('date', todayStr)
+      .order('date', { ascending: true })
+      .order('time_start', { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
-      if (annError) {
-        setErrorMsg(annError.message);
-      } else {
-        setErrorMsg(null);
-        const mappedAnnouncements: Announcement[] = (annData ?? []).map((item: any) => ({
-          ...item,
-          matches: Array.isArray(item.matches) ? item.matches[0] ?? null : item.matches,
-        }));
-        setAnnouncements(mappedAnnouncements);
-      }
-
-      if (regDataRes && !regDataRes.error && regDataRes.data) {
-        setUserRegistrations(regDataRes.data.map((r: { match_id: string }) => r.match_id));
-      } else {
-        setUserRegistrations([]);
-      }
-
-      if (player && annData) {
-        const announcementIds = annData.map((a: any) => a.id);
-        if (announcementIds.length > 0) {
-          await supabase
-            .from('player_announcements')
-            .update({ is_read: true, read_at: new Date().toISOString() })
-            .eq('player_id', player.id)
-            .eq('is_read', false);
-        }
-      }
-    } catch (e: any) {
-      setErrorMsg(e?.message || 'Wystąpił nieznany błąd');
-    } finally {
+    if (matchError || !matchData) {
+      setMatch(null);
       setLoading(false);
-    }
-  };
-
-  useFocusEffect(
-    useCallback(() => {
-      loadData();
-    }, [])
-  );
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  };
-
-  const handleRegisterMatch = async (matchId: string) => {
-    if (!currentPlayer) {
-      Alert.alert('Błąd', 'Nie znaleziono profilu gracza.');
       return;
     }
 
-    const targetAnnouncement = announcements.find((a) => a.matches?.id === matchId);
-    const match = targetAnnouncement?.matches;
+    setMatch(matchData);
 
-    if (match) {
-      if (isMatchPast(match.date, match.time_start)) {
-        Alert.alert('Błąd', 'Nie można zapisać się na miniony mecz.');
-        return;
-      }
-      if (
-        match.status_id === 2 ||
-        targetAnnouncement?.announcements_category?.name?.toLowerCase() === 'spotkanie odwołane'
-      ) {
-        Alert.alert('Błąd', 'Nie można zapisać się na odwołany mecz.');
-        return;
-      }
-    }
-
-    const { error } = await supabase.from('match_registrations').insert({
-      match_id: matchId,
-      player_id: currentPlayer.id,
-    });
-
-    if (error) {
-      Alert.alert('Błąd zapisu', error.message);
-      return;
-    }
-
-    setUserRegistrations((prev: string[]) => [...prev, matchId]);
-
-    if (match) {
-      scheduleMatchNotification(match);
-    }
-  };
-
-  const executeCancellation = async (matchId: string) => {
-    if (!currentPlayer) return;
-
-    const { error } = await supabase
+    const { data: regsData, error: regsError } = await supabase
       .from('match_registrations')
-      .delete()
-      .eq('match_id', matchId)
-      .eq('player_id', currentPlayer.id);
+      .select('id, match_id, player_id, is_paid, created_at, players(full_name)')
+      .eq('match_id', matchData.id)
+      .order('created_at', { ascending: true });
 
-    if (error) {
-      Alert.alert('Błąd', error.message);
-      return;
+    if (!regsError) {
+      setRegistrations(regsData ?? []);
     }
 
-    setUserRegistrations((prev: string[]) => prev.filter((id) => id !== matchId));
-    cancelMatchNotification(matchId);
+    const { data: annData, error: annError } = await supabase
+      .from('announcements')
+      .select(`
+        id,
+        title,
+        content,
+        category_id,
+        is_pinned,
+        author_id,
+        created_at,
+        match_id,
+        players:author_id (
+          full_name
+        )
+      `)
+      .eq('match_id', matchData.id);
+
+    if (!annError && annData) {
+      const sortedAnnouncements = annData.sort((a, b) => {
+        if (a.is_pinned && !b.is_pinned) return -1;
+        if (!a.is_pinned && b.is_pinned) return 1;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+      setAnnouncements(sortedAnnouncements);
+    }
+
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleScrollEnd = (e: any) => {
+    const contentOffsetX = e.nativeEvent.contentOffset.x;
+    const currentIndex = Math.round(contentOffsetX / SCREEN_WIDTH);
+    if (currentIndex === 0 || currentIndex === 1) {
+      setActiveTab(currentIndex);
+    }
   };
 
-  const handleCancelRegistration = (matchId: string) => {
-    if (!currentPlayer) return;
-
-    const targetAnnouncement = announcements.find((a) => a.matches?.id === matchId);
-    const match = targetAnnouncement?.matches;
-
-    if (match && match.status_id === 2) {
-      Alert.alert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
-      return;
-    }
-
-    if (match && !canCancelMatch(match.date, match.time_start)) {
-      Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
-      return;
-    }
-
-    Alert.alert(
-      'Wypisz się z meczu',
-      'Czy na pewno chcesz wypisać się z tego meczu?',
-      [
-        { text: 'Nie', style: 'cancel' },
-        {
-          text: 'Tak, wypisz się',
-          style: 'destructive',
-          onPress: () => executeCancellation(matchId),
-        },
-      ]
-    );
+  const switchTab = (index: 0 | 1) => {
+    setActiveTab(index);
+    horizontalScrollRef.current?.scrollTo({
+      x: index * SCREEN_WIDTH,
+      animated: true,
+    });
   };
-
-  const handlePressMatch = (matchId: string) => {
-    router.push(`/(match)/${matchId}`);
-  };
-
-  const uniqueCategoriesMap = new Map<number, string>();
-  announcements.forEach((a) => {
-    if (a.announcements_category) {
-      uniqueCategoriesMap.set(a.announcements_category.id, a.announcements_category.name);
-    }
-  });
-
-  const availableFilters = [
-    { key: 'all' as const, label: 'Wszystkie' },
-    ...Array.from(uniqueCategoriesMap.entries()).map(([id, name]) => ({
-      key: id,
-      label: name,
-    })),
-  ];
-
-  const filtered = announcements.filter((a) => {
-    if (filter === 'all') return true;
-    return a.category_id === filter;
-  });
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
+      <SafeAreaView style={styles.loadingContainer} edges={['top', 'bottom', 'left', 'right']}>
         <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
+  if (!match) {
+    return (
+      <SafeAreaView style={styles.loadingContainer} edges={['top', 'bottom', 'left', 'right']}>
+        <Text style={styles.emptyMainText}>Brak nadchodzących meczów w kalendarzu.</Text>
+      </SafeAreaView>
+    );
+  }
+
+  const isCancelled = match.status_id === 2;
+  const isFinished = isDateInPast(match.date) || isCancelled;
+  const capacity = match.capacity ?? match.max_players;
+
+  const mainList = registrations.slice(0, capacity);
+  const waitlist = registrations.slice(capacity);
+  const isFull = registrations.length >= capacity;
+
+  const myRegistration = registrations.find(
+    (r) => String(r.player_id) === String(currentPlayer?.id)
+  );
+  
+  const isUserInMain = mainList.some((r) => String(r.player_id) === String(currentPlayer?.id));
+
+  const isCancellable = canCancelMatch(match.date, match.time_start);
+  const title = match.title?.trim() || 'Najbliższy Trening';
+  const { weekday, day, month } = formatMatchDate(match.date);
+
+  const handleSignUp = async () => {
+    if (!currentPlayer) {
+      Alert.alert('Błąd', 'Nie zidentyfikowano zalogowanego gracza.');
+      return;
+    }
+
+    if (isCancelled) {
+      Alert.alert('Błąd', 'Nie można zapisać się na odwołany mecz.');
+      return;
+    }
+
+    setActionLoading(true);
+    const { error } = await supabase.from('match_registrations').insert({
+      match_id: match.id,
+      player_id: currentPlayer.id,
+    });
+    setActionLoading(false);
+
+    if (error) {
+      Alert.alert('Błąd', error.message);
+      return;
+    }
+    loadData();
+  };
+
+  const handleCancel = async () => {
+    if (!currentPlayer || !match) return;
+
+    if (isCancelled) {
+      Alert.alert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
+      return;
+    }
+
+    if (!isCancellable) {
+      Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+      return;
+    }
+
+    setActionLoading(true);
+    const { error } = await supabase
+      .from('match_registrations')
+      .delete()
+      .eq('match_id', match.id)
+      .eq('player_id', currentPlayer.id);
+    setActionLoading(false);
+
+    if (error) {
+      Alert.alert('Błąd', error.message);
+      return;
+    }
+    loadData();
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
-        }
-        ListHeaderComponent={
-          <View>
-            <View style={styles.headerRow}>
-              <View>
-                <Text style={styles.headerTitle}>Tablica ogłoszeń</Text>
-                <Text style={styles.headerSubtitle}>Co się dzieje w Twojej grupie</Text>
-              </View>
-            </View>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
+      <View style={styles.heroSection}>
+        <View style={styles.heroTopRow}>
+          <Text style={styles.heroBadge}>NADCHODZĄCY MECZ</Text>
+          <Text style={styles.heroPrice}>{Number(match.price_per_player)} PLN</Text>
+        </View>
 
-            {errorMsg && (
-              <View style={styles.errorBox}>
-                <Text style={styles.errorText}>Błąd wczytywania: {errorMsg}</Text>
-              </View>
-            )}
+        <Text style={styles.heroTitle} numberOfLines={1}>{title}</Text>
 
-            {availableFilters.length > 1 && (
-              <FlatList
-                horizontal
-                data={availableFilters}
-                keyExtractor={(f) => String(f.key)}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.filterRow}
-                renderItem={({ item }) => {
-                  const isActive = filter === item.key;
-                  return (
-                    <TouchableOpacity
-                      style={[styles.filterChip, isActive && styles.filterChipActive]}
-                      onPress={() => setFilter(item.key)}
-                      activeOpacity={0.7}
-                    >
-                      <Text
-                        style={[
-                          styles.filterChipText,
-                          isActive && styles.filterChipTextActive,
-                        ]}
-                      >
-                        {item.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                }}
-              />
-            )}
+        <View style={styles.heroInfoCard}>
+          <View style={styles.heroDateBox}>
+            <Text style={styles.heroDayNumber}>{day}</Text>
+            <Text style={styles.heroMonthText}>{month}</Text>
           </View>
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>
-              {announcements.length === 0
-                ? 'Brak ogłoszeń.'
-                : 'Brak ogłoszeń spełniających kryteria.'}
-            </Text>
+
+          <View style={styles.heroDetailsCol}>
+            <Text style={styles.heroDateMain}>{weekday}, {match.date}</Text>
+            <Text style={styles.heroTimeMain}>🕒 {formatTime(match.time_start)} – {formatTime(match.time_end)}</Text>
+            <Text style={styles.heroLocationMain} numberOfLines={1}>📍 {match.location}</Text>
           </View>
-        }
-        renderItem={({ item }) => (
-          <AnnouncementCard
-            item={item}
-            userRegistrations={userRegistrations}
-            onCancelRegistration={handleCancelRegistration}
-            onRegisterMatch={handleRegisterMatch}
-            onPressMatch={handlePressMatch}
-          />
+        </View>
+
+        {isCancelled && (
+          <View style={styles.cancelledBadge}>
+            <Text style={styles.cancelledBadgeText}>⚠️ Mecz został odwołany</Text>
+          </View>
         )}
-      />
+      </View>
+
+      <View style={styles.navSection}>
+        <TouchableOpacity
+          style={[styles.navButton, activeTab === 0 && styles.navButtonActive]}
+          onPress={() => switchTab(0)}
+        >
+          <Text style={[styles.navButtonText, activeTab === 0 && styles.navButtonTextActive]}>
+            Uczestnicy ({registrations.length}/{capacity})
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.navButton, activeTab === 1 && styles.navButtonActive]}
+          onPress={() => switchTab(1)}
+        >
+          <Text style={[styles.navButtonText, activeTab === 1 && styles.navButtonTextActive]}>
+            Powiadomienia ({announcements.length})
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        ref={horizontalScrollRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={handleScrollEnd}
+        style={styles.bottomSectionScroll}
+      >
+        <View style={styles.tabContentPage}>
+          <ScrollView contentContainerStyle={styles.innerListScroll} showsVerticalScrollIndicator={false}>
+            <Text style={styles.sectionHeading}>Skład Główny ({mainList.length}/{capacity})</Text>
+            {mainList.length === 0 ? (
+              <Text style={styles.emptySubText}>Brak zapisanych graczy.</Text>
+            ) : (
+              mainList.map((item, index) => {
+                const isMe = String(item.player_id) === String(currentPlayer?.id);
+                const playerName = getPlayerName(item.players);
+                return (
+                  <View key={item.id} style={[styles.playerRow, isMe && styles.playerRowHighlight]}>
+                    <Text style={[styles.playerText, isMe && styles.playerTextHighlight]}>
+                      {index + 1}. {playerName} {isMe && '(Ty)'}
+                    </Text>
+                    <Text style={styles.playerRoleTag}>Główny</Text>
+                  </View>
+                );
+              })
+            )}
+
+            <Text style={[styles.sectionHeading, { marginTop: 20 }]}>Lista Rezerwowa ({waitlist.length})</Text>
+            {waitlist.length === 0 ? (
+              <Text style={styles.emptySubText}>Brak osób na rezerwie.</Text>
+            ) : (
+              waitlist.map((item, index) => {
+                const isMe = String(item.player_id) === String(currentPlayer?.id);
+                const playerName = getPlayerName(item.players);
+                return (
+                  <View key={item.id} style={[styles.playerRow, isMe && styles.playerRowHighlight]}>
+                    <Text style={[styles.playerText, isMe && styles.playerTextHighlight]}>
+                      {index + 1}. {playerName} {isMe && '(Ty)'}
+                    </Text>
+                    <Text style={[styles.playerRoleTag, { backgroundColor: '#FEF3C7', color: '#D97706' }]}>
+                      Rezerwa
+                    </Text>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        </View>
+
+        <View style={styles.tabContentPage}>
+          <ScrollView contentContainerStyle={styles.innerListScroll} showsVerticalScrollIndicator={false}>
+            <Text style={styles.sectionHeading}>Powiadomienia o meczu</Text>
+            {announcements.length === 0 ? (
+              <Text style={styles.emptySubText}>Brak powiadomień powiązanych z tym meczem.</Text>
+            ) : (
+              announcements.map((item) => {
+                const authorName = getAuthorName(item.players);
+                return (
+                  <View
+                    key={item.id}
+                    style={[
+                      styles.notificationCard,
+                      item.is_pinned && styles.notificationCardPinned,
+                    ]}
+                  >
+                    <View style={styles.notifHeaderRow}>
+                      <Text style={styles.notifTitle}>{item.title}</Text>
+                      {item.is_pinned && (
+                        <View style={styles.pinnedBadge}>
+                          <Text style={styles.pinnedBadgeText}>📌 Przypięte</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.notifDesc}>{item.content}</Text>
+                    
+                    <View style={styles.notifFooter}>
+                      <Text style={styles.notifAuthor}>Autor: {authorName}</Text>
+                      {item.created_at && (
+                        <Text style={styles.notifDate}>
+                          {new Date(item.created_at).toLocaleDateString('pl-PL', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        </View>
+      </ScrollView>
+
+      {!isFinished && currentPlayer && (
+        <View style={styles.footerActionContainer}>
+          {myRegistration ? (
+            <View style={styles.footerRegisteredWrapper}>
+              <Text style={styles.footerStatusText}>
+                {!isUserInMain
+                  ? '⏳ Jesteś na liście rezerwowej'
+                  : '✅ Jesteś zapisany w składzie głównym'}
+              </Text>
+              {isCancellable ? (
+                <TouchableOpacity
+                  style={styles.footerCancelBtn}
+                  onPress={handleCancel}
+                  disabled={actionLoading}
+                >
+                  <Text style={styles.footerCancelBtnText}>Wypisz się z meczu</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.footerLockedText}>Wypis zablokowany (&lt; 2h przed meczem)</Text>
+              )}
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.footerSignupBtn, actionLoading && { opacity: 0.6 }]}
+              onPress={handleSignUp}
+              disabled={actionLoading}
+            >
+              <Text style={styles.footerSignupBtnText}>
+                {isFull ? 'Zapisz się na listę rezerwową' : 'Zapisz się na mecz'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
-  loadingContainer: {
-    flex: 1,
+  loadingContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
     backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 16 
+  },
+  emptyMainText: { fontSize: 16, color: colors.mutedForeground, textAlign: 'center', fontWeight: '600' },
+
+  heroSection: {
     paddingHorizontal: 16,
-  },
-  listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32 },
-
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginTop: 10,
-    marginBottom: 20,
-  },
-  headerTitle: { fontSize: 24, fontWeight: '700', color: colors.foreground },
-  headerSubtitle: { fontSize: 14, color: colors.mutedForeground, marginTop: 4 },
-
-  errorBox: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: radius.md,
-    padding: 12,
-    marginBottom: 14,
-  },
-  errorText: { color: '#DC2626', fontSize: 13 },
-
-  filterRow: { gap: 8, paddingBottom: 18 },
-  filterChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: radius['2xl'],
+    paddingTop: 8,
+    paddingBottom: 14,
     backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  filterChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  filterChipText: { fontSize: 13, fontWeight: '600', color: colors.mutedForeground },
-  filterChipTextActive: { color: colors.primaryForeground },
-
-  card: {
-    flexDirection: 'row',
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
-    padding: 14,
-    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
     ...shadow.card,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
-  iconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  iconText: { fontSize: 18, fontWeight: '700' },
-  cardBody: { flex: 1 },
-  cardTopRow: {
+  heroTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 4,
   },
-  badgeLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  cardDate: { fontSize: 11, color: colors.mutedForeground },
-  titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
-  pinIcon: { fontSize: 12, marginRight: 4 },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: colors.foreground },
-  cardDescription: { fontSize: 13, color: colors.mutedForeground, lineHeight: 18 },
-  cardAuthor: { fontSize: 11, color: colors.mutedForeground, marginTop: 6, fontStyle: 'italic' },
-
-  matchActionBox: {
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: 10,
+  heroBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.primary,
+    letterSpacing: 1,
   },
-  matchInfoText: { fontSize: 12, color: colors.foreground, marginBottom: 10, fontWeight: '600' },
-  actionButtonsRow: {
+  heroPrice: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.foreground,
+  },
+  heroTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.foreground,
+    marginBottom: 10,
+  },
+  heroInfoCard: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
     alignItems: 'center',
-    flexWrap: 'wrap',
-  },
-  viewMatchBtn: {
-    backgroundColor: colors.accent,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    backgroundColor: colors.background,
     borderRadius: radius.md,
+    padding: 10,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  viewMatchBtnText: { fontSize: 12, fontWeight: '700', color: colors.accentForeground },
-  cancelMatchBtn: {
-    backgroundColor: '#FEE2E2',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: radius.md,
+  heroDateBox: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  heroDayNumber: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#ffffff',
+    lineHeight: 22,
+  },
+  heroMonthText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
+    textTransform: 'uppercase',
+  },
+  heroDetailsCol: {
+    flex: 1,
+  },
+  heroDateMain: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: 2,
+  },
+  heroTimeMain: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.mutedForeground,
+    marginBottom: 2,
+  },
+  heroLocationMain: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.mutedForeground,
+  },
+  cancelledBadge: {
+    marginTop: 8,
+    backgroundColor: '#FEF2F2',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: '#FCA5A5',
+    alignItems: 'center',
   },
-  cancelMatchBtnText: { fontSize: 12, fontWeight: '700', color: '#DC2626' },
-  registerMatchBtn: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: radius.md,
+  cancelledBadgeText: {
+    color: '#DC2626',
+    fontWeight: '700',
+    fontSize: 12,
   },
-  registerMatchBtnText: { fontSize: 12, fontWeight: '700', color: colors.primaryForeground },
-  statusBadgeCancelled: {
-    backgroundColor: '#FEE2E2',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: radius.md,
-  },
-  statusBadgeCancelledText: { fontSize: 12, fontWeight: '700', color: '#DC2626' },
-  statusBadgePast: {
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: radius.md,
-  },
-  statusBadgePastText: { fontSize: 12, fontWeight: '700', color: colors.mutedForeground },
 
-  emptyState: { paddingVertical: 40, alignItems: 'center' },
-  emptyText: { fontSize: 14, color: colors.mutedForeground },
+  navSection: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  navButton: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: radius.md,
+  },
+  navButtonActive: {
+    backgroundColor: colors.accent,
+  },
+  navButtonText: { fontSize: 13, fontWeight: '600', color: colors.mutedForeground },
+  navButtonTextActive: { color: colors.accentForeground, fontWeight: '700' },
+
+  bottomSectionScroll: { flex: 1 },
+  tabContentPage: {
+    width: SCREEN_WIDTH,
+    flex: 1,
+  },
+  innerListScroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 },
+  sectionHeading: { fontSize: 15, fontWeight: '700', color: colors.foreground, marginBottom: 8 },
+  emptySubText: { fontSize: 13, color: colors.mutedForeground, fontStyle: 'italic', marginBottom: 8 },
+
+  playerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radius.sm,
+    backgroundColor: colors.card,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  playerRowHighlight: {
+    borderColor: colors.primary,
+    backgroundColor: '#eff6ff',
+  },
+  playerText: { fontSize: 14, color: colors.foreground, fontWeight: '500' },
+  playerTextHighlight: { fontWeight: '700', color: colors.primary },
+  playerRoleTag: { fontSize: 10, fontWeight: '700', color: colors.mutedForeground, backgroundColor: colors.muted, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+
+  notificationCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: 14,
+    marginBottom: 10,
+    ...shadow.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  notificationCardPinned: {
+    borderColor: colors.primary,
+    backgroundColor: '#f8fafc',
+  },
+  notifHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  notifTitle: { fontSize: 14, fontWeight: '700', color: colors.foreground, flex: 1, marginRight: 8 },
+  notifDesc: { fontSize: 13, color: colors.mutedForeground, lineHeight: 18, marginBottom: 8 },
+  pinnedBadge: {
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  pinnedBadgeText: { fontSize: 10, fontWeight: '700', color: colors.primary },
+  notifFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: 8,
+    marginTop: 4,
+  },
+  notifAuthor: { fontSize: 11, color: colors.mutedForeground, fontWeight: '600' },
+  notifDate: { fontSize: 11, color: colors.mutedForeground },
+
+  footerActionContainer: {
+    padding: 16,
+    backgroundColor: colors.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  footerSignupBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+    ...shadow.card,
+  },
+  footerSignupBtnText: { color: colors.primaryForeground, fontSize: 15, fontWeight: '700' },
+  footerRegisteredWrapper: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
+  footerStatusText: { fontSize: 13, fontWeight: '600', color: colors.foreground, marginBottom: 8, textAlign: 'center' },
+  footerCancelBtn: {
+    backgroundColor: colors.destructive,
+    borderRadius: radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  footerCancelBtnText: { color: '#ffffff', fontSize: 15, fontWeight: '700' },
+  footerLockedText: { fontSize: 12, color: colors.mutedForeground, fontStyle: 'italic', textAlign: 'center' },
 });

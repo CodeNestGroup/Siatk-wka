@@ -6,7 +6,6 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -63,7 +62,7 @@ export default function ScheduleScreen() {
       .select('*');
 
     if (matchesError || !matchesData) {
-      Alert.alert('Błąd', 'Nie udało się pobrać listy meczów.');
+      console.error('Nie udało się pobrać listy meczów:', matchesError?.message);
       setLoading(false);
       return;
     }
@@ -122,7 +121,7 @@ export default function ScheduleScreen() {
       .eq('player_id', currentPlayer.id);
 
     if (error) {
-      Alert.alert('Błąd', error.message);
+      console.error('Błąd wypisywania:', error.message);
     }
     setActionLoadingId(null);
     loadSchedule();
@@ -130,7 +129,7 @@ export default function ScheduleScreen() {
 
   const handleQuickAction = async (match: MatchItem) => {
     if (!currentPlayer) {
-      Alert.alert('Błąd', 'Nie wczytano profilu gracza.');
+      console.error('Nie wczytano profilu gracza.');
       return;
     }
 
@@ -138,22 +137,11 @@ export default function ScheduleScreen() {
 
     if (match.isRegistered) {
       if (!canCancelMatch(match.date, match.time_start)) {
-        Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+        console.error('Nie można wypisać się na mniej niż 2 godziny przed meczem.');
         return;
       }
 
-      Alert.alert(
-        'Wypisz się z meczu',
-        'Czy na pewno chcesz wypisać się z tego meczu?',
-        [
-          { text: 'Nie', style: 'cancel' },
-          {
-            text: 'Tak, wypisz się',
-            style: 'destructive',
-            onPress: () => executeCancellation(match),
-          },
-        ]
-      );
+      executeCancellation(match);
     } else {
       setActionLoadingId(match.id);
       const { error } = await supabase.from('match_registrations').insert({
@@ -161,7 +149,7 @@ export default function ScheduleScreen() {
         player_id: currentPlayer.id,
       });
 
-      if (error) Alert.alert('Błąd', error.message);
+      if (error) console.error('Błąd zapisu:', error.message);
 
       setActionLoadingId(null);
       loadSchedule();

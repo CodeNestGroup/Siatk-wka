@@ -1,22 +1,43 @@
 import React, { useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, LayoutChangeEvent } from 'react-native';
-import { Tabs } from 'expo-router';
+import { createMaterialTopTabNavigator } from 'expo-router/js-top-tabs';
+import { withLayoutContext } from 'expo-router';
+import { ParamListBase, TabNavigationState, RouteProp } from 'expo-router/react-navigation';
+import { 
+  MaterialTopTabNavigationOptions, 
+  MaterialTopTabNavigationEventMap 
+} from '@react-navigation/material-top-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius } from '@/constants/app-theme';
 
+const { Navigator } = createMaterialTopTabNavigator();
+
+export const MaterialTopTabs = withLayoutContext<
+  MaterialTopTabNavigationOptions,
+  typeof Navigator,
+  TabNavigationState<ParamListBase>,
+  MaterialTopTabNavigationEventMap
+>(Navigator);
+
 const TAB_LABELS: Record<string, string> = {
-  index: 'Ogłoszenia',
+  index: 'Nadchodzący mecz',
+  ogloszenia: 'Ogłoszenia',
   terminarz: 'Terminarz',
   'moje-zapisy': 'Moje zapisy',
   profil: 'Profil',
 };
 
-function TopTabBar({ state, navigation }: any) {
+type TopTabBarProps = {
+  state: TabNavigationState<ParamListBase>;
+  navigation: any;
+};
+
+function TopTabBar({ state, navigation }: TopTabBarProps) {
   const scrollViewRef = useRef<ScrollView>(null);
   const tabLayouts = useRef<{ [key: number]: { x: number; width: number } }>({});
   const insets = useSafeAreaInsets();
 
-  const handleTabPress = (route: any, index: number, isFocused: boolean) => {
+  const handleTabPress = (route: RouteProp<ParamListBase>, index: number, isFocused: boolean) => {
     const event = navigation.emit({
       type: 'tabPress',
       target: route.key,
@@ -26,7 +47,6 @@ function TopTabBar({ state, navigation }: any) {
       navigation.navigate(route.name);
     }
 
-    // Centrowanie klikniętego przycisku w ScrollView
     const layout = tabLayouts.current[index];
     if (layout && scrollViewRef.current) {
       scrollViewRef.current.scrollTo({
@@ -36,7 +56,6 @@ function TopTabBar({ state, navigation }: any) {
     }
   };
 
-  // Automatyczne dopasowanie paska, gdy zakładka zmieni się przez swipe palcem
   React.useEffect(() => {
     const currentIndex = state.index;
     const layout = tabLayouts.current[currentIndex];
@@ -56,7 +75,7 @@ function TopTabBar({ state, navigation }: any) {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.tabBar}
       >
-        {state.routes.map((route: any, index: number) => {
+        {state.routes.map((route, index: number) => {
           const isFocused = state.index === index;
           const label = TAB_LABELS[route.name] ?? route.name;
 
@@ -84,19 +103,19 @@ function TopTabBar({ state, navigation }: any) {
 
 export default function TabsLayout() {
   return (
-    <Tabs
-      tabBar={(props) => <TopTabBar {...props} />}
+    <MaterialTopTabs
+      tabBar={(props: any) => <TopTabBar {...props} />}
       screenOptions={{
-        headerShown: false,
-        tabBarPosition: 'top', // Pasek na górze
-        lazy: false,
+        swipeEnabled: true,
+        animationEnabled: true,
       }}
     >
-      <Tabs.Screen name="index" />
-      <Tabs.Screen name="terminarz" />
-      <Tabs.Screen name="moje-zapisy" />
-      <Tabs.Screen name="profil" />
-    </Tabs>
+      <MaterialTopTabs.Screen name="index" />
+      <MaterialTopTabs.Screen name="ogloszenia" />
+      <MaterialTopTabs.Screen name="terminarz" />
+      <MaterialTopTabs.Screen name="moje-zapisy" />
+      <MaterialTopTabs.Screen name="profil" />
+    </MaterialTopTabs>
   );
 }
 
@@ -120,7 +139,7 @@ const styles = StyleSheet.create({
     borderRadius: radius['2xl'],
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.muted + '40', // Delikatne tło dla nieaktywnych guzików (opcjonalnie)
+    backgroundColor: colors.muted + '40',
   },
   tabItemActive: {
     backgroundColor: colors.primary,

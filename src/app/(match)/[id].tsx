@@ -46,11 +46,16 @@ type Announcement = {
   id: string;
   title: string;
   content: string;
-  category: string | null;
+  category_id: number | null;
   is_pinned: boolean;
-  author: string | null;
+  author_id: string;
   created_at: string;
   match_id?: string | null;
+  players?: {
+    full_name: string;
+  } | {
+    full_name: string;
+  }[] | null;
 };
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -72,6 +77,14 @@ function getPlayerName(playersField: Registration['players']): string {
     return playersField[0]?.full_name || 'Nieznany gracz';
   }
   return playersField.full_name || 'Nieznany gracz';
+}
+
+function getAuthorName(playersField: Announcement['players']): string {
+  if (!playersField) return 'Administrator';
+  if (Array.isArray(playersField)) {
+    return playersField[0]?.full_name || 'Administrator';
+  }
+  return playersField.full_name || 'Administrator';
 }
 
 export default function MatchDetailScreen() {
@@ -121,7 +134,19 @@ export default function MatchDetailScreen() {
 
     const { data: annData, error: annError } = await supabase
       .from('announcements')
-      .select('*')
+      .select(`
+        id,
+        title,
+        content,
+        category_id,
+        is_pinned,
+        author_id,
+        created_at,
+        match_id,
+        players:author_id (
+          full_name
+        )
+      `)
       .eq('match_id', id);
 
     if (!annError && annData) {
@@ -207,8 +232,18 @@ export default function MatchDetailScreen() {
     loadData();
   };
 
-  const executeCancellation = async () => {
+  const handleCancel = async () => {
     if (!currentPlayer || !match) return;
+
+    if (isCancelled) {
+      Alert.alert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
+      return;
+    }
+
+    if (!isCancellable) {
+      Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+      return;
+    }
 
     setActionLoading(true);
     const { error } = await supabase
@@ -223,33 +258,6 @@ export default function MatchDetailScreen() {
       return;
     }
     loadData();
-  };
-
-  const handleCancel = () => {
-    if (!currentPlayer) return;
-
-    if (isCancelled) {
-      Alert.alert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
-      return;
-    }
-
-    if (!isCancellable) {
-      Alert.alert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
-      return;
-    }
-
-    Alert.alert(
-      'Wypisz się z meczu',
-      'Czy na pewno chcesz wypisać się z tego meczu?',
-      [
-        { text: 'Nie', style: 'cancel' },
-        {
-          text: 'Tak, wypisz się',
-          style: 'destructive',
-          onPress: executeCancellation,
-        },
-      ]
-    );
   };
 
   return (
@@ -399,27 +407,28 @@ export default function MatchDetailScreen() {
             {announcements.length === 0 ? (
               <Text style={styles.emptySubText}>Brak powiadomień powiązanych z tym meczem.</Text>
             ) : (
-              announcements.map((item) => (
-                <View
-                  key={item.id}
-                  style={[
-                    styles.notificationCard,
-                    item.is_pinned && styles.notificationCardPinned,
-                  ]}
-                >
-                  <View style={styles.notifHeaderRow}>
-                    <Text style={styles.notifTitle}>{item.title}</Text>
-                    {item.is_pinned && (
-                      <View style={styles.pinnedBadge}>
-                        <Text style={styles.pinnedBadgeText}>📌 Przypięte</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.notifDesc}>{item.content}</Text>
-                  
-                  {(item.author || item.created_at) && (
+              announcements.map((item) => {
+                const authorName = getAuthorName(item.players);
+                return (
+                  <View
+                    key={item.id}
+                    style={[
+                      styles.notificationCard,
+                      item.is_pinned && styles.notificationCardPinned,
+                    ]}
+                  >
+                    <View style={styles.notifHeaderRow}>
+                      <Text style={styles.notifTitle}>{item.title}</Text>
+                      {item.is_pinned && (
+                        <View style={styles.pinnedBadge}>
+                          <Text style={styles.pinnedBadgeText}>📌 Przypięte</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.notifDesc}>{item.content}</Text>
+                    
                     <View style={styles.notifFooter}>
-                      {item.author && <Text style={styles.notifAuthor}>Autor: {item.author}</Text>}
+                      <Text style={styles.notifAuthor}>Autor: {authorName}</Text>
                       {item.created_at && (
                         <Text style={styles.notifDate}>
                           {new Date(item.created_at).toLocaleDateString('pl-PL', {
@@ -431,9 +440,9 @@ export default function MatchDetailScreen() {
                         </Text>
                       )}
                     </View>
-                  )}
-                </View>
-              ))
+                  </View>
+                );
+              })
             )}
           </ScrollView>
         </View>
