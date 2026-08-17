@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, LayoutChangeEvent } from 'react-native';
 import { createMaterialTopTabNavigator } from 'expo-router/js-top-tabs';
 import { withLayoutContext } from 'expo-router';
@@ -9,6 +9,9 @@ import {
 } from '@react-navigation/material-top-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius } from '@/constants/app-theme';
+import { getCurrentPlayer } from '@/lib/player';
+import { supabase } from '@/lib/supabase';
+import { syncMatchNotifications } from '@/services/notificationService';
 
 const { Navigator } = createMaterialTopTabNavigator();
 
@@ -56,7 +59,7 @@ function TopTabBar({ state, navigation }: TopTabBarProps) {
     }
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     const currentIndex = state.index;
     const layout = tabLayouts.current[currentIndex];
     if (layout && scrollViewRef.current) {
@@ -102,6 +105,39 @@ function TopTabBar({ state, navigation }: TopTabBarProps) {
 }
 
 export default function TabsLayout() {
+  useEffect(() => {
+    const initializeNotifications = async () => {
+      try {
+        const player = await getCurrentPlayer();
+        if (!player) return;
+
+        const { data: matchesData } = await supabase.from('matches').select('*');
+        const { data: regsData } = await supabase
+          .from('match_registrations')
+          .select('match_id, player_id')
+          .eq('player_id', player.id);
+
+        if (matchesData) {
+          const registeredMatchIds = new Set((regsData || []).map((r) => r.match_id));
+          const formattedMatches = matchesData.map((m) => ({
+            id: m.id,
+            title: m.title,
+            date: m.date,
+            time_start: m.time_start,
+            location: m.location,
+            status_id: m.status_id,
+            isRegistered: registeredMatchIds.has(m.id),
+          }));
+          await syncMatchNotifications(formattedMatches);
+        }
+      } catch (error) {
+        console.error('Błąd podczas synchronizacji powiadomień w tle:', error);
+      }
+    };
+
+    initializeNotifications();
+  }, []);
+
   return (
     <MaterialTopTabs
       tabBar={(props: any) => <TopTabBar {...props} />}

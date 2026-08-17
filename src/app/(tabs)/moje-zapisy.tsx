@@ -16,7 +16,7 @@ import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
-import { refreshPlayerNotifications } from '@/services/matchSyncService';
+import { syncMatchNotifications } from '@/services/notificationService';
 
 type MatchInfo = {
   id: string;
@@ -356,6 +356,29 @@ export default function MojeZapisyScreen() {
     setRefreshing(false);
   };
 
+  // Pomocnicza funkcja aktualizująca powiadomienia po wypisaniu się gracza
+  const updateNotificationsAfterChange = async (playerId: string) => {
+    const { data: matchesData } = await supabase.from('matches').select('*');
+    const { data: regsData } = await supabase
+      .from('match_registrations')
+      .select('match_id, player_id')
+      .eq('player_id', playerId);
+
+    if (matchesData) {
+      const registeredMatchIds = new Set((regsData || []).map((r) => r.match_id));
+      const formattedMatches = matchesData.map((m) => ({
+        id: m.id,
+        title: m.title,
+        date: m.date,
+        time_start: m.time_start,
+        location: m.location,
+        status_id: m.status_id,
+        isRegistered: registeredMatchIds.has(m.id),
+      }));
+      await syncMatchNotifications(formattedMatches);
+    }
+  };
+
   const executeCancellation = async (regId: string) => {
     setCancellingId(regId);
 
@@ -372,9 +395,8 @@ export default function MojeZapisyScreen() {
     }
 
     if (currentPlayer) {
-      await refreshPlayerNotifications(currentPlayer.id);
+      await updateNotificationsAfterChange(currentPlayer.id);
     }
-
     await loadData();
   };
 
@@ -507,7 +529,7 @@ export default function MojeZapisyScreen() {
     }
 
     if (currentPlayer) {
-      await refreshPlayerNotifications(currentPlayer.id);
+      await updateNotificationsAfterChange(currentPlayer.id);
     }
 
     setIsSelectionMode(false);

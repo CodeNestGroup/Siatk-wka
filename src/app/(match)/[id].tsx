@@ -15,7 +15,7 @@ import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
-import { refreshPlayerNotifications } from '@/services/matchSyncService';
+import { syncMatchNotifications } from '@/services/notificationService';
 
 type Match = {
   id: string;
@@ -232,6 +232,29 @@ export default function MatchDetailScreen() {
     });
   };
 
+  // Pomocnicza funkcja do odświeżania powiadomień po zmianie statusu zapisu
+  const updateNotificationsAfterChange = async (playerId: string) => {
+    const { data: matchesData } = await supabase.from('matches').select('*');
+    const { data: regsData } = await supabase
+      .from('match_registrations')
+      .select('match_id, player_id')
+      .eq('player_id', playerId);
+
+    if (matchesData) {
+      const registeredMatchIds = new Set((regsData || []).map((r) => r.match_id));
+      const formattedMatches = matchesData.map((m) => ({
+        id: m.id,
+        title: m.title,
+        date: m.date,
+        time_start: m.time_start,
+        location: m.location,
+        status_id: m.status_id,
+        isRegistered: registeredMatchIds.has(m.id),
+      }));
+      await syncMatchNotifications(formattedMatches);
+    }
+  };
+
   if (loading || !match) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['top', 'bottom', 'left', 'right']}>
@@ -279,8 +302,9 @@ export default function MatchDetailScreen() {
       showAlert('Błąd', error.message);
       return;
     }
+
     // Odświeżenie lokalnych powiadomień po zapisie na mecz
-    await refreshPlayerNotifications(currentPlayer.id);
+    await updateNotificationsAfterChange(currentPlayer.id);
     loadData();
   };
 
@@ -309,8 +333,9 @@ export default function MatchDetailScreen() {
       showAlert('Błąd', error.message);
       return;
     }
+
     // Odświeżenie lokalnych powiadomień po wypisaniu się z meczu
-    await refreshPlayerNotifications(currentPlayer.id);
+    await updateNotificationsAfterChange(currentPlayer.id);
     loadData();
   };
 

@@ -16,11 +16,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
+import { syncMatchNotifications } from '@/services/notificationService';
 
 const CURRENT_PLAYER_KEY = 'current_player_id';
 const REMEMBER_ME_KEY = 'remember_me_status';
 
-// Własny komponent CustomAlert w stylu aplikacji
 type CustomAlertProps = {
   visible: boolean;
   title: string;
@@ -62,7 +62,6 @@ export default function LoginScreen() {
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  // Stany dla własnego custom alertu
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
@@ -105,7 +104,6 @@ export default function LoginScreen() {
         return;
       }
 
-      // Sprawdzenie czy admin potwierdził rejestrację (player_status_id === 3 oznacza 'pending')
       if (data.role_id === 3) {
         setLoading(false);
         showAlert(
@@ -115,10 +113,30 @@ export default function LoginScreen() {
         return;
       }
 
-      // Zapisujemy sesję do AsyncStorage
       await AsyncStorage.setItem(CURRENT_PLAYER_KEY, data.id);
       await AsyncStorage.setItem(REMEMBER_ME_KEY, rememberMe ? 'true' : 'false');
       await AsyncStorage.setItem('current_player_data', JSON.stringify(data));
+
+      // Pobieramy mecze i rejestracje, aby zsynchronizować powiadomienia lokalne przy starcie
+      const { data: matchesData } = await supabase.from('matches').select('*');
+      const { data: regsData } = await supabase
+        .from('match_registrations')
+        .select('match_id, player_id')
+        .eq('player_id', data.id);
+
+      if (matchesData) {
+        const registeredMatchIds = new Set((regsData || []).map((r) => r.match_id));
+        const formattedMatches = matchesData.map((m) => ({
+          id: m.id,
+          title: m.title,
+          date: m.date,
+          time_start: m.time_start,
+          location: m.location,
+          status_id: m.status_id,
+          isRegistered: registeredMatchIds.has(m.id),
+        }));
+        await syncMatchNotifications(formattedMatches);
+      }
 
       setLoading(false);
       router.replace('/(tabs)');

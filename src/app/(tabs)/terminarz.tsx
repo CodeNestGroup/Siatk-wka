@@ -15,7 +15,6 @@ import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
 import { syncMatchNotifications } from '@/services/notificationService';
-import { refreshPlayerNotifications } from '@/services/matchSyncService';
 
 type MatchItem = {
   id: string;
@@ -36,7 +35,6 @@ type MatchItem = {
 
 type TabType = 'upcoming' | 'past';
 
-// Własny komponent CustomAlert w spójnym stylu aplikacji (pozostawiony do komunikatów o błędach itp.)
 type CustomAlertProps = {
   visible: boolean;
   title: string;
@@ -89,7 +87,6 @@ export default function ScheduleScreen() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('upcoming');
 
-  // Stan dla własnego alertu
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
@@ -149,10 +146,10 @@ export default function ScheduleScreen() {
     });
 
     setMatches(processedMatches);
-    if (player) {
-      await refreshPlayerNotifications(player.id);
-    }
     setLoading(false);
+
+    // Synchronizacja powiadomień po załadowaniu terminarza
+    await syncMatchNotifications(processedMatches);
   }, []);
 
   useFocusEffect(
@@ -173,8 +170,6 @@ export default function ScheduleScreen() {
 
     if (error) {
       showAlert('Błąd', 'Nie udało się wypisać z meczu: ' + error.message);
-    } else {
-      await refreshPlayerNotifications(currentPlayer.id);
     }
     setActionLoadingId(null);
     loadSchedule();
@@ -194,7 +189,6 @@ export default function ScheduleScreen() {
         return;
       }
 
-      // Bezpośrednie wypisanie bez wyświetlania modala z potwierdzeniem
       await executeCancellation(match);
     } else {
       setActionLoadingId(match.id);
@@ -205,8 +199,6 @@ export default function ScheduleScreen() {
 
       if (error) {
         showAlert('Błąd', 'Nie udało się zapisać na mecz: ' + error.message);
-      } else {
-        await refreshPlayerNotifications(currentPlayer.id);
       }
 
       setActionLoadingId(null);

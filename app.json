@@ -8,7 +8,9 @@
     "scheme": "siatkowka",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.siatkowka"
     },
     "android": {
       "adaptiveIcon": {

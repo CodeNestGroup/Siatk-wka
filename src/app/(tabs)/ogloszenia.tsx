@@ -11,11 +11,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatRelativeDate } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
-import { refreshPlayerNotifications } from '@/services/matchSyncService';
 
 type MatchDetails = {
   id: string;
@@ -54,7 +54,6 @@ const CATEGORY_META: Record<string, CategoryMeta> = {
   'ogólne': { bg: '#E0E7FF', fg: colors.primary, icon: 'i', label: 'Ogólne' },
   'spotkanie odwołane': { bg: '#FEE2E2', fg: '#DC2626', icon: '✕', label: 'Spotkanie odwołane' },
   'zaproszenie na spotkanie': { bg: '#DCFCE7', fg: '#16A34A', icon: '＋', label: 'Zaproszenie na spotkanie' },
-  'powiadomienia o meczu': { bg: '#FEF08A', fg: '#CA8A04', icon: '🔔', label: 'Powiadomienie o meczu' },
 };
 
 const DEFAULT_META: CategoryMeta = { bg: '#F1F5F9', fg: colors.foreground, icon: '•', label: 'Ogólne' };
@@ -123,6 +122,40 @@ function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolea
   }
 }
 
+async function scheduleMatchReminder(match: MatchDetails) {
+  try {
+    const matchDateTime = new Date(`${match.date}T${match.time_start}`);
+    // 24 godziny wcześniej
+    const triggerTime = new Date(matchDateTime.getTime() - 24 * 60 * 60 * 1000);
+
+    // Jeśli czas przypomnienia jest w przeszłości, nie planujemy
+    if (triggerTime.getTime() <= Date.now()) return;
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Przypomnienie o meczu',
+        body: `Jutro odbędzie się mecz: ${match.title?.trim() || 'Trening'} o godzinie ${match.time_start}.`,
+        sound: true,
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: triggerTime,
+      },
+      identifier: `match-reminder-${match.id}`,
+    });
+  } catch (error) {
+    console.error('Błąd podczas planowania powiadomienia:', error);
+  }
+}
+
+async function cancelMatchReminder(matchId: string) {
+  try {
+    await Notifications.cancelScheduledNotificationAsync(`match-reminder-${matchId}`);
+  } catch (error) {
+    console.error('Błąd podczas anulowania powiadomienia:', error);
+  }
+}
+
 function AnnouncementCard({
   item,
   userRegistrations,
@@ -136,7 +169,7 @@ function AnnouncementCard({
   onRegisterMatch: (matchId: string) => void;
   onPressMatch: (matchId: string) => void;
 }) {
-  const categoryName = item.isNotificationItem ? 'powiadomienia o meczu' : item.announcements_category?.name;
+  const categoryName = item.announcements_category?.name;
   const meta = getCategoryMeta(categoryName);
   const match = item.matches;
   const isRegistered = match ? userRegistrations.includes(match.id) : false;
@@ -145,7 +178,7 @@ function AnnouncementCard({
   const isCancelled =
     (match && match.status_id === 2) || categoryName?.toLowerCase() === 'spotkanie odwołane';
 
-  const authorName = item.players?.full_name || (item.isNotificationItem ? 'System' : 'Administrator');
+  const authorName = item.players?.full_name || 'Administrator';
 
   return (
     <View style={styles.card}>
@@ -251,7 +284,7 @@ export default function AnnouncementsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [filter, setFilter] = useState<number | 'all' | 'notifications'>('all');
+  const [filter, setFilter] = useState<number | 'all'>('all');
 
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
@@ -388,7 +421,10 @@ export default function AnnouncementsScreen() {
 
     setUserRegistrations((prev: string[]) => [...prev, matchId]);
 
-    await refreshPlayerNotifications(currentPlayer.id);
+    if (match) {
+      await scheduleMatchReminder(match);
+    }
+
     loadData();
   };
 
@@ -407,7 +443,7 @@ export default function AnnouncementsScreen() {
     }
 
     setUserRegistrations((prev: string[]) => prev.filter((id) => id !== matchId));
-    await refreshPlayerNotifications(currentPlayer.id);
+    await cancelMatchReminder(matchId);
     loadData();
   };
 
@@ -436,7 +472,7 @@ export default function AnnouncementsScreen() {
 
   const uniqueCategoriesMap = new Map<number, string>();
   announcements.forEach((a) => {
-    if (a.announcements_category && !a.isNotificationItem) {
+    if (a.announcements_category) {
       uniqueCategoriesMap.set(a.announcements_category.id, a.announcements_category.name);
     }
   });
@@ -451,7 +487,6 @@ export default function AnnouncementsScreen() {
 
   const filtered = announcements.filter((a) => {
     if (filter === 'all') return true;
-    if (filter === 'notifications') return a.isNotificationItem === true;
     return a.category_id === filter;
   });
 

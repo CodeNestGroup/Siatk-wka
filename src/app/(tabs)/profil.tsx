@@ -16,12 +16,6 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
-import { refreshPlayerNotifications } from '@/services/matchSyncService';
-
-type NotificationPrefs = {
-  notif_announcements: boolean;
-  notif_match_reminders: boolean;
-};
 
 type CustomAlertProps = {
   visible: boolean;
@@ -140,10 +134,7 @@ export default function ProfilScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
 
-  const [prefs, setPrefs] = useState<NotificationPrefs>({
-    notif_announcements: true,
-    notif_match_reminders: true,
-  });
+  const [notifMatchReminders, setNotifMatchReminders] = useState(true);
 
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
@@ -208,10 +199,7 @@ export default function ProfilScreen() {
       const fetchedStatus = (data as any).player_status?.name || 'aktywny';
       setPlayerStatusName(fetchedStatus);
 
-      setPrefs({
-        notif_announcements: data.notif_announcements ?? true,
-        notif_match_reminders: data.notif_match_reminders ?? true,
-      });
+      setNotifMatchReminders(data.notif_match_reminders ?? true);
     } catch (e) {
       console.error(e);
     } finally {
@@ -219,24 +207,21 @@ export default function ProfilScreen() {
     }
   };
 
-  const togglePref = async (key: keyof NotificationPrefs) => {
+  const toggleMatchReminders = async () => {
     if (!playerId) return;
 
-    const newValue = !prefs[key];
-    setPrefs((prev) => ({ ...prev, [key]: newValue }));
+    const newValue = !notifMatchReminders;
+    setNotifMatchReminders(newValue);
 
     const { error } = await supabase
       .from('players')
-      .update({ [key]: newValue })
+      .update({ notif_match_reminders: newValue })
       .eq('id', playerId);
 
     if (error) {
       showAlert('Błąd', 'Nie udało się zapisać ustawienia powiadomień.');
-      setPrefs((prev) => ({ ...prev, [key]: !newValue }));
-      return;
+      setNotifMatchReminders(!newValue);
     }
-
-    await refreshPlayerNotifications(playerId);
   };
 
   const handleChangePassword = async () => {
@@ -470,31 +455,14 @@ export default function ProfilScreen() {
 
           <View style={styles.prefRow}>
             <View style={styles.prefTextWrap}>
-              <Text style={styles.prefLabel}>Nowe ogłoszenia</Text>
-              <Text style={styles.prefDescription}>
-                Powiadom mnie, gdy pojawi się nowe ogłoszenie
-              </Text>
-            </View>
-            <Switch
-              value={prefs.notif_announcements}
-              onValueChange={() => togglePref('notif_announcements')}
-              trackColor={{ false: colors.border, true: colors.primary }}
-              thumbColor="#fff"
-            />
-          </View>
-
-          <View style={styles.prefDivider} />
-
-          <View style={styles.prefRow}>
-            <View style={styles.prefTextWrap}>
               <Text style={styles.prefLabel}>Przypomnienia o meczach</Text>
               <Text style={styles.prefDescription}>
-                Tydzień, dzień, 6 rano w dniu meczu oraz na 3h przed
+                Przypomnienia o nadchodzących meczach (24h przed)
               </Text>
             </View>
             <Switch
-              value={prefs.notif_match_reminders}
-              onValueChange={() => togglePref('notif_match_reminders')}
+              value={notifMatchReminders}
+              onValueChange={toggleMatchReminders}
               trackColor={{ false: colors.border, true: colors.primary }}
               thumbColor="#fff"
             />
@@ -780,7 +748,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 4,
   },
   prefTextWrap: { flex: 1, paddingRight: 12 },
   prefLabel: {
@@ -793,9 +761,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.mutedForeground,
     lineHeight: 16,
-  },
-  prefDivider: {
-    height: 1,
-    backgroundColor: colors.border,
   },
 });
