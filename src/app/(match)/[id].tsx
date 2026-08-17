@@ -15,6 +15,7 @@ import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
+import { refreshPlayerNotifications } from '@/services/matchSyncService';
 
 type Match = {
   id: string;
@@ -60,7 +61,6 @@ type Announcement = {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Własny komponent CustomAlert w stylu aplikacji
 type CustomAlertProps = {
   visible: boolean;
   title: string;
@@ -135,7 +135,6 @@ export default function MatchDetailScreen() {
   const [activeTab, setActiveTab] = useState<0 | 1>(0);
   const horizontalScrollRef = useRef<ScrollView>(null);
 
-  // Stany dla własnego custom alertu
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
@@ -182,8 +181,6 @@ export default function MatchDetailScreen() {
 
     if (!regsError) {
       setRegistrations(regsData ?? []);
-    } else {
-      console.error('Błąd pobierania rejestracji:', regsError.message);
     }
 
     const { data: annData, error: annError } = await supabase
@@ -256,7 +253,6 @@ export default function MatchDetailScreen() {
   );
   
   const isUserInMain = mainList.some((r) => String(r.player_id) === String(currentPlayer?.id));
-
   const isCancellable = canCancelMatch(match.date, match.time_start);
   const title = match.title?.trim() || 'Trening Siatkówki';
   const { weekday, day, month } = formatMatchDate(match.date);
@@ -283,6 +279,8 @@ export default function MatchDetailScreen() {
       showAlert('Błąd', error.message);
       return;
     }
+    // Odświeżenie lokalnych powiadomień po zapisie na mecz
+    await refreshPlayerNotifications(currentPlayer.id);
     loadData();
   };
 
@@ -311,6 +309,8 @@ export default function MatchDetailScreen() {
       showAlert('Błąd', error.message);
       return;
     }
+    // Odświeżenie lokalnych powiadomień po wypisaniu się z meczu
+    await refreshPlayerNotifications(currentPlayer.id);
     loadData();
   };
 

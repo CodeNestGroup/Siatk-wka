@@ -11,22 +11,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import * as Notifications from 'expo-notifications';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatRelativeDate } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
-
-// Konfiguracja obsługi powiadomień zgodna z nowym API expo-notifications
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+import { refreshPlayerNotifications } from '@/services/matchSyncService';
 
 type MatchDetails = {
   id: string;
@@ -55,6 +44,7 @@ type Announcement = {
   announcements_category?: AnnouncementCategory | null;
   matches?: MatchDetails | null;
   players?: { full_name: string } | null;
+  isNotificationItem?: boolean;
 };
 
 type CategoryMeta = { bg: string; fg: string; icon: string; label: string };
@@ -64,11 +54,11 @@ const CATEGORY_META: Record<string, CategoryMeta> = {
   'ogólne': { bg: '#E0E7FF', fg: colors.primary, icon: 'i', label: 'Ogólne' },
   'spotkanie odwołane': { bg: '#FEE2E2', fg: '#DC2626', icon: '✕', label: 'Spotkanie odwołane' },
   'zaproszenie na spotkanie': { bg: '#DCFCE7', fg: '#16A34A', icon: '＋', label: 'Zaproszenie na spotkanie' },
+  'powiadomienia o meczu': { bg: '#FEF08A', fg: '#CA8A04', icon: '🔔', label: 'Powiadomienie o meczu' },
 };
 
 const DEFAULT_META: CategoryMeta = { bg: '#F1F5F9', fg: colors.foreground, icon: '•', label: 'Ogólne' };
 
-// Własny komponent CustomAlert w spójnym stylu aplikacji
 type CustomAlertProps = {
   visible: boolean;
   title: string;
@@ -133,49 +123,6 @@ function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolea
   }
 }
 
-async function scheduleMatchNotification(match: MatchDetails) {
-  try {
-    const { status } = await Notifications.getPermissionsAsync();
-    let finalStatus = status;
-    if (finalStatus !== 'granted') {
-      const { status: requestedStatus } = await Notifications.requestPermissionsAsync();
-      finalStatus = requestedStatus;
-    }
-    if (finalStatus !== 'granted') return;
-
-    const matchDateTime = new Date(`${match.date}T${match.time_start}`);
-    const triggerTime = new Date(matchDateTime.getTime() - 2 * 60 * 60 * 1000);
-
-    if (triggerTime.getTime() <= Date.now()) return;
-
-    const identifier = `match-${match.id}`;
-    await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
-
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'Nadchodzi mecz! 🏐',
-        body: `Masz zaplanowany trening "${match.title?.trim() || 'Siatkówka'}" o godzinie ${match.time_start.slice(0, 5)} w lokalizacji: ${match.location}`,
-        sound: true,
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: triggerTime,
-      },
-    });
-  } catch (e) {
-    console.error('Błąd planowania powiadomienia:', e);
-  }
-}
-
-async function cancelMatchNotification(matchId: string) {
-  try {
-    const identifier = `match-${matchId}`;
-    await Notifications.cancelScheduledNotificationAsync(identifier);
-  } catch (e) {
-    console.error('Błąd usuwania powiadomienia:', e);
-  }
-}
-
 function AnnouncementCard({
   item,
   userRegistrations,
@@ -189,7 +136,7 @@ function AnnouncementCard({
   onRegisterMatch: (matchId: string) => void;
   onPressMatch: (matchId: string) => void;
 }) {
-  const categoryName = item.announcements_category?.name;
+  const categoryName = item.isNotificationItem ? 'powiadomienia o meczu' : item.announcements_category?.name;
   const meta = getCategoryMeta(categoryName);
   const match = item.matches;
   const isRegistered = match ? userRegistrations.includes(match.id) : false;
@@ -198,7 +145,7 @@ function AnnouncementCard({
   const isCancelled =
     (match && match.status_id === 2) || categoryName?.toLowerCase() === 'spotkanie odwołane';
 
-  const authorName = item.players?.full_name || 'Administrator';
+  const authorName = item.players?.full_name || (item.isNotificationItem ? 'System' : 'Administrator');
 
   return (
     <View style={styles.card}>
@@ -281,7 +228,7 @@ function AnnouncementCard({
 
                   {isPast && (
                     <View style={styles.statusBadgePast}>
-                      <Text style={styles.statusBadgePastText}>Zakończony</Text>
+                      <Text style={styles.statusBadgePastText}>Zakończone</Text>
                     </View>
                   )}
                 </>
@@ -304,9 +251,8 @@ export default function AnnouncementsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [filter, setFilter] = useState<number | 'all'>('all');
+  const [filter, setFilter] = useState<number | 'all' | 'notifications'>('all');
 
-  // Stany dla własnego custom alertu
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
@@ -379,6 +325,7 @@ export default function AnnouncementsScreen() {
           matches: Array.isArray(item.matches) ? item.matches[0] ?? null : item.matches,
           players: Array.isArray(item.players) ? item.players[0] ?? null : item.players,
         }));
+
         setAnnouncements(mappedAnnouncements);
       }
 
@@ -386,17 +333,6 @@ export default function AnnouncementsScreen() {
         setUserRegistrations(regDataRes.data.map((r: { match_id: string }) => r.match_id));
       } else {
         setUserRegistrations([]);
-      }
-
-      if (player && annData) {
-        const announcementIds = annData.map((a: any) => a.id);
-        if (announcementIds.length > 0) {
-          await supabase
-            .from('player_announcements')
-            .update({ is_read: true, read_at: new Date().toISOString() })
-            .eq('player_id', player.id)
-            .eq('is_read', false);
-        }
       }
     } catch (e: any) {
       setErrorMsg(e?.message || 'Wystąpił nieznany błąd');
@@ -452,9 +388,8 @@ export default function AnnouncementsScreen() {
 
     setUserRegistrations((prev: string[]) => [...prev, matchId]);
 
-    if (match) {
-      scheduleMatchNotification(match);
-    }
+    await refreshPlayerNotifications(currentPlayer.id);
+    loadData();
   };
 
   const executeCancellation = async (matchId: string) => {
@@ -472,7 +407,8 @@ export default function AnnouncementsScreen() {
     }
 
     setUserRegistrations((prev: string[]) => prev.filter((id) => id !== matchId));
-    cancelMatchNotification(matchId);
+    await refreshPlayerNotifications(currentPlayer.id);
+    loadData();
   };
 
   const handleCancelRegistration = (matchId: string) => {
@@ -500,7 +436,7 @@ export default function AnnouncementsScreen() {
 
   const uniqueCategoriesMap = new Map<number, string>();
   announcements.forEach((a) => {
-    if (a.announcements_category) {
+    if (a.announcements_category && !a.isNotificationItem) {
       uniqueCategoriesMap.set(a.announcements_category.id, a.announcements_category.name);
     }
   });
@@ -515,6 +451,7 @@ export default function AnnouncementsScreen() {
 
   const filtered = announcements.filter((a) => {
     if (filter === 'all') return true;
+    if (filter === 'notifications') return a.isNotificationItem === true;
     return a.category_id === filter;
   });
 

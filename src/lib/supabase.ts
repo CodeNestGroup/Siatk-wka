@@ -6,7 +6,7 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: false, // wyłączamy trzymanie tokenów sesji Auth, bo logujemy się po kolumnie w tabeli
+    persistSession: false,
     autoRefreshToken: false,
   },
 });

@@ -16,6 +16,7 @@ import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
+import { refreshPlayerNotifications } from '@/services/matchSyncService';
 
 type MatchInfo = {
   id: string;
@@ -42,7 +43,6 @@ type MyRegistration = {
 
 type TabType = 'active' | 'past';
 
-// Własny komponent CustomAlert w spójnym stylu aplikacji
 type CustomAlertProps = {
   visible: boolean;
   title: string;
@@ -118,7 +118,11 @@ function RegistrationCard({
       style={[
         styles.card,
         isCancelled && styles.cardCancelled,
-        isSelectionMode && isSelected && { borderColor: colors.primary, borderWidth: 2, backgroundColor: '#eff6ff' },
+        isSelectionMode && isSelected && {
+          borderColor: colors.primary,
+          borderWidth: 2,
+          backgroundColor: '#eff6ff',
+        },
       ]}
       activeOpacity={0.8}
       onPress={() => {
@@ -139,13 +143,23 @@ function RegistrationCard({
       )}
 
       <View style={[styles.dateBox, isCancelled && styles.dateBoxCancelled]}>
-        <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>{day}</Text>
-        <Text style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]}>{month}</Text>
+        <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>
+          {day}
+        </Text>
+        <Text style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]}>
+          {month}
+        </Text>
       </View>
 
       <View style={styles.cardBody}>
         <View style={styles.cardTopRow}>
-          <Text style={[styles.matchTitle, isCancelled && styles.matchTitleCancelled]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.matchTitle,
+              isCancelled && styles.matchTitleCancelled,
+            ]}
+            numberOfLines={1}
+          >
             {title}
           </Text>
           <View
@@ -168,7 +182,8 @@ function RegistrationCard({
         <Text style={styles.weekday}>{weekday}</Text>
         <Text style={styles.location}>📍 {reg.matches.location}</Text>
         <Text style={styles.time}>
-          🕒 {formatTime(reg.matches.time_start)} – {formatTime(reg.matches.time_end)}
+          🕒 {formatTime(reg.matches.time_start)} –{' '}
+          {formatTime(reg.matches.time_end)}
         </Text>
 
         <View style={styles.footerRow}>
@@ -181,7 +196,9 @@ function RegistrationCard({
             >
               {reg.is_paid ? '✓ Opłacone' : 'Brak statusu płatności'}
             </Text>
-            <Text style={styles.footerText}>{Number(reg.matches.price_per_player)} PLN</Text>
+            <Text style={styles.footerText}>
+              {Number(reg.matches.price_per_player)} PLN
+            </Text>
           </View>
 
           {activeTab === 'active' && !isCancelled && !isSelectionMode && (
@@ -217,16 +234,21 @@ export default function MojeZapisyScreen() {
 
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedRegIds, setSelectedRegIds] = useState<string[]>([]);
-  const [selectedRange, setSelectedRange] = useState<'week' | 'month' | 'quarter' | 'year' | 'all' | null>(null);
+  const [selectedRange, setSelectedRange] = useState<
+    'week' | 'month' | 'quarter' | 'year' | 'all' | null
+  >(null);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
-  // Stany dla własnego custom alertu
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
   const [alertCallback, setAlertCallback] = useState<(() => void) | null>(null);
 
-  const showAlert = (title: string, message: string, onCloseCallback?: () => void) => {
+  const showAlert = (
+    title: string,
+    message: string,
+    onCloseCallback?: () => void
+  ) => {
     setAlertTitle(title);
     setAlertMessage(message);
     setAlertCallback(() => onCloseCallback || null);
@@ -273,6 +295,7 @@ export default function MojeZapisyScreen() {
       }
 
       const matchIds = userRegs.map((r) => r.match_id);
+
       const { data: allRegsForMatches, error: allRegsError } = await supabase
         .from('match_registrations')
         .select('match_id, player_id, created_at')
@@ -286,7 +309,9 @@ export default function MojeZapisyScreen() {
       const allRegs = allRegsForMatches ?? [];
 
       const processed: MyRegistration[] = userRegs.map((reg: any) => {
-        const match: MatchInfo | null = Array.isArray(reg.matches) ? reg.matches[0] ?? null : reg.matches;
+        const match: MatchInfo | null = Array.isArray(reg.matches)
+          ? reg.matches[0] ?? null
+          : reg.matches;
 
         if (!match) {
           return {
@@ -299,7 +324,9 @@ export default function MojeZapisyScreen() {
         const capacityLimit = match.capacity ?? match.max_players ?? 10;
         const mainList = matchAllRegs.slice(0, capacityLimit);
 
-        const isInMain = mainList.some((r) => r.player_id === player.id);
+        const isInMain = mainList.some(
+          (r) => r.player_id === player.id
+        );
 
         return {
           ...reg,
@@ -331,16 +358,23 @@ export default function MojeZapisyScreen() {
 
   const executeCancellation = async (regId: string) => {
     setCancellingId(regId);
+
     const { error } = await supabase
       .from('match_registrations')
       .delete()
       .eq('id', regId);
+
     setCancellingId(null);
 
     if (error) {
       showAlert('Błąd', error.message);
       return;
     }
+
+    if (currentPlayer) {
+      await refreshPlayerNotifications(currentPlayer.id);
+    }
+
     await loadData();
   };
 
@@ -350,8 +384,12 @@ export default function MojeZapisyScreen() {
         showAlert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
         return;
       }
+
       if (!canCancelMatch(reg.matches.date, reg.matches.time_start)) {
-        showAlert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
+        showAlert(
+          'Błąd',
+          'Nie można wypisać się na mniej niż 2 godziny przed meczem.'
+        );
         return;
       }
     }
@@ -366,8 +404,8 @@ export default function MojeZapisyScreen() {
   const filteredRegistrations = registrations
     .filter((reg) => {
       if (!reg.matches) return false;
-      const isPastDate = isDateInPast(reg.matches.date);
-      const isPast = isPastDate;
+
+      const isPast = isDateInPast(reg.matches.date);
 
       if (activeTab === 'active') {
         return !isPast;
@@ -377,8 +415,14 @@ export default function MojeZapisyScreen() {
     })
     .sort((a, b) => {
       if (!a.matches || !b.matches) return 0;
-      const timeA = new Date(`${a.matches.date}T${a.matches.time_start}`).getTime();
-      const timeB = new Date(`${b.matches.date}T${b.matches.time_start}`).getTime();
+
+      const timeA = new Date(
+        `${a.matches.date}T${a.matches.time_start}`
+      ).getTime();
+
+      const timeB = new Date(
+        `${b.matches.date}T${b.matches.time_start}`
+      ).getTime();
 
       if (activeTab === 'active') {
         return timeA - timeB;
@@ -389,7 +433,9 @@ export default function MojeZapisyScreen() {
 
   const toggleSelectReg = (regId: string) => {
     if (selectedRegIds.includes(regId)) {
-      setSelectedRegIds(selectedRegIds.filter((id) => id !== regId));
+      setSelectedRegIds(
+        selectedRegIds.filter((id) => id !== regId)
+      );
     } else {
       setSelectedRegIds([...selectedRegIds, regId]);
     }
@@ -397,6 +443,7 @@ export default function MojeZapisyScreen() {
 
   const handleLongPressCard = (regId: string) => {
     if (activeTab !== 'active') return;
+
     if (!isSelectionMode) {
       setIsSelectionMode(true);
       setSelectedRegIds([regId]);
@@ -405,23 +452,34 @@ export default function MojeZapisyScreen() {
     }
   };
 
-  const handleRangeSelect = (range: 'week' | 'month' | 'quarter' | 'year' | 'all') => {
+  const handleRangeSelect = (
+    range: 'week' | 'month' | 'quarter' | 'year' | 'all'
+  ) => {
     setSelectedRange(range);
+
     const now = new Date();
     const idsToSelect: string[] = [];
 
     filteredRegistrations.forEach((reg) => {
       if (!reg.matches || reg.matches.status_id === 2) return;
+
       const matchDate = new Date(reg.matches.date);
       const diffTime = matchDate.getTime() - now.getTime();
       const diffDays = diffTime / (1000 * 3600 * 24);
 
       let matchesCriteria = false;
-      if (range === 'week' && diffDays >= 0 && diffDays <= 7) matchesCriteria = true;
-      else if (range === 'month' && diffDays >= 0 && diffDays <= 30) matchesCriteria = true;
-      else if (range === 'quarter' && diffDays >= 0 && diffDays <= 90) matchesCriteria = true;
-      else if (range === 'year' && diffDays >= 0 && diffDays <= 365) matchesCriteria = true;
-      else if (range === 'all' && diffDays >= 0) matchesCriteria = true;
+
+      if (range === 'week' && diffDays >= 0 && diffDays <= 7) {
+        matchesCriteria = true;
+      } else if (range === 'month' && diffDays >= 0 && diffDays <= 30) {
+        matchesCriteria = true;
+      } else if (range === 'quarter' && diffDays >= 0 && diffDays <= 90) {
+        matchesCriteria = true;
+      } else if (range === 'year' && diffDays >= 0 && diffDays <= 365) {
+        matchesCriteria = true;
+      } else if (range === 'all' && diffDays >= 0) {
+        matchesCriteria = true;
+      }
 
       if (matchesCriteria) {
         idsToSelect.push(reg.id);
@@ -435,6 +493,7 @@ export default function MojeZapisyScreen() {
     if (selectedRegIds.length === 0) return;
 
     setBulkActionLoading(true);
+
     const { error } = await supabase
       .from('match_registrations')
       .delete()
@@ -447,101 +506,207 @@ export default function MojeZapisyScreen() {
       return;
     }
 
+    if (currentPlayer) {
+      await refreshPlayerNotifications(currentPlayer.id);
+    }
+
     setIsSelectionMode(false);
     setSelectedRegIds([]);
     setSelectedRange(null);
+
     await loadData();
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
+      <SafeAreaView
+        style={styles.loadingContainer}
+        edges={['bottom', 'left', 'right']}
+      >
         <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
+    <SafeAreaView
+      style={styles.safeArea}
+      edges={['bottom', 'left', 'right']}
+    >
       <CustomAlert
         visible={alertVisible}
         title={alertTitle}
         message={alertMessage}
         onClose={handleAlertClose}
       />
+
       <FlatList
         data={filteredRegistrations}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
         }
         ListHeaderComponent={
           <View>
             <Text style={styles.headerTitle}>Moje zapisy</Text>
-            <Text style={styles.headerSubtitle}>Mecze, na które się zapisałeś (przytrzymaj kafelek, aby zaznaczyć wiele)</Text>
+            <Text style={styles.headerSubtitle}>
+              Mecze, na które się zapisałeś (przytrzymaj kafelek, aby
+              zaznaczyć wiele)
+            </Text>
 
             {errorMsg && (
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>Błąd wczytywania: {errorMsg}</Text>
+                <Text style={styles.errorText}>
+                  Błąd wczytywania: {errorMsg}
+                </Text>
               </View>
             )}
 
             {!currentPlayer && !loading && (
               <View style={styles.warnBox}>
-                <Text style={styles.warnText}>Nie znaleziono Twojego profilu gracza.</Text>
+                <Text style={styles.warnText}>
+                  Nie znaleziono Twojego profilu gracza.
+                </Text>
               </View>
             )}
 
             {isSelectionMode && activeTab === 'active' && (
               <View style={styles.selectionToolbar}>
-                <Text style={styles.toolbarTitle}>Wybierz zakres dat:</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.rangeScroll}>
+                <Text style={styles.toolbarTitle}>
+                  Wybierz zakres dat:
+                </Text>
+
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.rangeScroll}
+                >
                   <TouchableOpacity
-                    style={[styles.rangeChip, selectedRange === 'week' && styles.rangeChipActive]}
+                    style={[
+                      styles.rangeChip,
+                      selectedRange === 'week' &&
+                        styles.rangeChipActive,
+                    ]}
                     onPress={() => handleRangeSelect('week')}
                   >
-                    <Text style={[styles.rangeText, selectedRange === 'week' && styles.rangeTextActive]}>Tydzień</Text>
+                    <Text
+                      style={[
+                        styles.rangeText,
+                        selectedRange === 'week' &&
+                          styles.rangeTextActive,
+                      ]}
+                    >
+                      Tydzień
+                    </Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity
-                    style={[styles.rangeChip, selectedRange === 'month' && styles.rangeChipActive]}
+                    style={[
+                      styles.rangeChip,
+                      selectedRange === 'month' &&
+                        styles.rangeChipActive,
+                    ]}
                     onPress={() => handleRangeSelect('month')}
                   >
-                    <Text style={[styles.rangeText, selectedRange === 'month' && styles.rangeTextActive]}>Miesiąc</Text>
+                    <Text
+                      style={[
+                        styles.rangeText,
+                        selectedRange === 'month' &&
+                          styles.rangeTextActive,
+                      ]}
+                    >
+                      Miesiąc
+                    </Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity
-                    style={[styles.rangeChip, selectedRange === 'quarter' && styles.rangeChipActive]}
+                    style={[
+                      styles.rangeChip,
+                      selectedRange === 'quarter' &&
+                        styles.rangeChipActive,
+                    ]}
                     onPress={() => handleRangeSelect('quarter')}
                   >
-                    <Text style={[styles.rangeText, selectedRange === 'quarter' && styles.rangeTextActive]}>Kwartał</Text>
+                    <Text
+                      style={[
+                        styles.rangeText,
+                        selectedRange === 'quarter' &&
+                          styles.rangeTextActive,
+                      ]}
+                    >
+                      Kwartał
+                    </Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity
-                    style={[styles.rangeChip, selectedRange === 'year' && styles.rangeChipActive]}
+                    style={[
+                      styles.rangeChip,
+                      selectedRange === 'year' &&
+                        styles.rangeChipActive,
+                    ]}
                     onPress={() => handleRangeSelect('year')}
                   >
-                    <Text style={[styles.rangeText, selectedRange === 'year' && styles.rangeTextActive]}>Rok</Text>
+                    <Text
+                      style={[
+                        styles.rangeText,
+                        selectedRange === 'year' &&
+                          styles.rangeTextActive,
+                      ]}
+                    >
+                      Rok
+                    </Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity
-                    style={[styles.rangeChip, selectedRange === 'all' && styles.rangeChipActive]}
+                    style={[
+                      styles.rangeChip,
+                      selectedRange === 'all' &&
+                        styles.rangeChipActive,
+                    ]}
                     onPress={() => handleRangeSelect('all')}
                   >
-                    <Text style={[styles.rangeText, selectedRange === 'all' && styles.rangeTextActive]}>Wszystko</Text>
+                    <Text
+                      style={[
+                        styles.rangeText,
+                        selectedRange === 'all' &&
+                          styles.rangeTextActive,
+                      ]}
+                    >
+                      Wszystko
+                    </Text>
                   </TouchableOpacity>
                 </ScrollView>
 
                 <View style={styles.toolbarActionsRow}>
                   <TouchableOpacity
-                    style={[styles.bulkCancelBtn, bulkActionLoading && { opacity: 0.6 }]}
+                    style={[
+                      styles.bulkCancelBtn,
+                      bulkActionLoading && { opacity: 0.6 },
+                    ]}
                     onPress={handleBulkCancel}
-                    disabled={selectedRegIds.length === 0 || bulkActionLoading}
+                    disabled={
+                      selectedRegIds.length === 0 ||
+                      bulkActionLoading
+                    }
                   >
                     {bulkActionLoading ? (
-                      <ActivityIndicator size="small" color="#fff" />
+                      <ActivityIndicator
+                        size="small"
+                        color="#fff"
+                      />
                     ) : (
-                      <Text style={styles.bulkCancelText}>Wypisz zaznaczone ({selectedRegIds.length})</Text>
+                      <Text style={styles.bulkCancelText}>
+                        Wypisz zaznaczone ({selectedRegIds.length})
+                      </Text>
                     )}
                   </TouchableOpacity>
+
                   <TouchableOpacity
                     style={styles.closeSelectionBtn}
                     onPress={() => {
@@ -550,7 +715,9 @@ export default function MojeZapisyScreen() {
                       setSelectedRange(null);
                     }}
                   >
-                    <Text style={styles.closeSelectionText}>Zamknij</Text>
+                    <Text style={styles.closeSelectionText}>
+                      Zamknij
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -558,7 +725,11 @@ export default function MojeZapisyScreen() {
 
             <View style={styles.tabsContainer}>
               <TouchableOpacity
-                style={[styles.tabButton, activeTab === 'active' && styles.tabButtonActive]}
+                style={[
+                  styles.tabButton,
+                  activeTab === 'active' &&
+                    styles.tabButtonActive,
+                ]}
                 onPress={() => {
                   setActiveTab('active');
                   setIsSelectionMode(false);
@@ -566,13 +737,23 @@ export default function MojeZapisyScreen() {
                 }}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>
+                <Text
+                  style={[
+                    styles.tabText,
+                    activeTab === 'active' &&
+                      styles.tabTextActive,
+                  ]}
+                >
                   Nadchodzące
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.tabButton, activeTab === 'past' && styles.tabButtonActive]}
+                style={[
+                  styles.tabButton,
+                  activeTab === 'past' &&
+                    styles.tabButtonActive,
+                ]}
                 onPress={() => {
                   setActiveTab('past');
                   setIsSelectionMode(false);
@@ -580,7 +761,13 @@ export default function MojeZapisyScreen() {
                 }}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>
+                <Text
+                  style={[
+                    styles.tabText,
+                    activeTab === 'past' &&
+                      styles.tabTextActive,
+                  ]}
+                >
                   Zakończone
                 </Text>
               </TouchableOpacity>
@@ -604,7 +791,9 @@ export default function MojeZapisyScreen() {
             onLongPress={() => handleLongPressCard(item.id)}
             cancelling={cancellingId === item.id}
             activeTab={activeTab}
-            isSelectionMode={isSelectionMode && activeTab === 'active'}
+            isSelectionMode={
+              isSelectionMode && activeTab === 'active'
+            }
             isSelected={selectedRegIds.includes(item.id)}
           />
         )}
@@ -678,8 +867,18 @@ const styles = StyleSheet.create({
   },
   listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32 },
 
-  headerTitle: { fontSize: 24, fontWeight: '700', color: colors.foreground, marginTop: 16 },
-  headerSubtitle: { fontSize: 13, color: colors.mutedForeground, marginTop: 4, marginBottom: 16 },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginTop: 16,
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    color: colors.mutedForeground,
+    marginTop: 4,
+    marginBottom: 16,
+  },
 
   selectionToolbar: {
     backgroundColor: colors.card,
@@ -690,7 +889,12 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadow.card,
   },
-  toolbarTitle: { fontSize: 12, fontWeight: '700', color: colors.foreground, marginBottom: 6 },
+  toolbarTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginBottom: 6,
+  },
   rangeScroll: { marginBottom: 8 },
   rangeChip: {
     paddingHorizontal: 10,
@@ -705,9 +909,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  rangeText: { fontSize: 11, fontWeight: '600', color: colors.mutedForeground },
-  rangeTextActive: { color: colors.primaryForeground, fontWeight: '700' },
-  toolbarActionsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  rangeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.mutedForeground,
+  },
+  rangeTextActive: {
+    color: colors.primaryForeground,
+    fontWeight: '700',
+  },
+  toolbarActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   bulkCancelBtn: {
     backgroundColor: colors.destructive,
     borderRadius: radius.sm,
@@ -717,7 +932,11 @@ const styles = StyleSheet.create({
     marginRight: 8,
     alignItems: 'center',
   },
-  bulkCancelText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  bulkCancelText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   closeSelectionBtn: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -725,9 +944,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  closeSelectionText: { color: colors.foreground, fontSize: 12, fontWeight: '600' },
+  closeSelectionText: {
+    color: colors.foreground,
+    fontSize: 12,
+    fontWeight: '600',
+  },
 
-  checkboxContainer: { marginRight: 10, justifyContent: 'center' },
+  checkboxContainer: {
+    marginRight: 10,
+    justifyContent: 'center',
+  },
   checkbox: {
     width: 20,
     height: 20,
@@ -738,8 +964,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.card,
   },
-  checkboxChecked: { backgroundColor: colors.primary },
-  checkmark: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 
   errorBox: {
     backgroundColor: '#FEE2E2',
@@ -747,7 +979,10 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 14,
   },
-  errorText: { color: '#DC2626', fontSize: 13 },
+  errorText: {
+    color: '#DC2626',
+    fontSize: 13,
+  },
 
   warnBox: {
     backgroundColor: '#FEF3C7',
@@ -755,7 +990,10 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 14,
   },
-  warnText: { color: '#92400E', fontSize: 13 },
+  warnText: {
+    color: '#92400E',
+    fontSize: 13,
+  },
 
   tabsContainer: {
     flexDirection: 'row',
@@ -770,67 +1008,108 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     alignItems: 'center',
-    justifyContent: 'center',
     borderRadius: radius.md,
   },
   tabButtonActive: {
     backgroundColor: colors.primary,
+    ...shadow.button,
   },
   tabText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
     color: colors.mutedForeground,
-    textAlign: 'center',
   },
   tabTextActive: {
     color: colors.primaryForeground,
     fontWeight: '700',
   },
-
   card: {
     flexDirection: 'row',
     backgroundColor: colors.card,
     borderRadius: radius.xl,
     padding: 14,
     marginBottom: 12,
-    ...shadow.card,
     borderWidth: 1,
     borderColor: colors.border,
-    alignItems: 'center',
+    ...shadow.card,
   },
-  cardCancelled: { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' },
+  cardCancelled: {
+    opacity: 0.7,
+    backgroundColor: '#F8FAFC',
+  },
   dateBox: {
-    width: 56,
-    height: 56,
+    width: 54,
+    height: 54,
     borderRadius: radius.lg,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
+    backgroundColor: colors.primary + '15',
     justifyContent: 'center',
-    marginRight: 14,
+    alignItems: 'center',
+    marginRight: 12,
   },
-  dateBoxCancelled: { backgroundColor: '#FEE2E2' },
-  dateDay: { fontSize: 20, fontWeight: '700', color: colors.accentForeground },
-  dateDayCancelled: { color: '#DC2626' },
-  dateMonth: { fontSize: 11, color: colors.accentForeground, textTransform: 'uppercase' },
-  dateMonthCancelled: { color: '#DC2626' },
-
-  cardBody: { flex: 1 },
+  dateBoxCancelled: {
+    backgroundColor: colors.muted,
+  },
+  dateDay: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  dateDayCancelled: {
+    color: colors.mutedForeground,
+  },
+  dateMonth: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+    textTransform: 'uppercase',
+  },
+  dateMonthCancelled: {
+    color: colors.mutedForeground,
+  },
+  cardBody: {
+    flex: 1,
+  },
   cardTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 2,
-    gap: 8,
+    marginBottom: 4,
   },
-  matchTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.foreground },
-  matchTitleCancelled: { textDecorationLine: 'line-through', color: '#DC2626' },
-  badge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.sm },
-  badgeText: { fontSize: 11, fontWeight: '700' },
-
-  weekday: { fontSize: 12, color: colors.mutedForeground, marginBottom: 6, fontWeight: '600' },
-  location: { fontSize: 13, color: colors.mutedForeground, marginBottom: 2 },
-  time: { fontSize: 13, color: colors.mutedForeground, marginBottom: 8 },
-
+  matchTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.foreground,
+    flex: 1,
+    marginRight: 8,
+  },
+  matchTitleCancelled: {
+    textDecorationLine: 'line-through',
+    color: colors.mutedForeground,
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  weekday: {
+    fontSize: 12,
+    color: colors.mutedForeground,
+    marginBottom: 4,
+  },
+  location: {
+    fontSize: 13,
+    color: colors.foreground,
+    marginBottom: 2,
+  },
+  time: {
+    fontSize: 13,
+    color: colors.mutedForeground,
+    marginBottom: 10,
+  },
   footerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -839,19 +1118,35 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     paddingTop: 8,
   },
-  footerText: { fontSize: 12, color: colors.mutedForeground },
-  paymentStatus: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
-
+  paymentStatus: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  footerText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.foreground,
+    marginTop: 2,
+  },
   cancelButton: {
     backgroundColor: '#FEE2E2',
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: 6,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: '#FCA5A5',
   },
-  cancelButtonText: { fontSize: 11, fontWeight: '700', color: '#DC2626' },
-
-  emptyState: { paddingVertical: 40, alignItems: 'center' },
-  emptyText: { fontSize: 14, color: colors.mutedForeground },
+  cancelButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  emptyState: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 14,
+    color: colors.mutedForeground,
+  },
 });

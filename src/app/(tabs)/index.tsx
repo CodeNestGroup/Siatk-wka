@@ -15,6 +15,7 @@ import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
+import { refreshPlayerNotifications } from '@/services/matchSyncService';
 
 type Match = {
   id: string;
@@ -60,7 +61,6 @@ type Announcement = {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Własny komponent CustomAlert w stylu aplikacji
 type CustomAlertProps = {
   visible: boolean;
   title: string;
@@ -134,7 +134,6 @@ export default function NearestMatchScreen() {
   const [activeTab, setActiveTab] = useState<0 | 1>(0);
   const horizontalScrollRef = useRef<ScrollView>(null);
 
-  // Stany dla własnego custom alertu
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
@@ -294,6 +293,10 @@ export default function NearestMatchScreen() {
       showAlert('Błąd', error.message);
       return;
     }
+
+    // Synchronizacja powiadomień o meczach przez centralny serwis
+    await refreshPlayerNotifications(currentPlayer.id);
+
     loadData();
   };
 
@@ -322,6 +325,10 @@ export default function NearestMatchScreen() {
       showAlert('Błąd', error.message);
       return;
     }
+
+    // Synchronizacja powiadomień po wypisaniu się z meczu
+    await refreshPlayerNotifications(currentPlayer.id);
+
     loadData();
   };
 

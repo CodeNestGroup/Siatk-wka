@@ -16,13 +16,13 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
+import { refreshPlayerNotifications } from '@/services/matchSyncService';
 
 type NotificationPrefs = {
   notif_announcements: boolean;
   notif_match_reminders: boolean;
 };
 
-// Własny komponent CustomAlert w spójnym stylu aplikacji
 type CustomAlertProps = {
   visible: boolean;
   title: string;
@@ -56,7 +56,6 @@ function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
   );
 }
 
-// Komponent CustomConfirm do pytań tak/nie (np. wylogowanie)
 type CustomConfirmProps = {
   visible: boolean;
   title: string;
@@ -128,29 +127,24 @@ export default function ProfilScreen() {
   const [loadingUser, setLoadingUser] = useState(true);
   const [playerId, setPlayerId] = useState<string | null>(null);
 
-  // Dane profilu (tylko do odczytu)
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [roleName, setRoleName] = useState('');
   const [playerStatusName, setPlayerStatusName] = useState('');
 
-  // Stan widoczności wrażliwych danych (telefon i email)
   const [showSensitiveData, setShowSensitiveData] = useState(false);
 
-  // Zmiana hasła
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
 
-  // Prefs powiadomień
   const [prefs, setPrefs] = useState<NotificationPrefs>({
     notif_announcements: true,
     notif_match_reminders: true,
   });
 
-  // Stany dla własnych modali komunikatów
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
@@ -171,7 +165,6 @@ export default function ProfilScreen() {
     }
   };
 
-  // Stan dla modala potwierdzenia wylogowania
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
 
   useEffect(() => {
@@ -190,7 +183,6 @@ export default function ProfilScreen() {
 
       setPlayerId(storedPlayerId);
 
-      // Pobieramy dane gracza wraz z rolą oraz statusem gracza
       const { data, error } = await supabase
         .from('players')
         .select(`
@@ -241,7 +233,10 @@ export default function ProfilScreen() {
     if (error) {
       showAlert('Błąd', 'Nie udało się zapisać ustawienia powiadomień.');
       setPrefs((prev) => ({ ...prev, [key]: !newValue }));
+      return;
     }
+
+    await refreshPlayerNotifications(playerId);
   };
 
   const handleChangePassword = async () => {
@@ -356,11 +351,9 @@ export default function ProfilScreen() {
         <Text style={styles.headerTitle}>Profil</Text>
         <Text style={styles.headerSubtitle}>Twoje dane i ustawienia konta</Text>
 
-        {/* Sekcja: Dane profilu */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Dane profilu</Text>
 
-          {/* Nowoczesna sekcja nagłówkowa gracza (Full name + rola + status) */}
           <View style={styles.profileHeaderBox}>
             <View style={styles.profileAvatarPlaceholder}>
               <Text style={styles.profileAvatarText}>
@@ -421,7 +414,6 @@ export default function ProfilScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Sekcja: Zmiana hasła */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Zmiana hasła</Text>
 
@@ -473,7 +465,6 @@ export default function ProfilScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Sekcja: Powiadomienia */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Powiadomienia</Text>
 
@@ -510,7 +501,6 @@ export default function ProfilScreen() {
           </View>
         </View>
 
-        {/* Przycisk Wyloguj */}
         <TouchableOpacity
           style={styles.logoutButton}
           onPress={handleLogoutPress}

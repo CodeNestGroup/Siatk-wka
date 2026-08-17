@@ -14,6 +14,8 @@ import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
+import { syncMatchNotifications } from '@/services/notificationService';
+import { refreshPlayerNotifications } from '@/services/matchSyncService';
 
 type MatchItem = {
   id: string;
@@ -147,6 +149,9 @@ export default function ScheduleScreen() {
     });
 
     setMatches(processedMatches);
+    if (player) {
+      await refreshPlayerNotifications(player.id);
+    }
     setLoading(false);
   }, []);
 
@@ -168,6 +173,8 @@ export default function ScheduleScreen() {
 
     if (error) {
       showAlert('Błąd', 'Nie udało się wypisać z meczu: ' + error.message);
+    } else {
+      await refreshPlayerNotifications(currentPlayer.id);
     }
     setActionLoadingId(null);
     loadSchedule();
@@ -198,6 +205,8 @@ export default function ScheduleScreen() {
 
       if (error) {
         showAlert('Błąd', 'Nie udało się zapisać na mecz: ' + error.message);
+      } else {
+        await refreshPlayerNotifications(currentPlayer.id);
       }
 
       setActionLoadingId(null);
