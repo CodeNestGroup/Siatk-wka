@@ -7,7 +7,10 @@ type CustomAlertProps = {
   title: string;
   message: string;
   type?: 'error' | 'success' | 'info';
+  confirmText?: string;
+  cancelText?: string;
   onClose: () => void;
+  onCancel?: () => void;
 };
 
 export default function CustomAlert({
@@ -15,7 +18,10 @@ export default function CustomAlert({
   title,
   message,
   type = 'error',
+  confirmText = 'OK',
+  cancelText,
   onClose,
+  onCancel,
 }: CustomAlertProps) {
   const isError = type === 'error';
 
@@ -28,19 +34,34 @@ export default function CustomAlert({
     >
       <View style={styles.overlay}>
         <View style={styles.alertBox}>
-          {/* Opcjonalna ikona lub kolorowy pasek na górze */}
           <View style={[styles.indicator, isError ? styles.errorIndicator : styles.successIndicator]} />
 
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
 
-          <TouchableOpacity
-            style={[styles.button, isError ? styles.errorButton : styles.successButton]}
-            onPress={onClose}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.buttonText}>OK</Text>
-          </TouchableOpacity>
+          <View style={styles.buttonContainer}>
+            {cancelText && onCancel && (
+              <TouchableOpacity
+                style={[styles.button, styles.cancelButton]}
+                onPress={onCancel}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.cancelButtonText}>{cancelText}</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.button, 
+                isError ? styles.errorButton : styles.successButton,
+                cancelText ? { flex: 1 } : { width: '100%' }
+              ]}
+              onPress={onClose}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.buttonText}>{confirmText}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -91,16 +112,32 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     lineHeight: 20,
   },
-  button: {
+  buttonContainer: {
+    flexDirection: 'row',
+    gap: 10,
     width: '100%',
+  },
+  button: {
     paddingVertical: 12,
     borderRadius: radius.lg,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: colors.muted,
+  },
+  cancelButtonText: {
+    color: colors.foreground,
+    fontSize: 15,
+    fontWeight: '600',
   },
   errorButton: {
-    backgroundColor: colors.primary, // lub np. ostry czerwony
+    flex: 1,
+    backgroundColor: colors.primary,
   },
   successButton: {
+    flex: 1,
     backgroundColor: colors.primary,
   },
   buttonText: {
