@@ -58,10 +58,10 @@ export default function RootLayout() {
             vibrationPattern: [0, 250, 250, 250],
           });
           
-          // Sprawdzamy, czy alert o baterii był już kiedykolwiek pokazywany
+          // Sprawdzamy, czy alert o baterii był już pokazywany
           const hasShownBatteryAlert = await AsyncStorage.getItem('has_shown_battery_alert');
 
-          if (!hasShownBatteryAlert) {
+          if (hasShownBatteryAlert !== 'true') {
             setAlert({
               visible: true,
               title: 'Optymalizacja baterii',
@@ -82,7 +82,6 @@ export default function RootLayout() {
           }
         }
       } else {
-        // Uprawnienia do powiadomień nie zostały przyznane – tutaj możemy pytań za każdym razem, aż użytkownik włączy
         setAlert({
           visible: true,
           title: 'Brak uprawnień',
