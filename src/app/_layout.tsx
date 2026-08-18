@@ -58,24 +58,31 @@ export default function RootLayout() {
             vibrationPattern: [0, 250, 250, 250],
           });
           
-          // Używamy CustomAlert do zapytania o optymalizację baterii
-          setAlert({
-            visible: true,
-            title: 'Optymalizacja baterii',
-            message: 'Aby powiadomienia o meczach dochodziły na czas, wyłącz oszczędzanie baterii dla tej aplikacji w ustawieniach.',
-            type: 'info',
-            confirmText: 'Przejdź do ustawień',
-            cancelText: 'Później',
-            onConfirm: () => {
-              setAlert(prev => ({ ...prev, visible: false }));
-              Linking.openSettings();
-            },
-            onCancel: () => {
-              setAlert(prev => ({ ...prev, visible: false }));
-            }
-          });
+          // Sprawdzamy, czy alert o baterii był już kiedykolwiek pokazywany
+          const hasShownBatteryAlert = await AsyncStorage.getItem('has_shown_battery_alert');
+
+          if (!hasShownBatteryAlert) {
+            setAlert({
+              visible: true,
+              title: 'Optymalizacja baterii',
+              message: 'Aby powiadomienia o meczach dochodziły na czas, wyłącz oszczędzanie baterii dla tej aplikacji w ustawieniach.',
+              type: 'info',
+              confirmText: 'Przejdź do ustawień',
+              cancelText: 'Później',
+              onConfirm: async () => {
+                await AsyncStorage.setItem('has_shown_battery_alert', 'true');
+                setAlert(prev => ({ ...prev, visible: false }));
+                Linking.openSettings();
+              },
+              onCancel: async () => {
+                await AsyncStorage.setItem('has_shown_battery_alert', 'true');
+                setAlert(prev => ({ ...prev, visible: false }));
+              }
+            });
+          }
         }
       } else {
+        // Uprawnienia do powiadomień nie zostały przyznane – tutaj możemy pytań za każdym razem, aż użytkownik włączy
         setAlert({
           visible: true,
           title: 'Brak uprawnień',
