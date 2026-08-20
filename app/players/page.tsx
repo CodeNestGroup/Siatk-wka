@@ -1,7 +1,21 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Users, Search, Trash2, Calendar, Plus, X, Mail, CheckCircle, Clock, CheckCircle2 } from "lucide-react"
+import {
+  Users,
+  Search,
+  Trash2,
+  Calendar,
+  Plus,
+  X,
+  Mail,
+  CheckCircle,
+  Clock,
+  CheckCircle2,
+  UserCheck,
+  UserX,
+  Power
+} from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
 import { supabase } from "@/lib/supabase"
@@ -43,6 +57,7 @@ export default function PlayersPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
+  const [statusFilter, setStatusFilter] = useState<"active" | "inactive" | "all">("active")
 
   const [isAdding, setIsAdding] = useState(false)
   const [newFullName, setNewFullName] = useState("")
@@ -57,9 +72,7 @@ export default function PlayersPage() {
     user?.role === "admin" ||
     user?.is_admin ||
     user?.role_id === 1 ||
-    user?.email === "admin@admin.pl" ||
-    user?.name === "Mateusz Podzorski" ||
-    user?.full_name === "Mateusz Podzorski"
+    user?.email === "admin@admin.pl"
 
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
@@ -81,7 +94,6 @@ export default function PlayersPage() {
     window.location.href = "/login"
   }
 
-  // Pobieranie zawodników z uwzględnieniem player_status_id lub role_id jako pending
   async function fetchPlayers() {
     setIsLoading(true)
 
@@ -117,25 +129,8 @@ export default function PlayersPage() {
       }
     })
 
-    matchesData?.forEach((m: any) => {
-      if (Array.isArray(m.players)) {
-        m.players.forEach((p: any) => {
-          const pid = p.id || p.name || p.full_name
-          if (!pid) return
-
-          const key = String(pid).toLowerCase().trim()
-          if (!regData || regData.length === 0) {
-            counts[key] = (counts[key] || 0) + 1
-            if (p.paid || p.is_paid) {
-              paidSums[key] = (paidSums[key] || 0) + Number(m.price_per_player || 25)
-            }
-          }
-        })
-      }
-    })
-
     if (dbPlayers && dbPlayers.length > 0) {
-      const activeList: GlobalPlayer[] = []
+      const allPlayerList: GlobalPlayer[] = []
       const pendingList: GlobalPlayer[] = []
 
       dbPlayers.forEach((p) => {
@@ -154,22 +149,21 @@ export default function PlayersPage() {
           id: p.id,
           full_name: fullName,
           email: p.email || "Brak e-maila",
-          player_status_id: p.player_status_id,
+          player_status_id: p.player_status_id ?? 1,
           role_id: p.role_id,
           created_at: p.created_at,
           matches_count: matchesCount,
           total_paid: totalPaid,
         }
 
-        // Sprawdzamy status 3, role_id 3 (pending) lub pole tekstowe role
         if (p.player_status_id === 3 || p.role_id === 3 || p.role === "pending") {
           pendingList.push(playerObj)
         } else {
-          activeList.push(playerObj)
+          allPlayerList.push(playerObj)
         }
       })
 
-      setPlayers(activeList)
+      setPlayers(allPlayerList)
       setPendingPlayers(pendingList)
     } else {
       setPlayers([])
@@ -179,11 +173,41 @@ export default function PlayersPage() {
     setIsLoading(false)
   }
 
-  // Zatwierdzanie konta -> ustawiamy role_id na 2 (zwykły użytkownik) oraz status na 1/2
-  async function approvePlayer(id: string) {
+  // DYNAMICZNE PRZEŁĄCZANIE STATUSU ZGODNIE ZE SŁOWNIKIEM PLAYER_STATUS
+  async function togglePlayerStatus(player: GlobalPlayer, e: React.MouseEvent) {
+    e.stopPropagation()
+
+    // 1. Pobieramy dostępne statusy z tabeli player_status
+    const { data: statusList } = await supabase.from('player_status').select('*').order('id', { ascending: true })
+
+    const activeStatusId = statusList?.find((s: any) => s.name?.toLowerCase().includes("aktyw") && !s.name?.toLowerCase().includes("nie"))?.id || 1
+    const inactiveStatusId = statusList?.find((s: any) => s.name?.toLowerCase().includes("nieaktyw") || s.name?.toLowerCase().includes("zablok") || s.name?.toLowerCase().includes("zawies"))?.id || (statusList && statusList.length > 1 ? statusList[1].id : 2)
+
+    const isCurrentlyActive = player.player_status_id === activeStatusId || !player.player_status_id
+    const targetStatusId = isCurrentlyActive ? inactiveStatusId : activeStatusId
+
+    const actionText = isCurrentlyActive ? "dezaktywować (wyłączyć konto z powołań)" : "aktywować"
+    if (!confirm(`Czy na pewno chcesz ${actionText} zawodnika "${player.full_name}"?`)) return
+
     const { error } = await supabase
       .from('players')
-      .update({ role_id: 2, player_status_id: 2 })
+      .update({ player_status_id: targetStatusId })
+      .eq('id', player.id)
+
+    if (error) {
+      alert(`Błąd aktualizacji statusu: ${error.message}`)
+    } else {
+      await fetchPlayers()
+    }
+  }
+
+  async function approvePlayer(id: string) {
+    const { data: statusList } = await supabase.from('player_status').select('*')
+    const activeId = statusList?.find((s: any) => s.name?.toLowerCase().includes("aktyw") && !s.name?.toLowerCase().includes("nie"))?.id || 1
+
+    const { error } = await supabase
+      .from('players')
+      .update({ role_id: 2, player_status_id: activeId })
       .eq('id', id)
 
     if (error) {
@@ -213,13 +237,16 @@ export default function PlayersPage() {
 
     const emailToUse = newEmail.trim() || `${newFullName.trim().toLowerCase().replace(/\s+/g, ".")}@volley.local`
 
+    const { data: statusList } = await supabase.from('player_status').select('*')
+    const activeId = statusList?.find((s: any) => s.name?.toLowerCase().includes("aktyw") && !s.name?.toLowerCase().includes("nie"))?.id || 1
+
     const { error } = await supabase
       .from('players')
       .insert([
         {
           full_name: newFullName.trim(),
           email: emailToUse,
-          player_status_id: 2,
+          player_status_id: activeId,
           role_id: 2
         }
       ])
@@ -243,11 +270,8 @@ export default function PlayersPage() {
     const playerToDelete = players.find(p => p.id === id)
     if (!playerToDelete) return
 
-    if (!confirm(`Czy na pewno chcesz usunąć zawodnika "${playerToDelete.full_name}" z CAŁEJ bazy? Zniknie on również ze statystyk oraz ze wszystkich meczów.`)) return
+    if (!confirm(`Czy na pewno chcesz trwale usunąć zawodnika "${playerToDelete.full_name}" z bazy? Zniknie on również ze statystyk.`)) return
 
-    // Usuwamy bezpośrednio zawodnika z tabeli players.
-    // Dzięki więzom obcym (FOREIGN KEY z ON DELETE CASCADE) w tabeli match_registrations,
-    // wpisy dotyczące zapisów tego gracza na mecze usuną się automatycznie.
     const { error } = await supabase.from('players').delete().eq('id', id)
 
     if (error) {
@@ -298,10 +322,18 @@ export default function PlayersPage() {
     setIsLoadingHistory(false)
   }
 
-  const filteredPlayers = players.filter((p) =>
-    p.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (p.email && p.email.toLowerCase().includes(searchQuery.toLowerCase()))
-  )
+  const filteredPlayers = players.filter((p) => {
+    const matchesSearch =
+      p.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.email && p.email.toLowerCase().includes(searchQuery.toLowerCase()))
+
+    // Status 1 uważamy za aktywny, każdy inny (>1) za nieaktywny/wyłączony
+    const isActive = p.player_status_id === 1 || !p.player_status_id
+
+    if (statusFilter === "active") return matchesSearch && isActive
+    if (statusFilter === "inactive") return matchesSearch && !isActive
+    return matchesSearch
+  })
 
   return (
     <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
@@ -313,7 +345,6 @@ export default function PlayersPage() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* GÓRNY PASEK ZE SPONSORAMI I DZWONKIEM */}
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/80 px-6 py-3.5 backdrop-blur-md">
           <style jsx>{`
             @keyframes marquee { 0% { transform: translateX(0%); } 100% { transform: translateX(-50%); } }
@@ -333,9 +364,7 @@ export default function PlayersPage() {
 
           <div className="flex items-center gap-3 shrink-0 ml-6">
             <NotificationsBell
-              onNotificationClick={(notif: NotificationItem) => {
-                // opcjonalna obsługa
-              }}
+              onNotificationClick={(notif: NotificationItem) => {}}
             />
           </div>
         </header>
@@ -344,39 +373,64 @@ export default function PlayersPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
-                <Users className="h-5 w-5 text-primary" />
+                <Users className="h-5 w-5 text-blue-600" />
               </div>
               <div>
-                <h1 className="text-xl font-bold tracking-tight text-foreground">Baza Zawodników</h1>
-                <p className="text-xs text-muted-foreground">
-                  Zarządzaj składem, sprawdzaj historię obecności i wpłat zawodników z bazy.
+                <h1 className="text-xl font-bold tracking-tight text-slate-900">Baza Zawodników</h1>
+                <p className="text-xs text-slate-500 font-medium">
+                  Zarządzaj statusem aktywności, historią obecności i rozliczeniami graczy.
                 </p>
               </div>
             </div>
 
             {isAdmin && (
-              <Button size="sm" className="gap-2 rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer" onClick={() => setIsAdding(true)}>
+              <Button size="sm" className="gap-2 rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-md shadow-blue-500/20" onClick={() => setIsAdding(true)}>
                 <Plus className="h-4 w-4" />
                 Dodaj zawodnika do bazy
               </Button>
             )}
           </div>
 
-          <div className="relative w-full max-w-md">
-            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="search"
-              placeholder="Szukaj zawodnika po imieniu lub e-mailu..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-2xl border border-input bg-card py-2.5 pl-10 pr-4 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30 shadow-sm transition-all"
-            />
+          {/* PASEK WYSZUKIWANIA I ZAKŁADKI STATUSU */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="relative w-full max-w-md">
+              <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                placeholder="Szukaj zawodnika po imieniu lub e-mailu..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-xs font-medium outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
+              {[
+                { id: "active", label: "Aktywni" },
+                { id: "inactive", label: "Nieaktywni" },
+                { id: "all", label: "Wszyscy" }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setStatusFilter(tab.id as any)}
+                  className={cn(
+                    "rounded-xl px-4 py-1.5 text-xs font-bold transition-all cursor-pointer",
+                    statusFilter === tab.id
+                      ? "bg-white text-blue-600 shadow-sm font-black"
+                      : "text-slate-600 hover:text-slate-900"
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
 
+          {/* KAFEL ZGŁOSZEŃ OCZEKUJĄCYCH */}
           {isAdmin && pendingPlayers.length > 0 && (
-            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-3">
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-50 p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-amber-600 flex items-center gap-2">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-amber-700 flex items-center gap-2">
                   <Clock className="h-4 w-4 text-amber-500" />
                   Konta oczekujące na zatwierdzenie ({pendingPlayers.length})
                 </h2>
@@ -384,17 +438,17 @@ export default function PlayersPage() {
 
               <div className="space-y-2">
                 {pendingPlayers.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between bg-card p-3 rounded-xl border border-border shadow-sm text-xs font-bold">
+                  <div key={p.id} className="flex items-center justify-between bg-white p-3 rounded-xl border border-amber-200/60 shadow-sm text-xs font-bold">
                     <div>
-                      <p className="text-foreground">{p.full_name}</p>
-                      <p className="text-[11px] text-muted-foreground font-normal">{p.email}</p>
+                      <p className="text-slate-900">{p.full_name}</p>
+                      <p className="text-[11px] text-slate-500 font-normal">{p.email}</p>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <Button
                         size="sm"
                         onClick={() => approvePlayer(p.id)}
-                        className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] gap-1 h-8 cursor-pointer"
+                        className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] gap-1 h-8 cursor-pointer shadow-sm"
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" /> Zatwierdź
                       </Button>
@@ -402,7 +456,7 @@ export default function PlayersPage() {
                         size="sm"
                         variant="ghost"
                         onClick={() => rejectPlayer(p.id)}
-                        className="rounded-xl hover:bg-destructive/10 text-destructive font-bold text-[11px] h-8 cursor-pointer"
+                        className="rounded-xl hover:bg-rose-50 text-rose-600 font-bold text-[11px] h-8 cursor-pointer"
                       >
                         Odrzuć
                       </Button>
@@ -413,30 +467,32 @@ export default function PlayersPage() {
             </div>
           )}
 
+          {/* TABELA ZAWODNIKÓW */}
           {isLoading ? (
-            <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
-              <p className="text-xs text-primary font-bold animate-pulse">
-                Ładowanie zawodników z bazy Supabase...
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
+              <p className="text-xs text-blue-600 font-bold animate-pulse">
+                Ładowanie bazy zawodników...
               </p>
             </div>
           ) : filteredPlayers.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
-              <p className="text-xs text-muted-foreground">
-                Brak zawodników odpowiadających kryteriom wyszukiwania.
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
+              <p className="text-xs text-slate-400 font-medium">
+                Brak zawodników w tej kategorii.
               </p>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
               <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground bg-secondary/30">
+                  <tr className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-400 bg-slate-50/50">
                     <th className="px-6 py-4 font-bold">Zawodnik</th>
+                    <th className="px-6 py-4 font-bold">Status konta</th>
                     <th className="px-6 py-4 font-bold">Rozegrane mecze</th>
                     <th className="px-6 py-4 font-bold">Suma wpłat</th>
                     {isAdmin && <th className="px-6 py-4 text-right font-bold">Akcje</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border/60">
+                <tbody className="divide-y divide-slate-100">
                   {filteredPlayers.map((player) => {
                     const isCurrentUser =
                       user?.id === player.id ||
@@ -444,63 +500,96 @@ export default function PlayersPage() {
                       user?.full_name?.toLowerCase() === player.full_name?.toLowerCase() ||
                       user?.name?.toLowerCase() === player.full_name?.toLowerCase()
 
+                    const isActive = player.player_status_id === 1 || !player.player_status_id
+
                     return (
                       <tr
                         key={player.id}
                         onClick={() => openPlayerHistory(player)}
                         className={cn(
                           "group transition-all cursor-pointer",
+                          !isActive && "opacity-60 bg-slate-50/50",
                           isCurrentUser
-                            ? "bg-blue-50/80 hover:bg-blue-100/80 dark:bg-blue-950/30 font-semibold"
-                            : "hover:bg-secondary/30"
+                            ? "bg-blue-50/80 hover:bg-blue-100/80 font-semibold"
+                            : "hover:bg-slate-50"
                         )}
                       >
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
                             <span className={cn(
                               "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-black text-xs border",
-                              isCurrentUser
+                              !isActive
+                                ? "bg-slate-100 text-slate-400 border-slate-200"
+                                : isCurrentUser
                                 ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                                : "bg-primary/10 text-primary border-primary/20"
+                                : "bg-blue-50 text-blue-600 border-blue-100"
                             )}>
                               {player.full_name?.charAt(0).toUpperCase()}
                             </span>
                             <div>
                               <p className={cn(
                                 "font-bold transition-colors flex items-center gap-1.5",
-                                isCurrentUser ? "text-blue-600 font-extrabold" : "text-foreground group-hover:text-primary"
+                                isCurrentUser ? "text-blue-600 font-extrabold" : "text-slate-900 group-hover:text-blue-600"
                               )}>
                                 <span>{player.full_name}</span>
                                 {isCurrentUser && (
-                                  <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                                  <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-blue-700">
                                     (Ty)
                                   </span>
                                 )}
                               </p>
-                              <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                                <Mail className="h-3 w-3 text-primary/70" />
+                              <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                                <Mail className="h-3 w-3 text-slate-400" />
                                 {player.email}
                               </p>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
+                          <span className={cn(
+                            "inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-extrabold border",
+                            isActive
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200/80"
+                              : "bg-slate-100 text-slate-500 border-slate-200"
+                          )}>
+                            {isActive ? <UserCheck className="h-3 w-3" /> : <UserX className="h-3 w-3" />}
+                            {isActive ? "Aktywny" : "Wyłączony"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
                           <Badge tone={player.matches_count && player.matches_count > 0 ? "success" : "neutral"}>
                             {player.matches_count || 0} {player.matches_count === 1 ? "mecz" : "meczy"}
                           </Badge>
                         </td>
-                        <td className="px-6 py-4 font-bold text-foreground">
-                          <span className="text-emerald-500">{player.total_paid || 0} PLN</span>
+                        <td className="px-6 py-4 font-bold text-slate-900">
+                          <span className="text-emerald-600">{player.total_paid || 0} PLN</span>
                         </td>
                         {isAdmin && (
                           <td className="px-6 py-4 text-right">
-                            <button
-                              onClick={(e) => deletePlayer(player.id, e)}
-                              className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-destructive/10 hover:text-destructive cursor-pointer"
-                              aria-label="Usuń zawodnika"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* Przełącznik wyłącz/włącz konto */}
+                              <button
+                                onClick={(e) => togglePlayerStatus(player, e)}
+                                className={cn(
+                                  "rounded-xl p-2 transition-all cursor-pointer border",
+                                  isActive
+                                    ? "bg-slate-50 text-slate-400 hover:bg-amber-50 hover:text-amber-600 border-slate-200"
+                                    : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-200"
+                                )}
+                                title={isActive ? "Wyłącz konto (ukryj z powołań)" : "Włącz konto ponownie"}
+                              >
+                                <Power className="h-4 w-4" />
+                              </button>
+
+                              {/* Trwałe usunięcie z bazy */}
+                              <button
+                                onClick={(e) => deletePlayer(player.id, e)}
+                                className="rounded-xl p-2 text-slate-400 transition-all hover:bg-rose-50 hover:text-rose-600 border border-slate-200 cursor-pointer"
+                                title="Usuń trwale z bazy"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -514,40 +603,40 @@ export default function PlayersPage() {
       </div>
 
       {isAdding && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-foreground/50 backdrop-blur-sm">
-          <form onSubmit={handleAddPlayer} className="relative w-full max-w-md rounded-3xl bg-card p-6 shadow-2xl border border-border space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <h2 className="text-base font-bold text-foreground">Dodaj nowego zawodnika do bazy</h2>
-              <button type="button" onClick={() => setIsAdding(false)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary cursor-pointer">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <form onSubmit={handleAddPlayer} className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h2 className="text-base font-bold text-slate-900">Dodaj nowego zawodnika do bazy</h2>
+              <button type="button" onClick={() => setIsAdding(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="mb-1 block font-semibold text-muted-foreground">Imię i nazwisko</label>
+                <label className="mb-1 block font-semibold text-slate-700">Imię i nazwisko</label>
                 <input
                   type="text"
                   required
                   value={newFullName}
                   onChange={(e) => setNewFullName(e.target.value)}
                   placeholder="np. Jan Kowalski"
-                  className="w-full rounded-xl border border-input bg-background px-3.5 py-2 outline-none focus:ring-2 focus:ring-primary/30"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 outline-none focus:border-blue-500 focus:bg-white"
                 />
               </div>
               <div>
-                <label className="mb-1 block font-semibold text-muted-foreground">Adres e-mail (opcjonalnie)</label>
+                <label className="mb-1 block font-semibold text-slate-700">Adres e-mail (opcjonalnie)</label>
                 <input
                   type="email"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
                   placeholder="np. jan@example.com"
-                  className="w-full rounded-xl border border-input bg-background px-3.5 py-2 outline-none focus:ring-2 focus:ring-primary/30"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 outline-none focus:border-blue-500 focus:bg-white"
                 />
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2 border-t border-border">
+            <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
               <Button type="button" variant="outline" size="sm" onClick={() => setIsAdding(false)} className="rounded-xl cursor-pointer">Anuluj</Button>
               <Button type="submit" size="sm" disabled={isSubmitting} className="rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer">{isSubmitting ? "Zapisywanie w bazie..." : "Zapisz w bazie"}</Button>
             </div>
@@ -556,38 +645,38 @@ export default function PlayersPage() {
       )}
 
       {selectedPlayer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-foreground/50 backdrop-blur-sm">
-          <div className="relative w-full max-w-lg rounded-3xl bg-card p-6 shadow-2xl max-h-[85vh] flex flex-col border border-border">
-            <div className="mb-4 flex items-center justify-between border-b border-border pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="relative w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl max-h-[85vh] flex flex-col border border-slate-200">
+            <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <h2 className="text-base font-bold text-foreground">{selectedPlayer.full_name}</h2>
-                <p className="text-xs text-muted-foreground">{selectedPlayer.email}</p>
+                <h2 className="text-base font-bold text-slate-900">{selectedPlayer.full_name}</h2>
+                <p className="text-xs text-slate-400">{selectedPlayer.email}</p>
               </div>
-              <button onClick={() => setSelectedPlayer(null)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary cursor-pointer">
+              <button onClick={() => setSelectedPlayer(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Historia meczów i płatności</h3>
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Historia meczów i płatności</h3>
               {isLoadingHistory ? (
-                <p className="text-xs text-muted-foreground text-center py-8 animate-pulse">Ładowanie historii...</p>
+                <p className="text-xs text-slate-400 text-center py-8 animate-pulse">Ładowanie historii...</p>
               ) : playerHistory.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-8">Ten zawodnik nie brał jeszcze udziału w żadnym meczu.</p>
+                <p className="text-xs text-slate-400 text-center py-8">Ten zawodnik nie brał jeszcze udziału w żadnym meczu.</p>
               ) : (
                 playerHistory.map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between rounded-2xl border border-border bg-secondary/20 p-3 text-xs">
+                  <div key={idx} className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/70 p-3 text-xs font-semibold">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                         <Calendar className="h-4 w-4" />
                       </div>
                       <div>
-                        <p className="font-bold text-foreground">{item.match_date} ({item.location})</p>
-                        <p className="text-[10px] text-muted-foreground">Status: {item.status}</p>
+                        <p className="font-bold text-slate-900">{item.match_date} ({item.location})</p>
+                        <p className="text-[10px] text-slate-400">Status: {item.status}</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-extrabold ${item.paid ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'}`}>
+                      <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-extrabold ${item.paid ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-amber-50 text-amber-600 border border-amber-200'}`}>
                         {item.paid ? <CheckCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
                         {item.paid ? `Opłacono (${item.fee} PLN)` : `Nieopłacone (${item.fee} PLN)`}
                       </span>
@@ -597,7 +686,7 @@ export default function PlayersPage() {
               )}
             </div>
 
-            <div className="mt-4 pt-3 border-t border-border flex justify-end">
+            <div className="mt-4 pt-3 border-t border-slate-100 flex justify-end">
               <Button variant="outline" size="sm" onClick={() => setSelectedPlayer(null)} className="rounded-xl cursor-pointer">Zamknij</Button>
             </div>
           </div>

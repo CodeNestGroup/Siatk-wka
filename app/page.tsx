@@ -16,16 +16,18 @@ import {
   UserCheck,
   Crown,
   Trophy,
-  Share2,
-  Shuffle,
   Trash2,
   Check,
   Ban,
-  Timer
+  Timer,
+  Repeat,
+  Sparkles,
+  ArrowRight,
+  LogOut,
+  CalendarOff
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { MatchDetail } from "@/components/dashboard/match-detail"
-import { TeamBalancerModal } from "@/components/dashboard/team-balancer-modal"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
 import { Button } from "@/components/ui/button"
 import { type Match, mainRoster, waitlist } from "@/lib/data"
@@ -56,18 +58,28 @@ export default function DashboardPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [readMatchIds, setReadMatchIds] = useState<string[]>([])
 
-  const [selectedMatchForTeams, setSelectedMatchForTeams] = useState<Match | null>(null)
   const [selectedMatchRosterPreview, setSelectedMatchRosterPreview] = useState<Match | null>(null)
   const [viewMode, setViewMode] = useState<"nearest" | "season">("nearest")
 
   const isAdmin = user?.role === "admin" || user?.is_admin || user?.role_id === 1
 
+  // Stan zaznaczania meczów dla Usera i Admina
+  const [isSelectionMode, setIsSelectionMode] = useState(false)
+  const [selectedMatchesForBulk, setSelectedMatchesForBulk] = useState<string[]>([])
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false)
+
+  // Pola formularza tworzenia meczów
   const [newDate, setNewDate] = useState("")
   const [newLocation, setNewLocation] = useState("Hala Sportowa ESCO Jaworze")
   const [newPrice, setNewPrice] = useState("25")
   const [newCapacity, setNewCapacity] = useState("12")
   const [newTitle, setNewTitle] = useState("")
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([])
+
+  const [repeatFrequency, setRepeatFrequency] = useState<"none" | "1week" | "2weeks" | "1month">("none")
+  const [durationMode, setDurationMode] = useState<"preset" | "custom_date">("preset")
+  const [presetDurationMonths, setPresetDurationMonths] = useState<number>(2)
+  const [repeatUntilDate, setRepeatUntilDate] = useState<string>("")
 
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
@@ -101,7 +113,6 @@ export default function DashboardPage() {
     setIsLoading(true)
 
     let fetchedMatches: Match[] = []
-    // Poprawna nazwa tabeli relacji ze schematu: matches_status
     const { data: matchesData, error } = await supabase
       .from("matches")
       .select("*, matches_status(id, name)")
@@ -127,7 +138,12 @@ export default function DashboardPage() {
 
     setMatches(processedMatches)
 
-    const { data: playersData } = await supabase.from("players").select("*")
+    const { data: playersData } = await supabase
+      .from("players")
+      .select("*")
+      .or("player_status_id.eq.1,player_status_id.is.null")
+      .order("full_name", { ascending: true })
+
     if (playersData) {
       setAvailablePlayers(playersData)
     }
@@ -150,27 +166,22 @@ export default function DashboardPage() {
     setSelectedMatchRosterPreview(match)
   }
 
-  // NAPRAWIONE ODWOŁYWANIE MECZU WG DOPASOWANEGO SCHEMATU ERD
   async function handleCancelMatch(matchId: string, matchDate: string, e: React.MouseEvent) {
     e.stopPropagation()
     if (!confirm(`Odwołać mecz z dnia ${matchDate}?`)) return
 
-    // 1. Pobieramy rekordy z tabeli matches_status
     const { data: statusList } = await supabase.from("matches_status").select("*")
 
-    // Szukamy ID dla statusu "Odwołany"
     let cancelledStatusId = statusList?.find((s: any) =>
       s.name?.toLowerCase().includes("odwoł") ||
       s.name?.toLowerCase().includes("cancel")
     )?.id
 
-    // Fallback: jeśli słownie nie znaleziono, wybieramy OSTATNIE id z tabeli matches_status lub 4
     if (!cancelledStatusId && statusList && statusList.length > 0) {
       cancelledStatusId = statusList[statusList.length - 1].id
     }
     if (!cancelledStatusId) cancelledStatusId = 4
 
-    // 2. Aktualizujemy status_id w tabeli matches
     const { error: matchError } = await supabase
       .from("matches")
       .update({ status_id: cancelledStatusId })
@@ -180,8 +191,6 @@ export default function DashboardPage() {
       notify(`Błąd aktualizacji meczu: ${matchError.message}`)
       return
     }
-
-    // 3. Tworzymy ogłoszenie z poprawnym powiązaniem match_id (uuid)
 
     notify("Mecz odwołany! Ogłoszenie zostało opublikowane.")
     await loadData()
@@ -198,18 +207,107 @@ export default function DashboardPage() {
     loadData()
   }
 
-  function copyMatchToClipboard(match: Match, e: React.MouseEvent) {
-    e.stopPropagation()
-    const roster = mainRoster(match)
-    const subtitle = match.title && match.title !== match.date ? ` - ${match.title}` : ""
-    const text = `🏐 *Trening ESCO (${match.date}${subtitle})*\n📍 ${match.location}\n⏰ ${match.time_start || '19:00'} - ${match.time_end || '21:00'}\n👥 Skład: ${roster.length}/${match.capacity || 12}\n💰 Składka: ${match.price_per_player || 25} PLN`
-    navigator.clipboard.writeText(text)
-    notify("Skopiowano do schowka!")
+  function handleCardClick(match: Match) {
+    if (isSelectionMode || selectedMatchesForBulk.length > 0) {
+      toggleMatchSelection(match.id)
+    } else {
+      handleSelectMatch(match)
+    }
   }
 
-  function handleOpenBalancer(match: Match, e: React.MouseEvent) {
-    e.stopPropagation()
-    setSelectedMatchForTeams(match)
+  function toggleMatchSelection(matchId: string) {
+    setSelectedMatchesForBulk((prev) => {
+      const next = prev.includes(matchId) ? prev.filter((id) => id !== matchId) : [...prev, matchId]
+      if (next.length === 0) setIsSelectionMode(false)
+      else setIsSelectionMode(true)
+      return next
+    })
+  }
+
+  function selectPresetRange(days: number) {
+    const today = new Date()
+    const targetEnd = new Date()
+    targetEnd.setDate(today.getDate() + days)
+
+    const todayStr = today.toISOString().split("T")[0]
+    const targetEndStr = targetEnd.toISOString().split("T")[0]
+
+    const matchedIds = matches
+      .filter((m: any) => {
+        const isInRange = m.date >= todayStr && m.date <= targetEndStr
+        const isUserSignedUp = m.players?.some((p: any) => p.id === user?.id)
+        return isInRange && isUserSignedUp
+      })
+      .map((m) => m.id)
+
+    if (matchedIds.length === 0) {
+      notify("Nie jesteś zapisany na żaden mecz w tym okresie.")
+      return
+    }
+
+    setSelectedMatchesForBulk(matchedIds)
+    setIsSelectionMode(true)
+    notify(`Zaznaczono ${matchedIds.length} Twoich meczów w wybranym okresie!`)
+  }
+
+  function toggleSelectAllCurrent(currentFilteredMatches: any[]) {
+    if (selectedMatchesForBulk.length === currentFilteredMatches.length) {
+      setSelectedMatchesForBulk([])
+      setIsSelectionMode(false)
+    } else {
+      setSelectedMatchesForBulk(currentFilteredMatches.map((m) => m.id))
+      setIsSelectionMode(true)
+    }
+  }
+
+  async function handleBulkLeaveSelected() {
+    if (!user || selectedMatchesForBulk.length === 0) return
+    if (!confirm(`Wypisać Cię z ${selectedMatchesForBulk.length} zaznaczonych spotkań?`)) return
+
+    setIsBulkProcessing(true)
+
+    try {
+      const { error } = await supabase
+        .from("match_registrations")
+        .delete()
+        .eq("player_id", user.id)
+        .in("match_id", selectedMatchesForBulk)
+
+      if (error) {
+        notify(`Błąd wypisywania: ${error.message}`)
+      } else {
+        notify(`Pomyślnie wypisano Cię z ${selectedMatchesForBulk.length} spotkań!`)
+        setSelectedMatchesForBulk([])
+        setIsSelectionMode(false)
+        await loadData()
+      }
+    } catch (err: any) {
+      notify(`Wystąpił błąd: ${err?.message}`)
+    } finally {
+      setIsBulkProcessing(false)
+    }
+  }
+
+  async function handleBulkDeleteAdmin() {
+    if (!isAdmin || selectedMatchesForBulk.length === 0) return
+    if (!confirm(`[ADMIN] Czy na pewno chcesz trwale usunąć ${selectedMatchesForBulk.length} meczów z bazy?`)) return
+
+    setIsBulkProcessing(true)
+
+    try {
+      await supabase.from("match_registrations").delete().in("match_id", selectedMatchesForBulk)
+      await supabase.from("announcements").delete().in("match_id", selectedMatchesForBulk)
+      await supabase.from("matches").delete().in("id", selectedMatchesForBulk)
+
+      notify(`Usunięto ${selectedMatchesForBulk.length} meczów z bazy!`)
+      setSelectedMatchesForBulk([])
+      setIsSelectionMode(false)
+      await loadData()
+    } catch (err: any) {
+      notify(`Błąd: ${err?.message}`)
+    } finally {
+      setIsBulkProcessing(false)
+    }
   }
 
   function togglePlayerSelection(playerId: string) {
@@ -226,48 +324,93 @@ export default function DashboardPage() {
     }
   }
 
+  function calculateGeneratedDates(): string[] {
+    if (!newDate) return []
+    if (repeatFrequency === "none") return [newDate]
+
+    const startDate = new Date(newDate)
+    let endDate = new Date(newDate)
+
+    if (durationMode === "preset") {
+      endDate.setMonth(endDate.getMonth() + presetDurationMonths)
+    } else if (durationMode === "custom_date" && repeatUntilDate) {
+      endDate = new Date(repeatUntilDate)
+    }
+
+    const generatedDates: string[] = []
+    const currentDate = new Date(startDate)
+
+    while (currentDate <= endDate) {
+      generatedDates.push(currentDate.toISOString().split("T")[0])
+
+      if (repeatFrequency === "1week") {
+        currentDate.setDate(currentDate.getDate() + 7)
+      } else if (repeatFrequency === "2weeks") {
+        currentDate.setDate(currentDate.getDate() + 14)
+      } else if (repeatFrequency === "1month") {
+        currentDate.setMonth(currentDate.getMonth() + 1)
+      }
+    }
+
+    return generatedDates
+  }
+
   async function handleCreateMatch(e: React.FormEvent) {
     e.preventDefault()
     if (!newDate) return
 
     setIsCreating(true)
     const todayStr = new Date().toISOString().split("T")[0]
-    const initialStatusId = newDate < todayStr ? 3 : 1
+    const datesToCreate = calculateGeneratedDates()
 
-    const matchTitle = newTitle.trim() ? newTitle.trim() : newDate
+    const matchesToInsert = datesToCreate.map((matchDateStr) => {
+      const initialStatusId = matchDateStr < todayStr ? 3 : 1
+      const matchTitle = newTitle.trim() ? newTitle.trim() : matchDateStr
 
-    const newMatchObj = {
-      title: matchTitle,
-      date: newDate,
-      time_start: "19:00:00",
-      time_end: "21:00:00",
-      location: newLocation,
-      price_per_player: Number(newPrice) || 25,
-      capacity: Number(newCapacity) || 12,
-      max_players: Number(newCapacity) || 12,
-      status_id: initialStatusId,
-      is_settled: false
-    }
+      return {
+        title: matchTitle,
+        date: matchDateStr,
+        time_start: "19:00:00",
+        time_end: "21:00:00",
+        location: newLocation,
+        price_per_player: Number(newPrice) || 25,
+        capacity: Number(newCapacity) || 12,
+        max_players: Number(newCapacity) || 12,
+        status_id: initialStatusId,
+        is_settled: false
+      }
+    })
 
-    const { data: insertedMatch, error } = await supabase.from("matches").insert([newMatchObj]).select().single()
+    const { data: insertedMatches, error } = await supabase
+      .from("matches")
+      .insert(matchesToInsert)
+      .select()
 
-    if (error || !insertedMatch) {
+    if (error || !insertedMatches) {
       notify(`Błąd zapisu: ${error?.message || "Nieznany błąd"}`)
     } else {
       if (selectedPlayerIds.length > 0) {
-        const registrations = selectedPlayerIds.map(pid => ({
-          match_id: insertedMatch.id,
-          player_id: pid,
-          is_paid: false
-        }))
-        await supabase.from("match_registrations").insert(registrations)
+        const allRegistrations: any[] = []
+        insertedMatches.forEach((m: any) => {
+          selectedPlayerIds.forEach((pid) => {
+            allRegistrations.push({
+              match_id: m.id,
+              player_id: pid,
+              is_paid: false
+            })
+          })
+        })
+        await supabase.from("match_registrations").insert(allRegistrations)
       }
 
-      notify("Pomyślnie utworzono nowy mecz!")
+      notify(datesToCreate.length > 1 ? `Utworzono ${datesToCreate.length} meczów!` : "Pomyślnie utworzono nowy mecz!")
       setShowCreateModal(false)
       setNewDate("")
       setNewTitle("")
       setSelectedPlayerIds([])
+      setRepeatFrequency("none")
+      setPresetDurationMonths(2)
+      setRepeatUntilDate("")
       loadData()
     }
 
@@ -293,6 +436,10 @@ export default function DashboardPage() {
 
   const todayStr = new Date().toISOString().split("T")[0]
 
+  const activeMatches = matches.filter((m: any) => !m.matches_status?.name?.toLowerCase().includes("odwoł") && m.status_id !== 4)
+  const upcomingMatches = activeMatches.filter((m: any) => m.date >= todayStr && !m.is_settled)
+  const nearestMatch = upcomingMatches[0] || activeMatches[0]
+
   const filteredMatches = matches.filter((m: any) => {
     const searchString = `${m.title || ''} ${m.location || ''} ${m.date || ''}`.toLowerCase()
     const matchFound = searchString.includes(searchTerm.toLowerCase())
@@ -308,10 +455,6 @@ export default function DashboardPage() {
   })
 
   const sortedMatches = [...filteredMatches].sort((a: any, b: any) => a.date.localeCompare(b.date))
-
-  const activeMatches = matches.filter((m: any) => !m.matches_status?.name?.toLowerCase().includes("odwoł") && m.status_id !== 4)
-  const upcomingMatches = activeMatches.filter((m: any) => m.date >= todayStr)
-  const nearestMatch = upcomingMatches[0] || activeMatches[0]
 
   const totalSeasonMatches = activeMatches.length
 
@@ -345,8 +488,12 @@ export default function DashboardPage() {
 
   const nearestRoster = nearestMatch ? mainRoster(nearestMatch) : []
   const nearestWaitlist = nearestMatch ? waitlist(nearestMatch) : []
+  const nearestCapacity = Number(nearestMatch?.capacity || nearestMatch?.max_players || 12)
   const nearestPrice = Number(nearestMatch?.price_per_player || 25)
   const nearestCollected = nearestRoster.filter((p: any) => p.paid || p.is_paid).length * nearestPrice
+  const nearestSpotsLeft = Math.max(0, nearestCapacity - nearestRoster.length)
+
+  const calculatedDatesCount = calculateGeneratedDates().length
 
   return (
     <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
@@ -383,8 +530,83 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-6 py-8">
+        <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-6 py-8 pb-28">
 
+          {/* SPOTLIGHT HERO CARD */}
+          {nearestMatch && (
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-[#0B1528] to-blue-950 p-6 sm:p-8 text-white shadow-xl border border-blue-900/40">
+              <div className="absolute -right-16 -top-16 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
+              <div className="absolute -left-16 -bottom-16 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
+
+              <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/20 border border-blue-400/30 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-blue-300">
+                      <Sparkles className="h-3 w-3 text-blue-400 animate-pulse" />
+                      Najbliższe spotkanie
+                    </span>
+                    {nearestMatch.title && nearestMatch.title !== nearestMatch.date && (
+                      <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-bold text-slate-300">
+                        {nearestMatch.title}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-3">
+                      {nearestMatch.date}
+                    </h2>
+                    <div className="flex items-center gap-4 text-xs font-semibold text-slate-300 mt-2 flex-wrap">
+                      <span className="flex items-center gap-1.5 text-white">
+                        <Timer className="h-4 w-4 text-blue-400" />
+                        {nearestMatch.time_start?.slice(0, 5) || "19:00"} - {nearestMatch.time_end?.slice(0, 5) || "21:00"}
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1.5 text-slate-300">
+                        <MapPin className="h-4 w-4 text-blue-400" />
+                        {nearestMatch.location}
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                        <Wallet className="h-4 w-4" />
+                        {nearestPrice} PLN / os.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 lg:gap-6 border-t lg:border-t-0 border-white/10 pt-4 lg:pt-0">
+                  <div className="rounded-2xl bg-white/5 border border-white/10 p-3.5 min-w-[170px] space-y-1.5">
+                    <div className="flex justify-between text-[11px] font-bold">
+                      <span className="text-slate-400">Skład główny:</span>
+                      <span className="text-white font-extrabold">{nearestRoster.length} / {nearestCapacity}</span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-blue-500 to-emerald-400 transition-all duration-500"
+                        style={{ width: `${Math.min(100, (nearestRoster.length / nearestCapacity) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-medium">
+                      {nearestSpotsLeft > 0 ? `Pozostało ${nearestSpotsLeft} wolnych miejsc` : "Komplet w składzie głównym"}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap w-full sm:w-auto">
+                    <Button
+                      onClick={() => handleSelectMatch(nearestMatch)}
+                      className="flex-1 sm:flex-initial rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs gap-2 px-5 py-3 shadow-lg shadow-blue-600/30 cursor-pointer transition-all"
+                    >
+                      Szczegóły & Skład
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* KAFELKI STATYSTYK */}
           {nearestMatch && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -430,7 +652,7 @@ export default function DashboardPage() {
                     </p>
                     <h3 className="text-xl font-black text-slate-900 mt-1 truncate max-w-[140px]">
                       {viewMode === "nearest"
-                        ? `${nearestRoster.length} / ${nearestMatch.capacity || nearestMatch.max_players || 12}`
+                        ? `${nearestRoster.length} / ${nearestCapacity}`
                         : attendanceKing.name}
                     </h3>
                     <p className="text-[11px] text-slate-400 font-medium mt-0.5">
@@ -479,6 +701,7 @@ export default function DashboardPage() {
             </div>
           )}
 
+          {/* HARMONOGRAM MECZÓW */}
           <div className="pt-4 border-t border-slate-200/80 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -487,20 +710,70 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <h1 className="text-xl font-black text-slate-900 tracking-tight">Harmonogram Meczów</h1>
-                  <p className="text-xs text-slate-500 font-medium">Zarządzaj terminami, składem i frekwencją zespołu.</p>
+                  <p className="text-xs text-slate-500 font-medium">Klikaj w spotkania, aby zarządzać swoją obecnością lub terminami.</p>
                 </div>
               </div>
 
-              {isAdmin && (
+              <div className="flex items-center gap-2 flex-wrap">
                 <Button
-                  onClick={() => setShowCreateModal(true)}
-                  className="rounded-2xl bg-blue-600 hover:bg-blue-700 font-bold text-xs gap-2 px-5 py-2.5 shadow-md shadow-blue-500/20 text-white cursor-pointer"
+                  onClick={() => {
+                    setIsSelectionMode(!isSelectionMode)
+                    if (isSelectionMode) setSelectedMatchesForBulk([])
+                  }}
+                  variant="outline"
+                  className={cn(
+                    "rounded-2xl font-bold text-xs gap-2 px-4 py-2.5 border transition-all cursor-pointer shadow-sm",
+                    isSelectionMode
+                      ? "bg-blue-600 text-white border-blue-600 shadow-blue-500/20"
+                      : "border-slate-200 text-slate-700 hover:bg-slate-100"
+                  )}
                 >
-                  <Plus className="h-4 w-4" />
-                  Utwórz nowy mecz
+                  <CalendarOff className="h-4 w-4" />
+                  {isSelectionMode ? "Zakończ zaznaczanie" : "Zarządzaj obecnością (Urlop)"}
                 </Button>
-              )}
+
+                {isAdmin && (
+                  <Button
+                    onClick={() => setShowCreateModal(true)}
+                    className="rounded-2xl bg-blue-600 hover:bg-blue-700 font-bold text-xs gap-2 px-5 py-2.5 shadow-md shadow-blue-500/20 text-white cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Utwórz nowy mecz
+                  </Button>
+                )}
+              </div>
             </div>
+
+            {/* Szybkie zaznaczanie okresu w trybie wyboru */}
+            {isSelectionMode && (
+              <div className="rounded-2xl bg-blue-50/70 border border-blue-200/80 p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-blue-900 flex items-center gap-1.5">
+                  <CalendarOff className="h-4 w-4 text-blue-600" />
+                  Szybkie zaznaczanie Twoich meczów wg urlopu:
+                </span>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    onClick={() => selectPresetRange(7)}
+                    className="rounded-xl bg-white border border-blue-200 px-3 py-1.5 font-bold text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer"
+                  >
+                    Najbliższy tydzień
+                  </button>
+                  <button
+                    onClick={() => selectPresetRange(14)}
+                    className="rounded-xl bg-white border border-blue-200 px-3 py-1.5 font-bold text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer"
+                  >
+                    2 tygodnie (Urlop)
+                  </button>
+                  <button
+                    onClick={() => selectPresetRange(30)}
+                    className="rounded-xl bg-white border border-blue-200 px-3 py-1.5 font-bold text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer"
+                  >
+                    1 miesiąc
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="relative w-full max-w-md">
               <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -556,33 +829,45 @@ export default function DashboardPage() {
                 const isPast = match.date < todayStr || match.status_id === 3
                 const isUnread = !readMatchIds.includes(`match-${match.id}`)
 
-                const isAbsoluteNearest = match.id === nearestMatch?.id
                 const hasSubtitle = match.title && match.title !== match.date
+                const isBulkSelected = selectedMatchesForBulk.includes(match.id)
+                const isUserRegistered = match.players?.some((p: any) => p.id === user?.id)
 
                 return (
                   <div
                     key={`${match.id}-${idx}`}
-                    onClick={() => handleSelectMatch(match)}
+                    onClick={() => handleCardClick(match)}
                     className={cn(
-                      "group relative flex flex-col sm:flex-row sm:items-center justify-between rounded-3xl border p-4 sm:p-5 shadow-sm transition-all cursor-pointer gap-4",
-                      isCancelled
+                      "group relative flex flex-col sm:flex-row sm:items-center justify-between rounded-3xl border p-4 sm:p-5 shadow-sm transition-all cursor-pointer gap-4 select-none",
+                      isBulkSelected
+                        ? "border-blue-600 bg-blue-50/80 ring-2 ring-blue-500/40 shadow-md"
+                        : isCancelled
                         ? "border-rose-300 bg-rose-100/60 hover:border-rose-400 text-rose-900"
-                        : isAbsoluteNearest
-                        ? "border-blue-400 bg-gradient-to-r from-blue-50/70 to-white ring-2 ring-blue-400/30 shadow-md shadow-blue-500/10"
                         : isPast || isSettled ? "border-slate-200/70 bg-slate-50/50" : "bg-white border-slate-200/90 hover:border-blue-400 hover:shadow-md"
                     )}
                   >
-                    {isAbsoluteNearest && !isCancelled && (
-                      <span className="absolute -top-2.5 left-6 bg-blue-600 text-white font-black text-[9px] uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-sm">
-                        Najbliższy Mecz
-                      </span>
-                    )}
-
                     <div className="flex items-center gap-4">
+                      {(isSelectionMode || selectedMatchesForBulk.length > 0) && (
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggleMatchSelection(match.id)
+                          }}
+                          className={cn(
+                            "flex h-6 w-6 items-center justify-center rounded-lg border transition-all cursor-pointer",
+                            isBulkSelected
+                              ? "bg-blue-600 border-blue-600 text-white"
+                              : "bg-white border-slate-300 text-transparent hover:border-blue-400"
+                          )}
+                        >
+                          <Check className="h-3.5 w-3.5 stroke-[3]" />
+                        </div>
+                      )}
+
                       <div className={cn(
                         "flex h-12 w-12 items-center justify-center rounded-2xl border shrink-0 relative",
-                        isCancelled ? "bg-rose-200 text-rose-600 border-rose-300"
-                        : isAbsoluteNearest ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20"
+                        isBulkSelected ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20"
+                        : isCancelled ? "bg-rose-200 text-rose-600 border-rose-300"
                         : isPast || isSettled ? "bg-slate-100 text-slate-400 border-slate-200" : "bg-amber-50 text-amber-500 border-amber-100"
                       )}>
                         {isCancelled ? <Ban className="h-6 w-6 text-rose-600" /> : <Calendar className="h-6 w-6" />}
@@ -609,6 +894,12 @@ export default function DashboardPage() {
                           )}>
                             {isCancelled ? "Odwołany" : isSettled ? "Rozliczony" : isPast ? "Zakończony" : "Nadchodzący"}
                           </span>
+
+                          {isUserRegistered && !isCancelled && (
+                            <span className="rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 text-[10px] font-extrabold">
+                              Jesteś w składzie
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-2 text-xs font-medium text-slate-400 flex-wrap">
@@ -634,14 +925,6 @@ export default function DashboardPage() {
                     <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 border-t sm:border-t-0 border-slate-100 pt-3 sm:pt-0">
                       {!isCancelled && (
                         <>
-                          <Button size="sm" variant="outline" onClick={(e) => copyMatchToClipboard(match, e)} className="rounded-xl text-[11px] font-bold gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">
-                            <Share2 className="h-3.5 w-3.5 text-blue-600" /> Udostępnij
-                          </Button>
-
-                          <Button size="sm" variant="outline" onClick={(e) => handleOpenBalancer(match, e)} className="rounded-xl text-[11px] font-bold gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">
-                            <Shuffle className="h-3.5 w-3.5 text-purple-600" /> Losuj A vs B
-                          </Button>
-
                           <button onClick={(e) => handleOpenRosterPreview(match, e)} className="flex items-center gap-2 rounded-xl bg-blue-50/80 hover:bg-blue-100 px-3 py-1.5 border border-blue-200/80 text-xs font-bold text-blue-900 transition-all shadow-sm cursor-pointer">
                             <Users className="h-4 w-4 text-blue-600" />
                             <span>Skład: <strong>{roster.length}/{match.capacity || match.max_players || 12}</strong></span>
@@ -666,9 +949,16 @@ export default function DashboardPage() {
                         </button>
                       )}
 
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-all ml-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleSelectMatch(match)
+                        }}
+                        className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:bg-blue-600 hover:text-white transition-all ml-1 cursor-pointer"
+                        title="Otwórz szczegóły meczu"
+                      >
                         <ChevronRight className="h-5 w-5" />
-                      </div>
+                      </button>
                     </div>
                   </div>
                 )
@@ -677,6 +967,61 @@ export default function DashboardPage() {
           </div>
         </main>
       </div>
+
+      {/* PŁYWAJĄCY PASEK AKCJI */}
+      {selectedMatchesForBulk.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-3xl bg-slate-900 px-5 py-3.5 text-white shadow-2xl border border-slate-800 animate-in fade-in slide-in-from-bottom-4 flex-wrap justify-center">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-black">
+              {selectedMatchesForBulk.length}
+            </span>
+            <span className="text-xs font-bold text-slate-200">zaznaczonych spotkań</span>
+          </div>
+
+          <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+
+          <button
+            onClick={() => toggleSelectAllCurrent(sortedMatches)}
+            className="text-xs font-bold text-blue-400 hover:underline cursor-pointer"
+          >
+            {selectedMatchesForBulk.length === sortedMatches.length ? "Odznacz wszystkie" : "Zaznacz wszystkie"}
+          </button>
+
+          <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+
+          <button
+            onClick={() => {
+              setSelectedMatchesForBulk([])
+              setIsSelectionMode(false)
+            }}
+            className="text-xs font-medium text-slate-400 hover:text-white transition-colors cursor-pointer"
+          >
+            Anuluj
+          </button>
+
+          <Button
+            size="sm"
+            disabled={isBulkProcessing}
+            onClick={handleBulkLeaveSelected}
+            className="rounded-xl bg-amber-500 hover:bg-amber-600 font-bold text-xs gap-1.5 px-4 text-slate-950 shadow-md shadow-amber-500/20 cursor-pointer"
+          >
+            <LogOut className="h-4 w-4" />
+            {isBulkProcessing ? "Wypisywanie..." : `Wypisz mnie (${selectedMatchesForBulk.length})`}
+          </Button>
+
+          {isAdmin && (
+            <Button
+              size="sm"
+              disabled={isBulkProcessing}
+              onClick={handleBulkDeleteAdmin}
+              className="rounded-xl bg-rose-600 hover:bg-rose-700 font-bold text-xs gap-1.5 px-4 text-white shadow-md shadow-rose-500/20 cursor-pointer"
+            >
+              <Trash2 className="h-4 w-4" />
+              Usuń z bazy
+            </Button>
+          )}
+        </div>
+      )}
 
       {selectedMatchRosterPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -758,7 +1103,7 @@ export default function DashboardPage() {
 
       {showCreateModal && isAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4 my-8">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4 my-8 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h2 className="text-lg font-black text-slate-900">Utwórz Nowy Mecz</h2>
               <button onClick={() => setShowCreateModal(false)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer">
@@ -766,7 +1111,7 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <form onSubmit={handleCreateMatch} className="space-y-3 text-xs">
+            <form onSubmit={handleCreateMatch} className="space-y-3.5 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Tytuł / Podtytuł (opcjonalnie)</label>
                 <input
@@ -779,7 +1124,7 @@ export default function DashboardPage() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Data meczu</label>
+                <label className="block font-bold text-slate-700 mb-1">Data pierwszego meczu</label>
                 <input
                   type="date"
                   required
@@ -787,6 +1132,112 @@ export default function DashboardPage() {
                   onChange={(e) => setNewDate(e.target.value)}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 font-medium outline-none focus:border-blue-500 focus:bg-white"
                 />
+              </div>
+
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-blue-950 flex items-center gap-1.5">
+                    <Repeat className="h-4 w-4 text-blue-600" />
+                    Częstotliwość spotkań
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[
+                    { id: "none", label: "Pojedynczy" },
+                    { id: "1week", label: "Co tydzień" },
+                    { id: "2weeks", label: "Co 2 tyg." },
+                    { id: "1month", label: "Co miesiąc" }
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setRepeatFrequency(opt.id as any)}
+                      className={cn(
+                        "py-2 px-1 rounded-xl font-bold text-[11px] border transition-all cursor-pointer text-center",
+                        repeatFrequency === opt.id
+                          ? "bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-500/20"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {repeatFrequency !== "none" && (
+                  <div className="pt-2 border-t border-blue-100 space-y-2.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-bold text-slate-700">Jak długo powielać?</span>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setDurationMode("preset")}
+                          className={cn(
+                            "px-2 py-0.5 rounded-lg font-bold text-[10px] cursor-pointer",
+                            durationMode === "preset" ? "bg-blue-600 text-white" : "bg-slate-200/70 text-slate-600"
+                          )}
+                        >
+                          Okres (mies.)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDurationMode("custom_date")}
+                          className={cn(
+                            "px-2 py-0.5 rounded-lg font-bold text-[10px] cursor-pointer",
+                            durationMode === "custom_date" ? "bg-blue-600 text-white" : "bg-slate-200/70 text-slate-600"
+                          )}
+                        >
+                          Data końcowa
+                        </button>
+                      </div>
+                    </div>
+
+                    {durationMode === "preset" ? (
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {[
+                          { months: 1, label: "1 miesiąc" },
+                          { months: 2, label: "2 miesiące" },
+                          { months: 3, label: "3 miesiące" },
+                          { months: 6, label: "Pół roku" }
+                        ].map((p) => (
+                          <button
+                            key={p.months}
+                            type="button"
+                            onClick={() => setPresetDurationMonths(p.months)}
+                            className={cn(
+                              "py-1.5 rounded-xl font-bold text-[10px] border transition-all cursor-pointer",
+                              presetDurationMonths === p.months
+                                ? "bg-blue-100 text-blue-800 border-blue-300 font-black"
+                                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                            )}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div>
+                        <input
+                          type="date"
+                          value={repeatUntilDate}
+                          min={newDate}
+                          onChange={(e) => setRepeatUntilDate(e.target.value)}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-bold text-slate-800 outline-none focus:border-blue-500"
+                        />
+                      </div>
+                    )}
+
+                    {newDate && (
+                      <div className="bg-white/80 rounded-xl p-2 border border-blue-200/60 text-[11px] font-bold text-blue-900 flex items-center justify-between">
+                        <span>Zostanie wygenerowanych:</span>
+                        <span className="bg-blue-600 text-white px-2 py-0.5 rounded-lg text-xs font-black">
+                          {calculatedDatesCount} meczów
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -875,21 +1326,17 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3">
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <Button type="button" variant="ghost" onClick={() => setShowCreateModal(false)} className="rounded-xl text-xs font-bold cursor-pointer">
                   Anuluj
                 </Button>
                 <Button type="submit" disabled={isCreating} className="rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-white text-xs cursor-pointer">
-                  {isCreating ? "Tworzenie..." : "Zapisz mecz"}
+                  {isCreating ? "Tworzenie..." : repeatFrequency === "none" ? "Zapisz mecz" : `Wygeneruj ${calculatedDatesCount} meczów`}
                 </Button>
               </div>
             </form>
           </div>
         </div>
-      )}
-
-      {selectedMatchForTeams && (
-        <TeamBalancerModal match={selectedMatchForTeams} onClose={() => setSelectedMatchForTeams(null)} />
       )}
 
       {selectedMatch && (
