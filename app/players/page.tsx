@@ -245,29 +245,9 @@ export default function PlayersPage() {
 
     if (!confirm(`Czy na pewno chcesz usunąć zawodnika "${playerToDelete.full_name}" z CAŁEJ bazy? Zniknie on również ze statystyk oraz ze wszystkich meczów.`)) return
 
-    const pName = playerToDelete.full_name.toLowerCase().trim()
-
-    await supabase.from('match_registrations').delete().eq('player_id', id)
-
-    const { data: matches } = await supabase.from('matches').select('*')
-
-    if (matches && matches.length > 0) {
-      for (const match of matches) {
-        if (Array.isArray(match.players)) {
-          const updatedRoster = match.players.filter((p: any) => {
-            const matchPid = String(p.id || "").toLowerCase().trim()
-            const matchPName = String(p.name || p.full_name || "").toLowerCase().trim()
-            return matchPid !== id && matchPName !== pName
-          })
-
-          await supabase
-            .from('matches')
-            .update({ players: updatedRoster })
-            .eq('id', match.id)
-        }
-      }
-    }
-
+    // Usuwamy bezpośrednio zawodnika z tabeli players.
+    // Dzięki więzom obcym (FOREIGN KEY z ON DELETE CASCADE) w tabeli match_registrations,
+    // wpisy dotyczące zapisów tego gracza na mecze usuną się automatycznie.
     const { error } = await supabase.from('players').delete().eq('id', id)
 
     if (error) {

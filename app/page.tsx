@@ -182,19 +182,6 @@ export default function DashboardPage() {
     }
 
     // 3. Tworzymy ogłoszenie z poprawnym powiązaniem match_id (uuid)
-    try {
-      await supabase.from("announcements").insert([
-        {
-          title: `⚠️ MECZ ODWOŁANY (${matchDate})`,
-          content: `Informujemy, że mecz zaplanowany na dzień ${matchDate} został odwołany przez Administratora.`,
-          author: user?.full_name || user?.name || "Administrator",
-          match_id: matchId,
-          is_pinned: true
-        }
-      ])
-    } catch (announcementErr) {
-      console.warn("Błąd wysyłania ogłoszenia:", announcementErr)
-    }
 
     notify("Mecz odwołany! Ogłoszenie zostało opublikowane.")
     await loadData()

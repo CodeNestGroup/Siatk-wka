@@ -56,7 +56,6 @@ export default function FinancesPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Stan dla modali szczegółowych wpływów/wydatków
   const [activeModal, setActiveModal] = useState<"income" | "expense" | null>(null)
 
   const [transactions, setTransactions] = useState<Transaction[]>([])

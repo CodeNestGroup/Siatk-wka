@@ -20,33 +20,6 @@ export function LoginForm({ onLoginSuccess }: LoginFormProps) {
     setLoading(true)
     setErrorMsg(null)
 
-    // 1. Szybkie logowanie testowe dla Admina
-    if (email === "admin@admin.pl") {
-      const mockAdmin = {
-        email: "admin@admin.pl",
-        full_name: "Mateusz Podzorski",
-        role: "admin"
-      }
-      localStorage.setItem("volley_user", JSON.stringify(mockAdmin))
-      if (onLoginSuccess) onLoginSuccess()
-      setLoading(false)
-      return
-    }
-
-    // 2. Szybkie logowanie testowe dla zwykłego Gracza (np. brudas@brudny.pl)
-    if (email === "brudas@brudny.pl" || email.includes("brudas")) {
-      const mockPlayer = {
-        email: email,
-        full_name: "brudas",
-        role: "user"
-      }
-      localStorage.setItem("volley_user", JSON.stringify(mockPlayer))
-      if (onLoginSuccess) onLoginSuccess()
-      setLoading(false)
-      return
-    }
-
-    // 3. Logowanie przez rzeczywistą bazę Supabase Auth
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
