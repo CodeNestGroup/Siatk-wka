@@ -14,7 +14,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 
 type CustomAlertProps = {
@@ -300,7 +299,7 @@ export default function ProfilScreen() {
   if (loadingUser) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color="#FBBF24" />
       </SafeAreaView>
     );
   }
@@ -407,7 +406,7 @@ export default function ProfilScreen() {
             <TextInput
               style={styles.input}
               placeholder="Wpisz obecne hasło"
-              placeholderTextColor={colors.mutedForeground}
+              placeholderTextColor="#64748B"
               secureTextEntry
               value={oldPassword}
               onChangeText={setOldPassword}
@@ -419,7 +418,7 @@ export default function ProfilScreen() {
             <TextInput
               style={styles.input}
               placeholder="Minimum 6 znaków"
-              placeholderTextColor={colors.mutedForeground}
+              placeholderTextColor="#64748B"
               secureTextEntry
               value={newPassword}
               onChangeText={setNewPassword}
@@ -431,7 +430,7 @@ export default function ProfilScreen() {
             <TextInput
               style={styles.input}
               placeholder="Powtórz nowe hasło"
-              placeholderTextColor={colors.mutedForeground}
+              placeholderTextColor="#64748B"
               secureTextEntry
               value={confirmPassword}
               onChangeText={setConfirmPassword}
@@ -463,7 +462,7 @@ export default function ProfilScreen() {
             <Switch
               value={notifMatchReminders}
               onValueChange={toggleMatchReminders}
-              trackColor={{ false: colors.border, true: colors.primary }}
+              trackColor={{ false: '#334155', true: '#FBBF24' }}
               thumbColor="#fff"
             />
           </View>
@@ -484,54 +483,53 @@ export default function ProfilScreen() {
 const alertStyles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   alertBox: {
     width: '100%',
-    maxWidth: 340,
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
+    maxWidth: 360,
+    backgroundColor: '#1E293B',
+    borderRadius: 24,
     padding: 24,
     alignItems: 'center',
-    overflow: 'hidden',
-    ...shadow.card,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   indicator: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
+    width: 48,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FBBF24',
     marginBottom: 16,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.foreground,
-    marginBottom: 8,
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 10,
     textAlign: 'center',
   },
   message: {
-    fontSize: 14,
-    color: colors.mutedForeground,
+    fontSize: 16,
+    color: '#94A3B8',
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   button: {
     width: '100%',
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    borderRadius: radius.lg,
+    backgroundColor: '#FBBF24',
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: 'center',
-    ...shadow.button,
   },
   buttonText: {
-    color: colors.primaryForeground,
-    fontSize: 15,
-    fontWeight: '700',
+    color: '#0F172A',
+    fontSize: 18,
+    fontWeight: '800',
   },
   confirmButtonsRow: {
     flexDirection: 'row',
@@ -541,109 +539,110 @@ const alertStyles = StyleSheet.create({
   confirmButton: {
     flex: 1,
     paddingVertical: 14,
-    borderRadius: radius.lg,
+    borderRadius: 16,
     alignItems: 'center',
   },
   cancelButton: {
-    backgroundColor: colors.muted,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: '#0F172A',
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   cancelButtonText: {
-    color: colors.foreground,
+    color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   primaryButton: {
-    backgroundColor: colors.primary,
-    ...shadow.button,
+    backgroundColor: '#FBBF24',
   },
   primaryButtonText: {
-    color: colors.primaryForeground,
+    color: '#0F172A',
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '900',
   },
   destructiveButton: {
-    backgroundColor: '#fee2e2',
-    borderWidth: 1,
-    borderColor: '#fca5a5',
+    backgroundColor: '#0F172A',
+    borderWidth: 2,
+    borderColor: '#F87171',
   },
   destructiveButtonText: {
-    color: '#b91c1c',
+    color: '#F87171',
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '800',
   },
 });
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.background },
+  safeArea: { flex: 1, backgroundColor: '#0F172A' },
   loadingContainer: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#0F172A',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40 },
 
   headerTitle: {
     fontSize: 24,
-    fontWeight: '700',
-    color: colors.foreground,
-    marginTop: 16,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginTop: 10,
   },
   headerSubtitle: {
     fontSize: 14,
-    color: colors.mutedForeground,
+    color: '#94A3B8',
     marginTop: 4,
     marginBottom: 20,
+    fontWeight: '500',
   },
 
   card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
-    padding: 20,
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
+    padding: 16,
     marginBottom: 16,
-    ...shadow.card,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   cardTitle: {
     fontSize: 16,
-    fontWeight: '700',
-    color: colors.foreground,
+    fontWeight: '800',
+    color: '#FFFFFF',
     marginBottom: 16,
   },
 
   profileHeaderBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.muted,
+    backgroundColor: '#0F172A',
     padding: 14,
-    borderRadius: radius.lg,
+    borderRadius: 16,
     marginBottom: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   profileAvatarPlaceholder: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: colors.primary,
+    backgroundColor: '#FBBF24',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
   profileAvatarText: {
-    color: colors.primaryForeground,
+    color: '#0F172A',
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: '900',
   },
   profileInfoWrap: {
     flex: 1,
   },
   profileFullName: {
     fontSize: 16,
-    fontWeight: '700',
-    color: colors.foreground,
+    fontWeight: '800',
+    color: '#FFFFFF',
     marginBottom: 6,
   },
   badgesRow: {
@@ -652,96 +651,96 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   roleBadge: {
-    backgroundColor: colors.primary,
+    backgroundColor: '#FBBF24',
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: radius.sm,
+    borderRadius: 8,
   },
   roleBadgeText: {
-    color: colors.primaryForeground,
+    color: '#0F172A',
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '900',
   },
   statusBadge: {
-    backgroundColor: '#DCFCE7',
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: radius.sm,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#BBF7D0',
+    borderColor: '#34D399',
   },
   statusBadgeText: {
-    color: '#16A34A',
+    color: '#34D399',
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
   },
 
   inputGroup: { marginBottom: 14 },
   label: {
     fontSize: 13,
-    fontWeight: '600',
-    color: colors.foreground,
+    fontWeight: '700',
+    color: '#FFFFFF',
     marginBottom: 6,
   },
   input: {
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
+    borderWidth: 2,
+    borderColor: '#334155',
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: Platform.OS === 'ios' ? 12 : 10,
     fontSize: 15,
-    backgroundColor: colors.muted,
-    color: colors.foreground,
+    backgroundColor: '#0F172A',
+    color: '#FFFFFF',
+    fontWeight: '500',
   },
   inputReadOnly: {
-    color: colors.mutedForeground,
-    opacity: 0.8,
+    color: '#94A3B8',
+    opacity: 0.9,
   },
 
   revealButton: {
-    backgroundColor: colors.muted,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
+    backgroundColor: '#0F172A',
+    borderWidth: 2,
+    borderColor: '#334155',
+    borderRadius: 14,
     paddingVertical: 12,
     alignItems: 'center',
     marginTop: 6,
   },
   revealButtonText: {
-    color: colors.foreground,
+    color: '#FBBF24',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '800',
   },
 
   button: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.lg,
+    backgroundColor: '#FBBF24',
+    borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 4,
-    ...shadow.button,
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: {
-    color: colors.primaryForeground,
+    color: '#0F172A',
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '900',
   },
 
   logoutButton: {
-    backgroundColor: '#fee2e2',
-    borderWidth: 1.5,
-    borderColor: '#fca5a5',
-    borderRadius: radius.lg,
-    paddingVertical: 14,
+    backgroundColor: '#0F172A',
+    borderWidth: 2,
+    borderColor: '#F87171',
+    borderRadius: 16,
+    paddingVertical: 16,
     alignItems: 'center',
     marginTop: 4,
     marginBottom: 20,
   },
   logoutButtonText: {
-    color: '#b91c1c',
+    color: '#F87171',
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '800',
   },
 
   prefRow: {
@@ -753,13 +752,14 @@ const styles = StyleSheet.create({
   prefTextWrap: { flex: 1, paddingRight: 12 },
   prefLabel: {
     fontSize: 14,
-    fontWeight: '600',
-    color: colors.foreground,
+    fontWeight: '700',
+    color: '#FFFFFF',
     marginBottom: 2,
   },
   prefDescription: {
     fontSize: 12,
-    color: colors.mutedForeground,
+    color: '#94A3B8',
     lineHeight: 16,
+    fontWeight: '500',
   },
 });

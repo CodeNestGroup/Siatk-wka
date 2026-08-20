@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
-import { colors, radius, shadow } from '@/constants/app-theme';
 
 type CustomAlertProps = {
   visible: boolean;
@@ -71,7 +70,7 @@ export default function CustomAlert({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -79,38 +78,41 @@ const styles = StyleSheet.create({
   alertBox: {
     width: '100%',
     maxWidth: 340,
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
     padding: 24,
     alignItems: 'center',
     overflow: 'hidden',
-    ...shadow.card,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   indicator: {
     width: 40,
     height: 4,
     borderRadius: 2,
     marginBottom: 16,
+    backgroundColor: '#FBBF24',
   },
   errorIndicator: {
-    backgroundColor: '#ef4444',
+    backgroundColor: '#F87171',
   },
   successIndicator: {
-    backgroundColor: '#22c55e',
+    backgroundColor: '#34D399',
   },
   title: {
     fontSize: 18,
-    fontWeight: '700',
-    color: colors.foreground,
+    fontWeight: '900',
+    color: '#FFFFFF',
     marginBottom: 8,
     textAlign: 'center',
   },
   message: {
     fontSize: 14,
-    color: colors.mutedForeground,
+    color: '#94A3B8',
     textAlign: 'center',
     marginBottom: 24,
     lineHeight: 20,
+    fontWeight: '500',
   },
   buttonContainer: {
     flexDirection: 'row',
@@ -118,31 +120,33 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   button: {
-    paddingVertical: 12,
-    borderRadius: radius.lg,
+    paddingVertical: 14,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cancelButton: {
     flex: 1,
-    backgroundColor: colors.muted,
+    backgroundColor: '#0F172A',
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   cancelButtonText: {
-    color: colors.foreground,
+    color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   errorButton: {
     flex: 1,
-    backgroundColor: colors.primary,
+    backgroundColor: '#FBBF24',
   },
   successButton: {
     flex: 1,
-    backgroundColor: colors.primary,
+    backgroundColor: '#FBBF24',
   },
   buttonText: {
-    color: colors.primaryForeground,
+    color: '#0F172A',
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '900',
   },
 });

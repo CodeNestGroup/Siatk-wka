@@ -12,10 +12,9 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 
-// Własny komponent CustomAlert w stylu aplikacji
+// Własny komponent CustomAlert dopasowany do czytelności starszych osób
 type CustomAlertProps = {
   visible: boolean;
   title: string;
@@ -52,6 +51,7 @@ function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
 export default function RegisterScreen() {
   const router = useRouter();
 
+  // Stany formularza rejestracji
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -59,7 +59,7 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Stany dla własnego custom alertu
+  // Stany dedykowanego okna alertu
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
@@ -80,13 +80,13 @@ export default function RegisterScreen() {
     }
   };
 
-  // Stany dla ekstremalnej Captcha
+  // Stany dla zabezpieczenia Captcha
   const [captchaCode, setCaptchaCode] = useState('');
   const [userCaptchaInput, setUserCaptchaInput] = useState('');
   const [captchaChars, setCaptchaChars] = useState<Array<{char: string, rotate: string, topOffset: number, fontSize: number, color: string}>>([]);
   const [noiseElements, setNoiseElements] = useState<Array<{top: number, left: number, width: number, height: number, rotate: string, backgroundColor: string}>>([]);
 
-  // Generowanie ekstremalnie trudnej captchy znak po znaku
+  // Funkcja generująca zaawansowaną captchę ze zniekształceniami i szumem
   const generateCaptcha = () => {
     const charsPool = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789abcdefghijkmnpqrstuvwxyz'; 
     let code = '';
@@ -96,20 +96,17 @@ export default function RegisterScreen() {
     setCaptchaCode(code);
     setUserCaptchaInput('');
 
-    // Rozbijanie kodu na tablicę obiektów z losowymi transformacjami wizualnymi
     const colorsList = ['#38bdf8', '#f43f5e', '#10b981', '#fbbf24', '#a855f7', '#ffffff'];
     const formattedChars = code.split('').map((char) => ({
       char,
-      rotate: `${Math.floor(Math.random() * 50) - 25}deg`, // Losowy kąt od -25 do 25 stopni
-      topOffset: Math.floor(Math.random() * 12) - 6, // Losowe "skakanie" góra-dół
-      fontSize: Math.floor(Math.random() * 6) + 20, // Losowa wielkość od 20 do 26
-      color: colorsList[Math.floor(Math.random() * colorsList.length)], // Losowy kolor każdego znaku
+      rotate: `${Math.floor(Math.random() * 50) - 25}deg`,
+      topOffset: Math.floor(Math.random() * 12) - 6,
+      fontSize: Math.floor(Math.random() * 6) + 22,
+      color: colorsList[Math.floor(Math.random() * colorsList.length)],
     }));
     setCaptchaChars(formattedChars);
 
-    // Generowanie gęstego szumu (linie oraz kropki/kwadraciki utrudniające OCR)
     const noise = [];
-    // Linie zakłócające
     for (let i = 0; i < 6; i++) {
       noise.push({
         top: Math.floor(Math.random() * 45),
@@ -120,7 +117,6 @@ export default function RegisterScreen() {
         backgroundColor: colorsList[Math.floor(Math.random() * colorsList.length)],
       });
     }
-    // Drobne plamy/kropki szumu w tle
     for (let i = 0; i < 10; i++) {
       noise.push({
         top: Math.floor(Math.random() * 50),
@@ -138,6 +134,7 @@ export default function RegisterScreen() {
     generateCaptcha();
   }, []);
 
+  // Główna logika rejestracji użytkownika
   const handleRegister = async () => {
     if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
       showAlert('Błąd', 'Wypełnij wszystkie wymagane pola.');
@@ -162,7 +159,6 @@ export default function RegisterScreen() {
       return;
     }
 
-    // Walidacja dokładnego kodu (z uwzględnieniem wielkości liter)
     if (!userCaptchaInput.trim() || userCaptchaInput.trim() !== captchaCode) {
       showAlert('Błąd weryfikacji', 'Wpisany kod jest niepoprawny (uwzględnij wielkość liter). Spróbuj ponownie.');
       generateCaptcha();
@@ -176,6 +172,7 @@ export default function RegisterScreen() {
     const cleanPhone = phone.trim();
 
     try {
+      // Sprawdzenie unikalności danych w bazie Supabase
       const { data: existingUsers, error: checkError } = await supabase
         .from('players')
         .select('id, email, full_name')
@@ -204,6 +201,7 @@ export default function RegisterScreen() {
         return;
       }
 
+      // Dodanie nowego gracza do bazy
       const { data, error: insertError } = await supabase
         .from('players')
         .insert({
@@ -255,6 +253,7 @@ export default function RegisterScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {/* Przycisk powrotu */}
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
@@ -263,6 +262,7 @@ export default function RegisterScreen() {
             <Text style={styles.backButtonText}>‹ Wstecz</Text>
           </TouchableOpacity>
 
+          {/* Nagłówek ekranu */}
           <View style={styles.header}>
             <View style={styles.logoCircle}>
               <Text style={styles.logo}>🏐</Text>
@@ -271,13 +271,14 @@ export default function RegisterScreen() {
             <Text style={styles.subtitle}>Załóż konto i zapisuj się na mecze</Text>
           </View>
 
+          {/* Formularz rejestracji */}
           <View style={styles.form}>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Nazwa (Imię i nazwisko)</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Jan Kowalski"
-                placeholderTextColor={colors.mutedForeground}
+                placeholderTextColor="#64748B"
                 autoCapitalize="words"
                 value={name}
                 onChangeText={setName}
@@ -285,11 +286,11 @@ export default function RegisterScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email</Text>
+              <Text style={styles.label}>Adres E-mail</Text>
               <TextInput
                 style={styles.input}
                 placeholder="twoj@email.com"
-                placeholderTextColor={colors.mutedForeground}
+                placeholderTextColor="#64748B"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -303,7 +304,7 @@ export default function RegisterScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="np. 123456789"
-                placeholderTextColor={colors.mutedForeground}
+                placeholderTextColor="#64748B"
                 keyboardType="phone-pad"
                 value={phone}
                 onChangeText={setPhone}
@@ -315,7 +316,7 @@ export default function RegisterScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Min. 6 znaków, duża litera, cyfra, znak"
-                placeholderTextColor={colors.mutedForeground}
+                placeholderTextColor="#64748B"
                 secureTextEntry
                 value={password}
                 onChangeText={setPassword}
@@ -327,19 +328,18 @@ export default function RegisterScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Powtórz hasło"
-                placeholderTextColor={colors.mutedForeground}
+                placeholderTextColor="#64748B"
                 secureTextEntry
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
               />
             </View>
 
-            {/* Ekstremalnie trudna Captcha (znaki generowane osobno z rotacją i szumem) */}
+            {/* Zabezpieczenie Captcha */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Zabezpieczenie przed botami (przepisz kod)</Text>
               <View style={styles.captchaBoxContainer}>
                 <View style={styles.captchaVisualBox}>
-                  {/* Elementy szumu w tle i na wierzchu */}
                   {noiseElements.map((item, index) => (
                     <View
                       key={index}
@@ -357,7 +357,6 @@ export default function RegisterScreen() {
                     />
                   ))}
 
-                  {/* Zniekształcone znaki renderowane pojedynczo */}
                   <View style={styles.charsRow}>
                     {captchaChars.map((item, index) => (
                       <Text
@@ -384,9 +383,9 @@ export default function RegisterScreen() {
                 </TouchableOpacity>
               </View>
               <TextInput
-                style={[styles.input, { marginTop: 8 }]}
+                style={[styles.input, { marginTop: 10 }]}
                 placeholder="Wpisz dokładnie powyższy kod"
-                placeholderTextColor={colors.mutedForeground}
+                placeholderTextColor="#64748B"
                 autoCapitalize="none"
                 autoCorrect={false}
                 value={userCaptchaInput}
@@ -394,6 +393,7 @@ export default function RegisterScreen() {
               />
             </View>
 
+            {/* Główny przycisk rejestracji w kolorze Mikasy */}
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleRegister}
@@ -401,11 +401,12 @@ export default function RegisterScreen() {
               activeOpacity={0.8}
             >
               <Text style={styles.buttonText}>
-                {loading ? 'Tworzenie konta...' : 'Zarejestruj się'}
+                {loading ? 'Tworzenie konta...' : 'ZAREJESTRUJ SIĘ'}
               </Text>
             </TouchableOpacity>
           </View>
 
+          {/* Powrót do logowania */}
           <View style={styles.loginRow}>
             <Text style={styles.loginText}>Masz już konto? </Text>
             <TouchableOpacity
@@ -421,63 +422,69 @@ export default function RegisterScreen() {
   );
 }
 
+// Stylizacja okna dialogowego
 const alertStyles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   alertBox: {
     width: '100%',
-    maxWidth: 340,
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
+    maxWidth: 360,
+    backgroundColor: '#1E293B',
+    borderRadius: 24,
     padding: 24,
     alignItems: 'center',
-    overflow: 'hidden',
-    ...shadow.card,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   indicator: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
+    width: 48,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FBBF24',
     marginBottom: 16,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.foreground,
-    marginBottom: 8,
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 10,
     textAlign: 'center',
   },
   message: {
-    fontSize: 14,
-    color: colors.mutedForeground,
+    fontSize: 16,
+    color: '#94A3B8',
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   button: {
     width: '100%',
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    borderRadius: radius.lg,
+    backgroundColor: '#FBBF24',
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: 'center',
-    ...shadow.button,
   },
   buttonText: {
-    color: colors.primaryForeground,
-    fontSize: 15,
-    fontWeight: '700',
+    color: '#0F172A',
+    fontSize: 18,
+    fontWeight: '800',
   },
 });
 
+// Stylizacja ekranu rejestracji (Motyw Mikasy: Granat + Żółty, duża czytelność)
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.background },
-  container: { flex: 1 },
+  safeArea: { 
+    flex: 1, 
+    backgroundColor: '#0F172A' // Głęboki grafit/granat tła 
+  },
+  container: { 
+    flex: 1 
+  },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
@@ -486,60 +493,70 @@ const styles = StyleSheet.create({
   },
   backButton: {
     alignSelf: 'flex-start',
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 4,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   backButtonText: {
-    color: colors.primary,
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#FBBF24',
+    fontSize: 18,
+    fontWeight: '700',
   },
-  header: { alignItems: 'center', marginBottom: 28 },
+  header: { 
+    alignItems: 'center', 
+    marginBottom: 28 
+  },
   logoCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.card,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#1E293B',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 14,
-    ...shadow.card,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
-  logo: { fontSize: 36 },
+  logo: { 
+    fontSize: 48 
+  },
   title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: colors.foreground,
-    marginBottom: 6,
+    fontSize: 30,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 8,
   },
   subtitle: {
-    fontSize: 14,
-    color: colors.mutedForeground,
+    fontSize: 16,
+    color: '#94A3B8',
+    fontWeight: '500',
     textAlign: 'center',
   },
   form: {
-    backgroundColor: colors.card,
-    borderRadius: radius['2xl'],
+    backgroundColor: '#1E293B',
+    borderRadius: 24,
     padding: 24,
-    ...shadow.card,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
-  inputGroup: { marginBottom: 16 },
+  inputGroup: { 
+    marginBottom: 18 
+  },
   label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.foreground,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F1F5F9',
     marginBottom: 8,
   },
   input: {
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
+    borderWidth: 2,
+    borderColor: '#334155',
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: Platform.OS === 'ios' ? 14 : 12,
-    fontSize: 16,
-    backgroundColor: colors.muted,
-    color: colors.foreground,
+    fontSize: 18,
+    backgroundColor: '#0F172A',
+    color: '#FFFFFF',
   },
   captchaBoxContainer: {
     flexDirection: 'row',
@@ -548,13 +565,13 @@ const styles = StyleSheet.create({
   },
   captchaVisualBox: {
     flex: 1,
-    height: 60,
-    backgroundColor: '#090d16',
-    borderRadius: radius.lg,
+    height: 64,
+    backgroundColor: '#090D16',
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    borderWidth: 2,
+    borderColor: '#334155',
     overflow: 'hidden',
     position: 'relative',
   },
@@ -566,44 +583,56 @@ const styles = StyleSheet.create({
   },
   captchaChar: {
     fontWeight: '900',
-    marginHorizontal: 3,
+    marginHorizontal: 4,
   },
   noiseItem: {
     position: 'absolute',
-    opacity: 0.5,
+    opacity: 0.6,
     zIndex: 1,
   },
   refreshButton: {
-    backgroundColor: colors.muted,
-    paddingHorizontal: 12,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 14,
     paddingVertical: 14,
-    borderRadius: radius.lg,
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#334155',
     justifyContent: 'center',
     alignItems: 'center',
-    height: 60,
+    height: 64,
   },
   refreshButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.foreground,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#F1F5F9',
   },
   button: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.lg,
-    paddingVertical: 16,
+    backgroundColor: '#FBBF24', // Żółty kolor piłki Mikasa
+    borderRadius: 16,
+    paddingVertical: 18,
     alignItems: 'center',
-    marginTop: 8,
-    ...shadow.button,
+    marginTop: 12,
   },
-  buttonDisabled: { opacity: 0.6 },
+  buttonDisabled: { 
+    opacity: 0.6 
+  },
   buttonText: {
-    color: colors.primaryForeground,
-    fontSize: 16,
-    fontWeight: '700',
+    color: '#0F172A', // Ciemny kontrastowy tekst na żółtym przycisku
+    fontSize: 18,
+    fontWeight: '800',
   },
-  loginRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
-  loginText: { color: colors.mutedForeground, fontSize: 14 },
-  loginLink: { color: colors.primary, fontSize: 14, fontWeight: '700' },
+  loginRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'center', 
+    marginTop: 28 
+  },
+  loginText: { 
+    color: '#94A3B8', 
+    fontSize: 16 
+  },
+  loginLink: { 
+    color: '#FBBF24', 
+    fontSize: 16, 
+    fontWeight: '800' 
+  },
 });

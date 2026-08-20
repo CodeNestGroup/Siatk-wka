@@ -14,10 +14,10 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { syncMatchNotifications } from '@/services/notificationService';
 
+// Klucze lokalnej sesji użytkownika
 const CURRENT_PLAYER_KEY = 'current_player_id';
 const REMEMBER_ME_KEY = 'remember_me_status';
 
@@ -28,6 +28,7 @@ type CustomAlertProps = {
   onClose: () => void;
 };
 
+// Komponent prostego alertu dostosowany do starszych użytkowników (ogromny czytelny tekst)
 function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
   return (
     <Modal
@@ -57,16 +58,19 @@ function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
 export default function LoginScreen() {
   const router = useRouter();
 
+  // Stany formularza logowania
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
 
+  // Stany dedykowanego okna alertu
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
   const [alertCallback, setAlertCallback] = useState<(() => void) | null>(null);
 
+  // Funkcja wywołująca powiadomienie dla użytkownika
   const showAlert = (title: string, message: string, onCloseCallback?: () => void) => {
     setAlertTitle(title);
     setAlertMessage(message);
@@ -82,6 +86,7 @@ export default function LoginScreen() {
     }
   };
 
+  // Główna logika logowania do systemu Supabase
   const handleLogin = async () => {
     if (!email.trim() || !password) {
       showAlert('Błąd', 'Wypełnij pole e-mail oraz hasło.');
@@ -91,6 +96,7 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
+      // Weryfikacja danych gracza w bazie danych
       const { data, error } = await supabase
         .from('players')
         .select('*')
@@ -104,6 +110,7 @@ export default function LoginScreen() {
         return;
       }
 
+      // Blokada dla kont niezatwierdzonych przez administratora (role_id === 3)
       if (data.role_id === 3) {
         setLoading(false);
         showAlert(
@@ -113,11 +120,12 @@ export default function LoginScreen() {
         return;
       }
 
+      // Zapisanie danych sesji lokalnie
       await AsyncStorage.setItem(CURRENT_PLAYER_KEY, data.id);
       await AsyncStorage.setItem(REMEMBER_ME_KEY, rememberMe ? 'true' : 'false');
       await AsyncStorage.setItem('current_player_data', JSON.stringify(data));
 
-      // Pobieramy mecze i rejestracje, aby zsynchronizować powiadomienia lokalne przy starcie
+      // Pobieranie meczów w celu synchronizacji powiadomień lokalnych przy starcie
       const { data: matchesData } = await supabase.from('matches').select('*');
       const { data: regsData } = await supabase
         .from('match_registrations')
@@ -164,6 +172,7 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {/* Nagłówek aplikacji */}
           <View style={styles.header}>
             <View style={styles.logoCircle}>
               <Text style={styles.logo}>🏐</Text>
@@ -172,13 +181,14 @@ export default function LoginScreen() {
             <Text style={styles.subtitle}>Zaloguj się do swojego konta</Text>
           </View>
 
+          {/* Formularz logowania */}
           <View style={styles.form}>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email</Text>
+              <Text style={styles.label}>Adres E-mail</Text>
               <TextInput
                 style={styles.input}
                 placeholder="twoj@email.com"
-                placeholderTextColor={colors.mutedForeground}
+                placeholderTextColor="#64748B"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 value={email}
@@ -191,7 +201,7 @@ export default function LoginScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="••••••••"
-                placeholderTextColor={colors.mutedForeground}
+                placeholderTextColor="#64748B"
                 secureTextEntry
                 autoCapitalize="none"
                 value={password}
@@ -199,16 +209,18 @@ export default function LoginScreen() {
               />
             </View>
 
+            {/* Przełącznik zapamiętywania sesji */}
             <View style={styles.rememberRow}>
               <Text style={styles.rememberText}>Pozostań zalogowany</Text>
               <Switch
                 value={rememberMe}
                 onValueChange={setRememberMe}
-                trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor={Platform.OS === 'ios' ? '#fff' : colors.primaryForeground}
+                trackColor={{ false: '#334155', true: '#FBBF24' }}
+                thumbColor={Platform.OS === 'ios' ? '#fff' : '#0F172A'}
               />
             </View>
 
+            {/* Główny przycisk akcji logowania (Kolor żółty Mikasy) */}
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleLogin}
@@ -216,11 +228,12 @@ export default function LoginScreen() {
               activeOpacity={0.8}
             >
               <Text style={styles.buttonText}>
-                {loading ? 'Logowanie...' : 'Zaloguj się'}
+                {loading ? 'Logowanie...' : 'ZALOGUJ SIĘ'}
               </Text>
             </TouchableOpacity>
           </View>
 
+          {/* Przejście do rejestracji */}
           <View style={styles.registerRow}>
             <Text style={styles.registerText}>Nie masz konta? </Text>
             <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
@@ -233,79 +246,170 @@ export default function LoginScreen() {
   );
 }
 
+// Stylizacja okna dialogowego
 const alertStyles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   alertBox: {
     width: '100%',
-    maxWidth: 340,
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
+    maxWidth: 360,
+    backgroundColor: '#1E293B',
+    borderRadius: 24,
     padding: 24,
     alignItems: 'center',
-    overflow: 'hidden',
-    ...shadow.card,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   indicator: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
+    width: 48,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FBBF24',
     marginBottom: 16,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.foreground,
-    marginBottom: 8,
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 10,
     textAlign: 'center',
   },
   message: {
-    fontSize: 14,
-    color: colors.mutedForeground,
+    fontSize: 16,
+    color: '#94A3B8',
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   button: {
     width: '100%',
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    borderRadius: radius.lg,
+    backgroundColor: '#FBBF24',
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: 'center',
-    ...shadow.button,
   },
   buttonText: {
-    color: colors.primaryForeground,
-    fontSize: 15,
-    fontWeight: '700',
+    color: '#0F172A',
+    fontSize: 18,
+    fontWeight: '800',
   },
 });
 
+// Stylizacja ekranu logowania (Motyw Mikasy: Granat + Żółty, duża czytelność)
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.background },
-  container: { flex: 1 },
-  scrollContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 32 },
-  header: { alignItems: 'center', marginBottom: 32 },
-  logoCircle: { width: 88, height: 88, borderRadius: 44, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center', marginBottom: 16, ...shadow.card },
-  logo: { fontSize: 44 },
-  title: { fontSize: 26, fontWeight: '700', color: colors.foreground, marginBottom: 6 },
-  subtitle: { fontSize: 14, color: colors.mutedForeground, fontWeight: '500', textAlign: 'center' },
-  form: { backgroundColor: colors.card, borderRadius: radius['2xl'], padding: 24, ...shadow.card },
-  inputGroup: { marginBottom: 16 },
-  label: { fontSize: 13, fontWeight: '600', color: colors.foreground, marginBottom: 8 },
-  input: { borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.lg, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, backgroundColor: colors.muted, color: colors.foreground },
-  rememberRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, marginTop: 4 },
-  rememberText: { fontSize: 14, color: colors.foreground, fontWeight: '500' },
-  button: { backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: 16, alignItems: 'center', marginTop: 12, ...shadow.button },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: colors.primaryForeground, fontSize: 16, fontWeight: '700' },
-  registerRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
-  registerText: { color: colors.mutedForeground, fontSize: 14 },
-  registerLink: { color: colors.primary, fontSize: 14, fontWeight: '700' },
+  safeArea: { 
+    flex: 1, 
+    backgroundColor: '#0F172A' // Głęboki grafit/granat tła 
+  },
+  container: { 
+    flex: 1 
+  },
+  scrollContent: { 
+    flexGrow: 1, 
+    justifyContent: 'center', 
+    paddingHorizontal: 24, 
+    paddingVertical: 32 
+  },
+  header: { 
+    alignItems: 'center', 
+    marginBottom: 28 
+  },
+  logoCircle: { 
+    width: 96, 
+    height: 96, 
+    borderRadius: 48, 
+    backgroundColor: '#1E293B', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#334155'
+  },
+  logo: { 
+    fontSize: 48 
+  },
+  title: { 
+    fontSize: 30, 
+    fontWeight: '800', 
+    color: '#FFFFFF', 
+    marginBottom: 8 
+  },
+  subtitle: { 
+    fontSize: 16, 
+    color: '#94A3B8', 
+    fontWeight: '500', 
+    textAlign: 'center' 
+  },
+  form: { 
+    backgroundColor: '#1E293B', 
+    borderRadius: 24, 
+    padding: 24,
+    borderWidth: 2,
+    borderColor: '#334155'
+  },
+  inputGroup: { 
+    marginBottom: 18 
+  },
+  label: { 
+    fontSize: 16, 
+    fontWeight: '700', 
+    color: '#F1F5F9', 
+    marginBottom: 8 
+  },
+  input: { 
+    borderWidth: 2, 
+    borderColor: '#334155', 
+    borderRadius: 16, 
+    paddingHorizontal: 16, 
+    paddingVertical: 14, 
+    fontSize: 18, 
+    backgroundColor: '#0F172A', 
+    color: '#FFFFFF' 
+  },
+  rememberRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 20, 
+    marginTop: 6 
+  },
+  rememberText: { 
+    fontSize: 16, 
+    color: '#F1F5F9', 
+    fontWeight: '600' 
+  },
+  button: { 
+    backgroundColor: '#FBBF24', // Żółty kolor piłki Mikasa
+    borderRadius: 16, 
+    paddingVertical: 18, 
+    alignItems: 'center', 
+    marginTop: 8,
+  },
+  buttonDisabled: { 
+    opacity: 0.6 
+  },
+  buttonText: { 
+    color: '#0F172A', // Ciemny kontrastowy tekst na żółtym przycisku
+    fontSize: 18, 
+    fontWeight: '800' 
+  },
+  registerRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'center', 
+    marginTop: 28 
+  },
+  registerText: { 
+    color: '#94A3B8', 
+    fontSize: 16 
+  },
+  registerLink: { 
+    color: '#FBBF24', 
+    fontSize: 16, 
+    fontWeight: '800' 
+  },
 });

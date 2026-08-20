@@ -10,9 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
-import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
+import { formatMatchDate, formatTime } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
 import { syncMatchNotifications } from '@/services/notificationService';
 
@@ -28,6 +27,7 @@ type MatchItem = {
   price_per_player: number;
   status_id: number;
   mainCount?: number;
+  totalRegistrationsCount?: number;
   capacityLimit?: number;
   isRegistered?: boolean;
   registrationStatus?: 'main' | 'waitlist';
@@ -76,6 +76,17 @@ function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolea
     return diffMs / (1000 * 60 * 60) > 2;
   } catch {
     return true;
+  }
+}
+
+function isMatchFinished(dateStr: string, timeEndStr: string, timeStartStr: string): boolean {
+  try {
+    const timeString = timeEndStr || timeStartStr || '23:59';
+    const matchDateTime = new Date(`${dateStr}T${timeString}`);
+    const now = new Date();
+    return matchDateTime.getTime() < now.getTime();
+  } catch {
+    return false;
   }
 }
 
@@ -139,6 +150,7 @@ export default function ScheduleScreen() {
       return {
         ...match,
         mainCount: mainList.length,
+        totalRegistrationsCount: matchRegs.length,
         capacityLimit,
         isRegistered: !!userReg,
         registrationStatus: regStatus,
@@ -148,7 +160,6 @@ export default function ScheduleScreen() {
     setMatches(processedMatches);
     setLoading(false);
 
-    // Synchronizacja powiadomień po załadowaniu terminarza
     await syncMatchNotifications(processedMatches);
   }, []);
 
@@ -181,7 +192,7 @@ export default function ScheduleScreen() {
       return;
     }
 
-    if (isDateInPast(match.date) || match.status_id === 2) return;
+    if (isMatchFinished(match.date, match.time_end, match.time_start) || match.status_id === 2) return;
 
     if (match.isRegistered) {
       if (!canCancelMatch(match.date, match.time_start)) {
@@ -208,20 +219,19 @@ export default function ScheduleScreen() {
 
   const filteredMatches = matches
     .filter((match) => {
-      const isPastDate = isDateInPast(match.date);
-      const isPast = isPastDate;
-      return activeTab === 'upcoming' ? !isPast : isPast;
+      const finished = isMatchFinished(match.date, match.time_end, match.time_start);
+      return activeTab === 'upcoming' ? !finished : finished;
     })
     .sort((a, b) => {
       const timeA = new Date(`${a.date}T${a.time_start}`).getTime();
       const timeB = new Date(`${b.date}T${b.time_start}`).getTime();
-      return timeA - timeB;
+      return activeTab === 'upcoming' ? timeA - timeB : timeB - timeA;
     });
 
   if (loading && matches.length === 0) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['top', 'left', 'right']}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color="#FBBF24" />
       </SafeAreaView>
     );
   }
@@ -268,42 +278,99 @@ export default function ScheduleScreen() {
         renderItem={({ item }) => {
           const { day, month } = formatMatchDate(item.date);
           const isCancelled = item.status_id === 2;
-          const isFinished = isDateInPast(item.date) || isCancelled;
+          const finished = isMatchFinished(item.date, item.time_end, item.time_start);
           const isFull = (item.mainCount ?? 0) >= (item.capacityLimit ?? 10);
           const isActionLoading = actionLoadingId === item.id;
           
           return (
             <TouchableOpacity
-              style={[styles.matchCard, isCancelled && styles.matchCardCancelled]}
+              style={[
+                styles.matchCard,
+                isCancelled && styles.matchCardCancelled,
+                !isCancelled && currentPlayer && item.isRegistered && item.registrationStatus === 'main' && styles.cardBorderMain,
+                !isCancelled && currentPlayer && item.isRegistered && item.registrationStatus === 'waitlist' && styles.cardBorderWaitlist,
+              ]}
               onPress={() => router.push(`/(match)/${item.id}`)}
+              activeOpacity={0.9}
             >
-              <View style={styles.cardContent}>
-                <View style={[styles.dateBox, isCancelled && styles.dateBoxCancelled]}>
-                  <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>{day}</Text>
-                  <Text style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]}>{month}</Text>
-                </View>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={[styles.matchTitle, isCancelled && styles.matchTitleCancelled]}>{item.title || 'Trening'}</Text>
-                  <Text style={styles.matchInfo}>🕒 {formatTime(item.time_start)} | 📍 {item.location}</Text>
-                  <Text style={styles.matchInfoBold}>👥 Zapisanych: {item.mainCount}/{item.capacityLimit}</Text>
-                </View>
-              </View>
-              {!isFinished && currentPlayer && !isCancelled && (
-                <View style={styles.cardFooter}>
-                  {item.isRegistered ? (
-                    <View style={styles.registeredBadgeRow}>
-                      <Text style={styles.registeredText}>{item.registrationStatus === 'waitlist' ? '⏳ Rezerwa' : '✅ Zapisany'}</Text>
-                      <TouchableOpacity style={styles.quickCancelBtn} onPress={(e) => { e.stopPropagation(); handleQuickAction(item); }} disabled={isActionLoading}>
-                        {isActionLoading ? <ActivityIndicator size="small" color={colors.destructive} /> : <Text style={styles.quickCancelText}>Wypisz się</Text>}
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <TouchableOpacity style={[styles.quickSignupBtn, isFull && styles.quickWaitlistBtn]} onPress={(e) => { e.stopPropagation(); handleQuickAction(item); }} disabled={isActionLoading}>
-                      {isActionLoading ? <ActivityIndicator size="small" color={colors.primaryForeground} /> : <Text style={styles.quickSignupText}>{isFull ? 'Zapisz się na rezerwę' : 'Zapisz się'}</Text>}
-                    </TouchableOpacity>
-                  )}
-                </View>
+              {!isCancelled && currentPlayer && item.isRegistered && (
+                <View style={[
+                  styles.sideStatusBar,
+                  item.registrationStatus === 'waitlist' ? styles.sideBarWaitlist : styles.sideBarMain
+                ]} />
               )}
+
+              <View style={styles.cardInnerContainer}>
+                <View style={styles.cardMainRow}>
+                  <View style={[styles.dateBox, isCancelled && styles.dateBoxCancelled]}>
+                    <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>{day}</Text>
+                    <Text style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]}>{month}</Text>
+                  </View>
+
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <View style={styles.titleRow}>
+                      <Text style={[styles.matchTitle, isCancelled && styles.matchTitleCancelled]} numberOfLines={1}>
+                        {item.title || 'Trening'}
+                      </Text>
+                      
+                      {isCancelled ? (
+                        <View style={styles.badgeCancelledBg}>
+                          <Text style={styles.badgeCancelledText}>⚠️ Odwołany</Text>
+                        </View>
+                      ) : (
+                        currentPlayer && item.isRegistered && (
+                          <View style={[
+                            styles.inlineStatusBadge,
+                            item.registrationStatus === 'waitlist' ? styles.badgeWaitlistBg : styles.badgeMainBg
+                          ]}>
+                            <Text style={[
+                              styles.inlineStatusText,
+                              item.registrationStatus === 'waitlist' ? styles.badgeWaitlistText : styles.badgeMainText
+                            ]}>
+                              {item.registrationStatus === 'waitlist' ? '⏳ Rezerwa' : '✅ Zapisany'}
+                            </Text>
+                          </View>
+                        )
+                      )}
+                    </View>
+
+                    <Text style={styles.matchInfo}>🕒 {formatTime(item.time_start)} | 📍 {item.location}</Text>
+                    <Text style={styles.matchInfoBold}>👥 Zapisanych: {item.totalRegistrationsCount}/{item.capacityLimit}</Text>
+                  </View>
+                </View>
+
+                {!finished && currentPlayer && !isCancelled && (
+                  <View style={styles.cardFooter}>
+                    {item.isRegistered ? (
+                      <TouchableOpacity 
+                        style={styles.quickCancelBtnInline} 
+                        onPress={(e) => { e.stopPropagation(); handleQuickAction(item); }} 
+                        disabled={isActionLoading}
+                      >
+                        {isActionLoading ? (
+                          <ActivityIndicator size="small" color="#F87171" />
+                        ) : (
+                          <Text style={styles.quickCancelText}>Wypisz się z meczu</Text>
+                        )}
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity 
+                        style={[styles.quickSignupBtn, isFull && styles.quickWaitlistBtn]} 
+                        onPress={(e) => { e.stopPropagation(); handleQuickAction(item); }} 
+                        disabled={isActionLoading}
+                      >
+                        {isActionLoading ? (
+                          <ActivityIndicator size="small" color="#0F172A" />
+                        ) : (
+                          <Text style={styles.quickSignupText}>
+                            {isFull ? 'Zapisz się na rezerwę' : 'Zapisz się na mecz'}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
             </TouchableOpacity>
           );
         }}
@@ -315,144 +382,186 @@ export default function ScheduleScreen() {
 const alertStyles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   alertBox: {
     width: '100%',
-    maxWidth: 340,
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
+    maxWidth: 360,
+    backgroundColor: '#1E293B',
+    borderRadius: 24,
     padding: 24,
     alignItems: 'center',
-    overflow: 'hidden',
-    ...shadow.card,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   indicator: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
+    width: 48,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FBBF24',
     marginBottom: 16,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.foreground,
-    marginBottom: 8,
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 10,
     textAlign: 'center',
   },
   message: {
-    fontSize: 14,
-    color: colors.mutedForeground,
+    fontSize: 16,
+    color: '#94A3B8',
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   button: {
     width: '100%',
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    borderRadius: radius.lg,
+    backgroundColor: '#FBBF24',
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: 'center',
-    ...shadow.button,
   },
   buttonText: {
-    color: colors.primaryForeground,
-    fontSize: 15,
-    fontWeight: '700',
+    color: '#0F172A',
+    fontSize: 18,
+    fontWeight: '800',
   },
 });
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.background },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
-  header: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: colors.foreground },
+  safeArea: { flex: 1, backgroundColor: '#0F172A' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0F172A' },
+  header: { paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 2, borderBottomColor: '#334155' },
+  headerTitle: { fontSize: 24, fontWeight: '800', color: '#FFFFFF' },
   
   tabsContainer: {
     flexDirection: 'row',
-    backgroundColor: colors.card,
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: radius.lg,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: '#1E293B',
+    marginHorizontal: 20,
+    marginTop: 16,
+    borderRadius: 16,
+    padding: 6,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   tabButton: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radius.md,
+    borderRadius: 12,
   },
-  tabButtonActive: { backgroundColor: colors.primary },
-  tabText: { fontSize: 12, fontWeight: '600', color: colors.mutedForeground },
-  tabTextActive: { color: colors.primaryForeground, fontWeight: '700' },
+  tabButtonActive: { backgroundColor: '#FBBF24' },
+  tabText: { fontSize: 13, fontWeight: '700', color: '#94A3B8' },
+  tabTextActive: { color: '#0F172A', fontWeight: '900' },
 
-  listContainer: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
+  listContainer: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 },
 
   matchCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: 12,
-    marginBottom: 12,
-    ...shadow.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
+    marginBottom: 14,
+    borderWidth: 2,
+    borderColor: '#334155',
+    overflow: 'hidden',
+    position: 'relative',
   },
-  matchCardCancelled: { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' },
-  cardContent: { flexDirection: 'row', alignItems: 'center' },
+  matchCardCancelled: { backgroundColor: '#1E293B', borderColor: '#F87171' },
+  cardBorderMain: { borderColor: '#FBBF24' },
+  cardBorderWaitlist: { borderColor: '#F59E0B' },
+
+  sideStatusBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 6,
+  },
+  sideBarMain: { backgroundColor: '#FBBF24' },
+  sideBarWaitlist: { backgroundColor: '#F59E0B' },
+
+  cardInnerContainer: {
+    padding: 14,
+    paddingLeft: 18,
+  },
+  cardMainRow: { flexDirection: 'row', alignItems: 'center' },
   dateBox: {
-    width: 50,
-    height: 50,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: '#0F172A',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#334155',
   },
-  dateBoxCancelled: { backgroundColor: '#FEE2E2' },
-  dateDay: { fontSize: 18, fontWeight: '700', color: colors.accentForeground },
-  dateDayCancelled: { color: '#DC2626' },
-  dateMonth: { fontSize: 11, color: colors.accentForeground, textTransform: 'uppercase' },
-  dateMonthCancelled: { color: '#DC2626' },
+  dateBoxCancelled: { borderColor: '#F87171', backgroundColor: '#0F172A' },
+  dateDay: { fontSize: 18, fontWeight: '900', color: '#FBBF24' },
+  dateDayCancelled: { color: '#F87171' },
+  dateMonth: { fontSize: 11, color: '#94A3B8', textTransform: 'uppercase', fontWeight: '800' },
+  dateMonthCancelled: { color: '#F87171' },
 
-  matchTitle: { fontSize: 15, fontWeight: '700', color: colors.foreground, marginBottom: 2 },
-  matchTitleCancelled: { textDecorationLine: 'line-through', color: '#DC2626' },
-  matchInfo: { fontSize: 12, color: colors.mutedForeground, marginBottom: 2 },
-  matchInfoBold: { fontSize: 12, fontWeight: '700', color: colors.foreground, marginTop: 2 },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  matchTitle: { fontSize: 16, fontWeight: '800', color: '#FFFFFF', flex: 1, marginRight: 6 },
+  matchTitleCancelled: { textDecorationLine: 'line-through', color: '#F87171' },
+
+  inlineStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  badgeMainBg: { backgroundColor: 'rgba(251, 191, 36, 0.15)', borderWidth: 1, borderColor: '#FBBF24' },
+  badgeWaitlistBg: { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderWidth: 1, borderColor: '#F59E0B' },
+  inlineStatusText: { fontSize: 11, fontWeight: '800' },
+  badgeMainText: { color: '#FBBF24' },
+  badgeWaitlistText: { color: '#F59E0B' },
+
+  badgeCancelledBg: { backgroundColor: 'rgba(248, 113, 113, 0.15)', borderWidth: 1, borderColor: '#F87171', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 8 },
+  badgeCancelledText: { fontSize: 11, fontWeight: '800', color: '#F87171' },
+
+  matchInfo: { fontSize: 13, color: '#94A3B8', marginBottom: 3, fontWeight: '500' },
+  matchInfoBold: { fontSize: 13, fontWeight: '800', color: '#FFFFFF', marginTop: 3 },
 
   cardFooter: {
-    marginTop: 10,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 2,
+    borderTopColor: '#334155',
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
   quickSignupBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.sm,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    backgroundColor: '#FBBF24',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    flex: 1,
+    alignItems: 'center',
   },
-  quickWaitlistBtn: { backgroundColor: '#D97706' },
-  quickSignupText: { color: colors.primaryForeground, fontSize: 12, fontWeight: '700' },
-  registeredBadgeRow: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  registeredText: { fontSize: 12, fontWeight: '600', color: colors.foreground },
-  quickCancelBtn: {
-    borderWidth: 1,
-    borderColor: colors.destructive,
-    borderRadius: radius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+  quickWaitlistBtn: { backgroundColor: '#F59E0B' },
+  quickSignupText: { color: '#0F172A', fontSize: 13, fontWeight: '900' },
+  
+  quickCancelBtnInline: {
+    borderWidth: 2,
+    borderColor: '#F87171',
+    borderRadius: 12,
+    paddingVertical: 9,
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
   },
-  quickCancelText: { color: colors.destructive, fontSize: 11, fontWeight: '700' },
+  quickCancelText: { color: '#F87171', fontSize: 13, fontWeight: '800' },
 
   emptyState: { paddingVertical: 40, alignItems: 'center' },
-  emptyText: { fontSize: 14, color: colors.mutedForeground },
+  emptyText: { fontSize: 14, color: '#94A3B8', fontWeight: '500' },
 });

@@ -1,29 +1,29 @@
 export const colors = {
-  background: '#FAFBFC',
-  foreground: '#241F3B',
+  background: '#0F172A',
+  foreground: '#FFFFFF',
 
-  card: '#FFFFFF',
-  cardForeground: '#241F3B',
+  card: '#1E293B',
+  cardForeground: '#FFFFFF',
 
-  primary: '#4F46E5',
-  primaryForeground: '#FFFFFF',
+  primary: '#FBBF24',
+  primaryForeground: '#0F172A',
 
-  secondary: '#F1F1F5',
-  secondaryForeground: '#241F3B',
+  secondary: '#1E293B',
+  secondaryForeground: '#FFFFFF',
 
-  muted: '#F1F1F5',
-  mutedForeground: '#6B7280',
+  muted: '#1E293B',
+  mutedForeground: '#94A3B8',
 
-  accent: '#ECEBFB',
-  accentForeground: '#3730A3',
+  accent: '#334155',
+  accentForeground: '#FBBF24',
 
-  destructive: '#D8492B',
-  success: '#3DA35E',
-  warning: '#D9A441',
-  info: '#4F46E5',
+  destructive: '#F87171',
+  success: '#34D399',
+  warning: '#FBBF24',
+  info: '#38BDF8',
 
-  border: '#E7E8EC',
-  input: '#E7E8EC',
+  border: '#334155',
+  input: '#334155',
 };
 
 export const radius = {
@@ -39,12 +39,12 @@ export const shadow = {
   card: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.3,
     shadowRadius: 16,
     elevation: 3,
   },
   button: {
-    shadowColor: '#4F46E5',
+    shadowColor: '#FBBF24',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,

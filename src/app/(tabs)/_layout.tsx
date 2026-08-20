@@ -8,7 +8,6 @@ import {
   MaterialTopTabNavigationEventMap 
 } from '@react-navigation/material-top-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, radius } from '@/constants/app-theme';
 import { getCurrentPlayer } from '@/lib/player';
 import { supabase } from '@/lib/supabase';
 import { syncMatchNotifications } from '@/services/notificationService';
@@ -22,8 +21,9 @@ export const MaterialTopTabs = withLayoutContext<
   MaterialTopTabNavigationEventMap
 >(Navigator);
 
+// Etykiety zakładek dostosowane dla czytelności
 const TAB_LABELS: Record<string, string> = {
-  index: 'Nadchodzący mecz',
+  index: 'Nadchodzący',
   ogloszenia: 'Ogłoszenia',
   terminarz: 'Terminarz',
   'moje-zapisy': 'Moje zapisy',
@@ -35,7 +35,8 @@ type TopTabBarProps = {
   navigation: any;
 };
 
-function TopTabBar({ state, navigation }: TopTabBarProps) {
+// Dolny pasek nawigacyjny w stylu Mikasy (zoptymalizowany pod obsługę kciukiem)
+function BottomTabBar({ state, navigation }: TopTabBarProps) {
   const scrollViewRef = useRef<ScrollView>(null);
   const tabLayouts = useRef<{ [key: number]: { x: number; width: number } }>({});
   const insets = useSafeAreaInsets();
@@ -53,7 +54,7 @@ function TopTabBar({ state, navigation }: TopTabBarProps) {
     const layout = tabLayouts.current[index];
     if (layout && scrollViewRef.current) {
       scrollViewRef.current.scrollTo({
-        x: Math.max(0, layout.x - 80), 
+        x: Math.max(0, layout.x - 60), 
         animated: true,
       });
     }
@@ -64,14 +65,14 @@ function TopTabBar({ state, navigation }: TopTabBarProps) {
     const layout = tabLayouts.current[currentIndex];
     if (layout && scrollViewRef.current) {
       scrollViewRef.current.scrollTo({
-        x: Math.max(0, layout.x - 80),
+        x: Math.max(0, layout.x - 60),
         animated: true,
       });
     }
   }, [state.index]);
 
   return (
-    <View style={[styles.container, { paddingTop: Math.max(insets.top, Platform.OS === 'ios' ? 12 : 16) }]}>
+    <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 12) }]}>
       <ScrollView
         ref={scrollViewRef}
         horizontal
@@ -91,7 +92,7 @@ function TopTabBar({ state, navigation }: TopTabBarProps) {
                 tabLayouts.current[index] = { x, width };
               }}
               style={[styles.tabItem, isFocused && styles.tabItemActive]}
-              activeOpacity={0.7}
+              activeOpacity={0.8}
             >
               <Text style={[styles.tabLabel, isFocused && styles.tabLabelActive]}>
                 {label}
@@ -105,6 +106,7 @@ function TopTabBar({ state, navigation }: TopTabBarProps) {
 }
 
 export default function TabsLayout() {
+  // Synchronizacja powiadomień po uruchomieniu zakładek
   useEffect(() => {
     const initializeNotifications = async () => {
       try {
@@ -140,7 +142,8 @@ export default function TabsLayout() {
 
   return (
     <MaterialTopTabs
-      tabBar={(props: any) => <TopTabBar {...props} />}
+      // Przeniesienie paska zakładek na dół (pozycja tabów jako 'bottom')
+      tabBar={(props: any) => <BottomTabBar {...props} />}
       screenOptions={{
         swipeEnabled: true,
         animationEnabled: true,
@@ -155,37 +158,41 @@ export default function TabsLayout() {
   );
 }
 
+// Stylizacja zgodna z motywem Mikasy oraz nastawiona na dużą czytelność
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingBottom: 4,
+    backgroundColor: '#0F172A', // Głęboki granat/grafit (tło aplikacji)
+    borderTopWidth: 2,
+    borderTopColor: '#1E293B',
+    paddingTop: 8,
   },
   tabBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 35,
+    paddingBottom: 0,
+    gap: 10,
   },
   tabItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: radius['2xl'],
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.muted + '40',
+    backgroundColor: '#1E293B', // Nieaktywny kafel
+    minHeight: 48, // Wygodny obszar kliknięcia dla starszych osób
   },
   tabItemActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: '#FBBF24', // Żółty Mikasa dla aktywnego elementu
   },
   tabLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.mutedForeground,
+    fontSize: 16, // Większa czcionka dla lepszej czytelności
+    fontWeight: '700',
+    color: '#94A3B8',
   },
   tabLabelActive: {
-    color: colors.primaryForeground,
+    color: '#0F172A', // Kontrastowy ciemny tekst na żółtym tle
+    fontWeight: '800',
   },
 });

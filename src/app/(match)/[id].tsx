@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
@@ -67,6 +66,12 @@ type CustomAlertProps = {
   message: string;
   onClose: () => void;
 };
+
+// Funkcja pomocnicza do formatowania daty z YYYY-MM-DD na DD-MM-YYYY
+function formatDateToPL(dateString: string): string {
+  const [year, month, day] = dateString.split('-');
+  return `${day}-${month}-${year}`;
+}
 
 function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
   return (
@@ -232,7 +237,6 @@ export default function MatchDetailScreen() {
     });
   };
 
-  // Pomocnicza funkcja do odświeżania powiadomień po zmianie statusu zapisu
   const updateNotificationsAfterChange = async (playerId: string) => {
     const { data: matchesData } = await supabase.from('matches').select('*');
     const { data: regsData } = await supabase
@@ -258,7 +262,7 @@ export default function MatchDetailScreen() {
   if (loading || !match) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['top', 'bottom', 'left', 'right']}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color="#FBBF24" />
       </SafeAreaView>
     );
   }
@@ -303,7 +307,6 @@ export default function MatchDetailScreen() {
       return;
     }
 
-    // Odświeżenie lokalnych powiadomień po zapisie na mecz
     await updateNotificationsAfterChange(currentPlayer.id);
     loadData();
   };
@@ -334,7 +337,6 @@ export default function MatchDetailScreen() {
       return;
     }
 
-    // Odświeżenie lokalnych powiadomień po wypisaniu się z meczu
     await updateNotificationsAfterChange(currentPlayer.id);
     loadData();
   };
@@ -350,7 +352,7 @@ export default function MatchDetailScreen() {
       <View style={styles.topSection}>
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← Wróć</Text>
+            <Text style={styles.backButtonText}>‹ Wróć</Text>
           </TouchableOpacity>
           <Text style={styles.matchIdTitle} numberOfLines={1}>
             {title}
@@ -363,7 +365,7 @@ export default function MatchDetailScreen() {
             <Text style={styles.dateMonthSm}>{month}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.infoTextBold}>{weekday}, {match.date}</Text>
+            <Text style={styles.infoTextBold}>{weekday}, {formatDateToPL(match.date)}</Text>
             <Text style={styles.infoText}>📍 {match.location}</Text>
             <Text style={styles.infoText}>
               🕒 {formatTime(match.time_start)} – {formatTime(match.time_end)}
@@ -373,8 +375,13 @@ export default function MatchDetailScreen() {
               {Number(match.price_per_player)} PLN
             </Text>
             {isCancelled && (
-              <Text style={[styles.infoText, { color: '#DC2626', fontWeight: '700', marginTop: 2 }]}>
+              <Text style={[styles.infoText, { color: '#F87171', fontWeight: '700', marginTop: 2 }]}>
                 ⚠️ Mecz odwołany
+              </Text>
+            )}
+            {isFinished && !isCancelled && (
+              <Text style={[styles.infoText, { color: '#FBBF24', fontWeight: '700', marginTop: 2 }]}>
+                🏁 Zakończone
               </Text>
             )}
           </View>
@@ -394,6 +401,7 @@ export default function MatchDetailScreen() {
                     style={styles.cancelBtn}
                     onPress={handleCancel}
                     disabled={actionLoading}
+                    activeOpacity={0.8}
                   >
                     <Text style={styles.cancelBtnText}>Wypisz się</Text>
                   </TouchableOpacity>
@@ -406,9 +414,10 @@ export default function MatchDetailScreen() {
                 style={[styles.signupBtn, actionLoading && { opacity: 0.6 }]}
                 onPress={handleSignUp}
                 disabled={actionLoading}
+                activeOpacity={0.8}
               >
                 <Text style={styles.signupBtnText}>
-                  {isFull ? 'Zapisz się na listę rezerwową' : 'Zapisz się na mecz'}
+                  {isFull ? 'Zapisz się na listę rezerwową' : 'ZAPISZ SIĘ NA MECZ'}
                 </Text>
               </TouchableOpacity>
             )}
@@ -476,7 +485,7 @@ export default function MatchDetailScreen() {
                     <Text style={[styles.playerText, isMe && styles.playerTextHighlight]}>
                       {index + 1}. {playerName} {isMe && '(Ty)'}
                     </Text>
-                    <Text style={[styles.playerRoleTag, { backgroundColor: '#FEF3C7', color: '#D97706' }]}>
+                    <Text style={[styles.playerRoleTag, { backgroundColor: '#334155', color: '#FBBF24' }]}>
                       Rezerwa
                     </Text>
                   </View>
@@ -539,210 +548,217 @@ export default function MatchDetailScreen() {
 const alertStyles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   alertBox: {
     width: '100%',
-    maxWidth: 340,
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
+    maxWidth: 360,
+    backgroundColor: '#1E293B',
+    borderRadius: 24,
     padding: 24,
     alignItems: 'center',
-    overflow: 'hidden',
-    ...shadow.card,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   indicator: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
+    width: 48,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FBBF24',
     marginBottom: 16,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.foreground,
-    marginBottom: 8,
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 10,
     textAlign: 'center',
   },
   message: {
-    fontSize: 14,
-    color: colors.mutedForeground,
+    fontSize: 16,
+    color: '#94A3B8',
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   button: {
     width: '100%',
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    borderRadius: radius.lg,
+    backgroundColor: '#FBBF24',
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: 'center',
-    ...shadow.button,
   },
   buttonText: {
-    color: colors.primaryForeground,
-    fontSize: 15,
-    fontWeight: '700',
+    color: '#0F172A',
+    fontSize: 18,
+    fontWeight: '800',
   },
 });
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.background },
+  safeArea: { flex: 1, backgroundColor: '#0F172A' },
   loadingContainer: { 
     flex: 1, 
     justifyContent: 'center', 
     alignItems: 'center', 
-    backgroundColor: colors.background,
+    backgroundColor: '#0F172A',
     paddingHorizontal: 16 
   },
 
   topSection: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingHorizontal: 20,
+    paddingTop: 12,
     paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomWidth: 2,
+    borderBottomColor: '#334155',
+    backgroundColor: '#0F172A',
   },
-  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, marginTop: 4 },
-  backButton: { marginRight: 12, paddingVertical: 4 },
-  backButtonText: { fontSize: 14, fontWeight: '700', color: colors.primary },
-  matchIdTitle: { flex: 1, fontSize: 18, fontWeight: '700', color: colors.foreground },
+  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14, marginTop: 4 },
+  backButton: { marginRight: 12, paddingVertical: 6, paddingHorizontal: 4 },
+  backButtonText: { fontSize: 18, fontWeight: '700', color: '#FBBF24' },
+  matchIdTitle: { flex: 1, fontSize: 20, fontWeight: '800', color: '#FFFFFF' },
 
   matchInfoCard: {
     flexDirection: 'row',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: 12,
-    ...shadow.card,
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
+    padding: 16,
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   dateBoxSm: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
+    width: 60,
+    height: 60,
+    borderRadius: 16,
+    backgroundColor: '#0F172A',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 16,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
-  dateDaySm: { fontSize: 16, fontWeight: '700', color: colors.accentForeground },
-  dateMonthSm: { fontSize: 10, color: colors.accentForeground },
-  infoTextBold: { fontSize: 13, fontWeight: '700', color: colors.foreground, marginBottom: 2 },
-  infoText: { fontSize: 12, color: colors.mutedForeground, marginBottom: 2 },
-  bold: { fontWeight: '700', color: colors.foreground },
+  dateDaySm: { fontSize: 20, fontWeight: '800', color: '#FBBF24' },
+  dateMonthSm: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
+  infoTextBold: { fontSize: 16, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 },
+  infoText: { fontSize: 15, color: '#94A3B8', marginBottom: 4, fontWeight: '500' },
+  bold: { fontWeight: '800', color: '#FFFFFF' },
 
-  actionContainer: { marginTop: 12 },
+  actionContainer: { marginTop: 16 },
   signupBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    paddingVertical: 10,
+    backgroundColor: '#FBBF24',
+    borderRadius: 16,
+    paddingVertical: 16,
     alignItems: 'center',
   },
-  signupBtnText: { color: colors.primaryForeground, fontSize: 13, fontWeight: '700' },
+  signupBtnText: { color: '#0F172A', fontSize: 18, fontWeight: '800' },
   registeredRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  statusTextInfo: { fontSize: 12, fontWeight: '600', color: colors.foreground, flex: 1 },
+  statusTextInfo: { fontSize: 15, fontWeight: '700', color: '#FBBF24', flex: 1 },
   cancelBtn: {
-    borderWidth: 1,
-    borderColor: colors.destructive,
-    borderRadius: radius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    backgroundColor: '#0F172A',
+    borderWidth: 2,
+    borderColor: '#F87171',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
-  cancelBtnText: { color: colors.destructive, fontSize: 12, fontWeight: '700' },
-  lockedText: { fontSize: 11, color: colors.mutedForeground, fontStyle: 'italic' },
+  cancelBtnText: { color: '#F87171', fontSize: 15, fontWeight: '800' },
+  lockedText: { fontSize: 13, color: '#94A3B8', fontStyle: 'italic', fontWeight: '500' },
 
   navSection: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#0F172A',
+    borderBottomWidth: 2,
+    borderBottomColor: '#334155',
   },
   navButton: {
     flex: 1,
-    paddingVertical: 8,
+    paddingVertical: 12,
     alignItems: 'center',
-    borderRadius: radius.md,
+    borderRadius: 14,
+    backgroundColor: '#1E293B',
+    marginHorizontal: 4,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   navButtonActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: '#FBBF24',
+    borderColor: '#FBBF24',
   },
-  navButtonText: { fontSize: 13, fontWeight: '600', color: colors.mutedForeground },
-  navButtonTextActive: { color: colors.accentForeground, fontWeight: '700' },
+  navButtonText: { fontSize: 15, fontWeight: '700', color: '#94A3B8' },
+  navButtonTextActive: { color: '#0F172A', fontWeight: '900' },
 
-  bottomSectionScroll: { flex: 1 },
+  bottomSectionScroll: { flex: 1, backgroundColor: '#0F172A' },
   tabContentPage: {
     width: SCREEN_WIDTH,
     flex: 1,
   },
-  innerListScroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 },
-  sectionHeading: { fontSize: 15, fontWeight: '700', color: colors.foreground, marginBottom: 8 },
-  emptySubText: { fontSize: 13, color: colors.mutedForeground, fontStyle: 'italic', marginBottom: 8 },
+  innerListScroll: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 },
+  sectionHeading: { fontSize: 18, fontWeight: '800', color: '#FFFFFF', marginBottom: 12 },
+  emptySubText: { fontSize: 15, color: '#94A3B8', fontStyle: 'italic', marginBottom: 12 },
 
   playerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: radius.sm,
-    backgroundColor: colors.card,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: '#1E293B',
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   playerRowHighlight: {
-    borderColor: colors.primary,
-    backgroundColor: '#eff6ff',
+    borderColor: '#FBBF24',
+    backgroundColor: '#1E293B',
   },
-  playerText: { fontSize: 14, color: colors.foreground, fontWeight: '500' },
-  playerTextHighlight: { fontWeight: '700', color: colors.primary },
-  playerRoleTag: { fontSize: 10, fontWeight: '700', color: colors.mutedForeground, backgroundColor: colors.muted, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  playerText: { fontSize: 16, color: '#FFFFFF', fontWeight: '600' },
+  playerTextHighlight: { fontWeight: '900', color: '#FBBF24' },
+  playerRoleTag: { fontSize: 12, fontWeight: '800', color: '#0F172A', backgroundColor: '#FBBF24', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
 
   notificationCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: 14,
-    marginBottom: 10,
-    ...shadow.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 14,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   notificationCardPinned: {
-    borderColor: colors.primary,
-    backgroundColor: '#f8fafc',
+    borderColor: '#FBBF24',
   },
   notifHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 8,
   },
-  notifTitle: { fontSize: 14, fontWeight: '700', color: colors.foreground, flex: 1, marginRight: 8 },
-  notifDesc: { fontSize: 13, color: colors.mutedForeground, lineHeight: 18, marginBottom: 8 },
+  notifTitle: { fontSize: 16, fontWeight: '800', color: '#FFFFFF', flex: 1, marginRight: 8 },
+  notifDesc: { fontSize: 15, color: '#94A3B8', lineHeight: 22, marginBottom: 12, fontWeight: '500' },
   pinnedBadge: {
-    backgroundColor: '#eff6ff',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.primary,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#FBBF24',
   },
-  pinnedBadgeText: { fontSize: 10, fontWeight: '700', color: colors.primary },
+  pinnedBadgeText: { fontSize: 12, fontWeight: '800', color: '#FBBF24' },
   notifFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: 8,
+    borderTopWidth: 2,
+    borderTopColor: '#334155',
+    paddingTop: 12,
     marginTop: 4,
   },
-  notifAuthor: { fontSize: 11, color: colors.mutedForeground, fontWeight: '600' },
-  notifDate: { fontSize: 11, color: colors.mutedForeground },
+  notifAuthor: { fontSize: 13, color: '#94A3B8', fontWeight: '700' },
+  notifDate: { fontSize: 13, color: '#94A3B8', fontWeight: '500' },
 });

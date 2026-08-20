@@ -12,9 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { colors, radius, shadow } from '@/constants/app-theme';
 import { supabase } from '@/lib/supabase';
-import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
+import { formatMatchDate, formatTime } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
 import { syncMatchNotifications } from '@/services/notificationService';
 
@@ -87,6 +86,17 @@ function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolea
   }
 }
 
+function isMatchFinished(dateStr: string, timeEndStr: string, timeStartStr: string): boolean {
+  try {
+    const timeString = timeEndStr || timeStartStr || '23:59';
+    const matchDateTime = new Date(`${dateStr}T${timeString}`);
+    const now = new Date();
+    return matchDateTime.getTime() < now.getTime();
+  } catch {
+    return false;
+  }
+}
+
 function RegistrationCard({
   reg,
   onCancel,
@@ -108,23 +118,26 @@ function RegistrationCard({
 }) {
   if (!reg.matches) return null;
 
-  const { weekday, day, month } = formatMatchDate(reg.matches.date);
+  const { day, month } = formatMatchDate(reg.matches.date);
   const title = reg.matches.title?.trim() || 'Trening Siatkówki';
   const isWaitlist = reg.registrationStatus === 'waitlist';
   const isCancelled = reg.matches.status_id === 2;
+  const finished = isMatchFinished(reg.matches.date, reg.matches.time_end, reg.matches.time_start);
 
   return (
     <TouchableOpacity
       style={[
-        styles.card,
-        isCancelled && styles.cardCancelled,
+        styles.matchCard,
+        isCancelled && styles.matchCardCancelled,
+        !isCancelled && !finished && currentPlayerIsMain(reg) && styles.cardBorderMain,
+        !isCancelled && !finished && isWaitlist && styles.cardBorderWaitlist,
         isSelectionMode && isSelected && {
-          borderColor: colors.primary,
+          borderColor: '#FBBF24',
           borderWidth: 2,
-          backgroundColor: '#eff6ff',
+          backgroundColor: '#1E293B',
         },
       ]}
-      activeOpacity={0.8}
+      activeOpacity={0.9}
       onPress={() => {
         if (isSelectionMode) {
           onLongPress();
@@ -134,6 +147,13 @@ function RegistrationCard({
       }}
       onLongPress={onLongPress}
     >
+      {!isCancelled && !finished && !isSelectionMode && (
+        <View style={[
+          styles.sideStatusBar,
+          isWaitlist ? styles.sideBarWaitlist : styles.sideBarMain
+        ]} />
+      )}
+
       {isSelectionMode && (
         <View style={styles.checkboxContainer}>
           <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
@@ -142,83 +162,94 @@ function RegistrationCard({
         </View>
       )}
 
-      <View style={[styles.dateBox, isCancelled && styles.dateBoxCancelled]}>
-        <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>
-          {day}
-        </Text>
-        <Text style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]}>
-          {month}
-        </Text>
-      </View>
-
-      <View style={styles.cardBody}>
-        <View style={styles.cardTopRow}>
-          <Text
-            style={[
-              styles.matchTitle,
-              isCancelled && styles.matchTitleCancelled,
-            ]}
-            numberOfLines={1}
-          >
-            {title}
-          </Text>
-          <View
-            style={[
-              styles.badge,
-              { backgroundColor: isWaitlist ? '#FEF3C7' : '#DCFCE7' },
-            ]}
-          >
-            <Text
-              style={[
-                styles.badgeText,
-                { color: isWaitlist ? '#D97706' : '#16A34A' },
-              ]}
-            >
-              {isWaitlist ? 'Lista rezerwowa' : 'Zapisany'}
+      <View style={styles.cardInnerContainer}>
+        <View style={styles.cardMainRow}>
+          <View style={[styles.dateBox, isCancelled && styles.dateBoxCancelled]}>
+            <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>
+              {day}
             </Text>
+            <Text style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]}>
+              {month}
+            </Text>
+          </View>
+
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            <View style={styles.titleRow}>
+              <Text
+                style={[
+                  styles.matchTitle,
+                  isCancelled && styles.matchTitleCancelled,
+                ]}
+                numberOfLines={1}
+              >
+                {title}
+              </Text>
+              
+              {isCancelled ? (
+                <View style={styles.badgeCancelledBg}>
+                  <Text style={styles.badgeCancelledText}>⚠️ Odwołany</Text>
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.inlineStatusBadge,
+                    isWaitlist ? styles.badgeWaitlistBg : styles.badgeMainBg,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.inlineStatusText,
+                      isWaitlist ? styles.badgeWaitlistText : styles.badgeMainText,
+                    ]}
+                  >
+                    {isWaitlist ? '⏳ Rezerwa' : '✅ Zapisany'}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <Text style={styles.matchInfo}>📍 {reg.matches.location} | 🕒 {formatTime(reg.matches.time_start)}</Text>
+            
+            <View style={styles.subInfoRow}>
+              <Text
+                style={[
+                  styles.paymentStatus,
+                  { color: reg.is_paid ? '#34D399' : '#94A3B8' },
+                ]}
+              >
+                {reg.is_paid ? '✓ Opłacone' : 'Brak statusu płatności'}
+              </Text>
+              <Text style={styles.priceText}>{Number(reg.matches.price_per_player)} PLN</Text>
+            </View>
           </View>
         </View>
 
-        <Text style={styles.weekday}>{weekday}</Text>
-        <Text style={styles.location}>📍 {reg.matches.location}</Text>
-        <Text style={styles.time}>
-          🕒 {formatTime(reg.matches.time_start)} –{' '}
-          {formatTime(reg.matches.time_end)}
-        </Text>
-
-        <View style={styles.footerRow}>
-          <View>
-            <Text
-              style={[
-                styles.paymentStatus,
-                { color: reg.is_paid ? '#16A34A' : colors.mutedForeground },
-              ]}
-            >
-              {reg.is_paid ? '✓ Opłacone' : 'Brak statusu płatności'}
-            </Text>
-            <Text style={styles.footerText}>
-              {Number(reg.matches.price_per_player)} PLN
-            </Text>
-          </View>
-
-          {activeTab === 'active' && !isCancelled && !isSelectionMode && (
+        {activeTab === 'active' && !isCancelled && !isSelectionMode && (
+          <View style={styles.cardFooter}>
             <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => onCancel(reg)}
+              style={styles.quickCancelBtnInline}
+              onPress={(e) => {
+                e.stopPropagation();
+                onCancel(reg);
+              }}
               disabled={cancelling}
               activeOpacity={0.7}
             >
               {cancelling ? (
-                <ActivityIndicator size="small" color="#DC2626" />
+                <ActivityIndicator size="small" color="#F87171" />
               ) : (
-                <Text style={styles.cancelButtonText}>Wypisz się</Text>
+                <Text style={styles.quickCancelText}>Wypisz się z meczu</Text>
               )}
             </TouchableOpacity>
-          )}
-        </View>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
+}
+
+function currentPlayerIsMain(reg: MyRegistration): boolean {
+  return reg.registrationStatus === 'main';
 }
 
 export default function MojeZapisyScreen() {
@@ -356,7 +387,6 @@ export default function MojeZapisyScreen() {
     setRefreshing(false);
   };
 
-  // Pomocnicza funkcja aktualizująca powiadomienia po wypisaniu się gracza
   const updateNotificationsAfterChange = async (playerId: string) => {
     const { data: matchesData } = await supabase.from('matches').select('*');
     const { data: regsData } = await supabase
@@ -427,12 +457,16 @@ export default function MojeZapisyScreen() {
     .filter((reg) => {
       if (!reg.matches) return false;
 
-      const isPast = isDateInPast(reg.matches.date);
+      const finished = isMatchFinished(
+        reg.matches.date,
+        reg.matches.time_end,
+        reg.matches.time_start
+      );
 
       if (activeTab === 'active') {
-        return !isPast;
+        return !finished;
       } else {
-        return isPast;
+        return finished;
       }
     })
     .sort((a, b) => {
@@ -545,7 +579,7 @@ export default function MojeZapisyScreen() {
         style={styles.loadingContainer}
         edges={['bottom', 'left', 'right']}
       >
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color="#FBBF24" />
       </SafeAreaView>
     );
   }
@@ -571,7 +605,7 @@ export default function MojeZapisyScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={colors.primary}
+            tintColor="#FBBF24"
           />
         }
         ListHeaderComponent={
@@ -720,7 +754,7 @@ export default function MojeZapisyScreen() {
                     {bulkActionLoading ? (
                       <ActivityIndicator
                         size="small"
-                        color="#fff"
+                        color="#0F172A"
                       />
                     ) : (
                       <Text style={styles.bulkCancelText}>
@@ -827,118 +861,117 @@ export default function MojeZapisyScreen() {
 const alertStyles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   alertBox: {
     width: '100%',
-    maxWidth: 340,
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
+    maxWidth: 360,
+    backgroundColor: '#1E293B',
+    borderRadius: 24,
     padding: 24,
     alignItems: 'center',
-    overflow: 'hidden',
-    ...shadow.card,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   indicator: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
+    width: 48,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FBBF24',
     marginBottom: 16,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.foreground,
-    marginBottom: 8,
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 10,
     textAlign: 'center',
   },
   message: {
-    fontSize: 14,
-    color: colors.mutedForeground,
+    fontSize: 16,
+    color: '#94A3B8',
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   button: {
     width: '100%',
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    borderRadius: radius.lg,
+    backgroundColor: '#FBBF24',
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: 'center',
-    ...shadow.button,
   },
   buttonText: {
-    color: colors.primaryForeground,
-    fontSize: 15,
-    fontWeight: '700',
+    color: '#0F172A',
+    fontSize: 18,
+    fontWeight: '800',
   },
 });
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.background },
+  safeArea: { flex: 1, backgroundColor: '#0F172A' },
   loadingContainer: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#0F172A',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
-  listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32 },
+  listContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32 },
 
   headerTitle: {
     fontSize: 24,
-    fontWeight: '700',
-    color: colors.foreground,
+    fontWeight: '800',
+    color: '#FFFFFF',
     marginTop: 16,
   },
   headerSubtitle: {
-    fontSize: 13,
-    color: colors.mutedForeground,
+    fontSize: 14,
+    color: '#94A3B8',
     marginTop: 4,
     marginBottom: 16,
+    fontWeight: '500',
   },
 
   selectionToolbar: {
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    padding: 10,
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
+    padding: 14,
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   toolbarTitle: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
-    color: colors.foreground,
-    marginBottom: 6,
+    color: '#FFFFFF',
+    marginBottom: 8,
   },
-  rangeScroll: { marginBottom: 8 },
+  rangeScroll: { marginBottom: 10 },
   rangeChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: radius.sm,
-    backgroundColor: colors.muted,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: '#0F172A',
     marginRight: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   rangeChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: '#FBBF24',
+    borderColor: '#FBBF24',
   },
   rangeText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
-    color: colors.mutedForeground,
+    color: '#94A3B8',
   },
   rangeTextActive: {
-    color: colors.primaryForeground,
-    fontWeight: '700',
+    color: '#0F172A',
+    fontWeight: '800',
   },
   toolbarActionsRow: {
     flexDirection: 'row',
@@ -946,229 +979,218 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   bulkCancelBtn: {
-    backgroundColor: colors.destructive,
-    borderRadius: radius.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    backgroundColor: '#F87171',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     flex: 1,
     marginRight: 8,
     alignItems: 'center',
   },
   bulkCancelText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
+    color: '#0F172A',
+    fontSize: 13,
+    fontWeight: '800',
   },
   closeSelectionBtn: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderWidth: 2,
+    borderColor: '#334155',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#0F172A',
   },
   closeSelectionText: {
-    color: colors.foreground,
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
 
   checkboxContainer: {
     marginRight: 10,
     justifyContent: 'center',
+    paddingLeft: 16,
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: '#FBBF24',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.card,
+    backgroundColor: '#0F172A',
   },
   checkboxChecked: {
-    backgroundColor: colors.primary,
+    backgroundColor: '#FBBF24',
   },
   checkmark: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
+    color: '#0F172A',
+    fontSize: 14,
+    fontWeight: '900',
   },
 
   errorBox: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: radius.md,
-    padding: 12,
+    backgroundColor: 'rgba(248, 113, 113, 0.15)',
+    borderRadius: 16,
+    padding: 14,
     marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#F87171',
   },
   errorText: {
-    color: '#DC2626',
-    fontSize: 13,
+    color: '#F87171',
+    fontSize: 14,
+    fontWeight: '600',
   },
 
   warnBox: {
-    backgroundColor: '#FEF3C7',
-    borderRadius: radius.md,
-    padding: 12,
+    backgroundColor: 'rgba(251, 191, 36, 0.15)',
+    borderRadius: 16,
+    padding: 14,
     marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#FBBF24',
   },
   warnText: {
-    color: '#92400E',
-    fontSize: 13,
+    color: '#FBBF24',
+    fontSize: 14,
+    fontWeight: '600',
   },
 
   tabsContainer: {
     flexDirection: 'row',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
+    backgroundColor: '#1E293B',
+    borderRadius: 18,
     padding: 4,
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 2,
+    borderColor: '#334155',
   },
   tabButton: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 12,
     alignItems: 'center',
-    borderRadius: radius.md,
+    borderRadius: 14,
   },
   tabButtonActive: {
-    backgroundColor: colors.primary,
-    ...shadow.button,
+    backgroundColor: '#FBBF24',
   },
   tabText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.mutedForeground,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#94A3B8',
   },
   tabTextActive: {
-    color: colors.primaryForeground,
-    fontWeight: '700',
+    color: '#0F172A',
+    fontWeight: '900',
   },
-  card: {
-    flexDirection: 'row',
-    backgroundColor: colors.card,
-    borderRadius: radius.xl,
+
+  matchCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
+    marginBottom: 14,
+    borderWidth: 2,
+    borderColor: '#334155',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  matchCardCancelled: { backgroundColor: '#1E293B', borderColor: '#F87171' },
+  cardBorderMain: { borderColor: '#FBBF24' },
+  cardBorderWaitlist: { borderColor: '#334155' },
+
+  sideStatusBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 6,
+  },
+  sideBarMain: { backgroundColor: '#FBBF24' },
+  sideBarWaitlist: { backgroundColor: '#64748B' },
+
+  cardInnerContainer: {
     padding: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.card,
+    paddingLeft: 18,
   },
-  cardCancelled: {
-    opacity: 0.7,
-    backgroundColor: '#F8FAFC',
-  },
+  cardMainRow: { flexDirection: 'row', alignItems: 'center' },
   dateBox: {
-    width: 54,
-    height: 54,
-    borderRadius: radius.lg,
-    backgroundColor: colors.primary + '15',
+    width: 60,
+    height: 60,
+    borderRadius: 16,
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#334155',
+  },
+  dateBoxCancelled: { borderColor: '#F87171' },
+  dateDay: { fontSize: 20, fontWeight: '800', color: '#FBBF24' },
+  dateDayCancelled: { color: '#F87171' },
+  dateMonth: { fontSize: 12, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase' },
+  dateMonthCancelled: { color: '#F87171' },
+
+  titleRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
+    justifyContent: 'space-between',
+    marginBottom: 4,
   },
-  dateBoxCancelled: {
-    backgroundColor: colors.muted,
+  matchTitle: { fontSize: 16, fontWeight: '800', color: '#FFFFFF', flex: 1, marginRight: 6 },
+  matchTitleCancelled: { textDecorationLine: 'line-through', color: '#F87171' },
+
+  inlineStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
-  dateDay: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  dateDayCancelled: {
-    color: colors.mutedForeground,
-  },
-  dateMonth: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.primary,
-    textTransform: 'uppercase',
-  },
-  dateMonthCancelled: {
-    color: colors.mutedForeground,
-  },
-  cardBody: {
-    flex: 1,
-  },
-  cardTopRow: {
+  badgeMainBg: { backgroundColor: '#0F172A', borderWidth: 2, borderColor: '#FBBF24' },
+  badgeWaitlistBg: { backgroundColor: '#0F172A', borderWidth: 2, borderColor: '#64748B' },
+  inlineStatusText: { fontSize: 11, fontWeight: '800' },
+  badgeMainText: { color: '#FBBF24' },
+  badgeWaitlistText: { color: '#94A3B8' },
+
+  badgeCancelledBg: { backgroundColor: '#0F172A', borderWidth: 2, borderColor: '#F87171', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  badgeCancelledText: { fontSize: 11, fontWeight: '800', color: '#F87171' },
+
+  matchInfo: { fontSize: 13, color: '#94A3B8', marginBottom: 6, fontWeight: '500' },
+  
+  subInfoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
-  },
-  matchTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.foreground,
-    flex: 1,
-    marginRight: 8,
-  },
-  matchTitleCancelled: {
-    textDecorationLine: 'line-through',
-    color: colors.mutedForeground,
-  },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radius.sm,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  weekday: {
-    fontSize: 12,
-    color: colors.mutedForeground,
-    marginBottom: 4,
-  },
-  location: {
-    fontSize: 13,
-    color: colors.foreground,
-    marginBottom: 2,
-  },
-  time: {
-    fontSize: 13,
-    color: colors.mutedForeground,
-    marginBottom: 10,
-  },
-  footerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: 8,
+    marginTop: 2,
   },
   paymentStatus: {
     fontSize: 12,
-    fontWeight: '600',
-  },
-  footerText: {
-    fontSize: 12,
     fontWeight: '700',
-    color: colors.foreground,
-    marginTop: 2,
   },
-  cancelButton: {
-    backgroundColor: '#FEE2E2',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: '#FCA5A5',
+  priceText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
-  cancelButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#DC2626',
-  },
-  emptyState: {
-    paddingVertical: 40,
+
+  cardFooter: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 2,
+    borderTopColor: '#334155',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     alignItems: 'center',
   },
-  emptyText: {
-    fontSize: 14,
-    color: colors.mutedForeground,
+  quickCancelBtnInline: {
+    borderWidth: 2,
+    borderColor: '#F87171',
+    borderRadius: 14,
+    paddingVertical: 10,
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
   },
+  quickCancelText: { color: '#F87171', fontSize: 13, fontWeight: '800' },
+
+  emptyState: { paddingVertical: 40, alignItems: 'center' },
+  emptyText: { fontSize: 15, color: '#94A3B8', fontStyle: 'italic', fontWeight: '500' },
 });
