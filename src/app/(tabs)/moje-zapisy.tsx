@@ -129,8 +129,6 @@ function RegistrationCard({
       style={[
         styles.matchCard,
         isCancelled && styles.matchCardCancelled,
-        !isCancelled && !finished && currentPlayerIsMain(reg) && styles.cardBorderMain,
-        !isCancelled && !finished && isWaitlist && styles.cardBorderWaitlist,
         isSelectionMode && isSelected && {
           borderColor: '#FBBF24',
           borderWidth: 2,
@@ -1090,14 +1088,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E293B',
     borderRadius: 20,
     marginBottom: 14,
-    borderWidth: 2,
-    borderColor: '#334155',
+    borderWidth: 0,
     overflow: 'hidden',
     position: 'relative',
   },
-  matchCardCancelled: { backgroundColor: '#1E293B', borderColor: '#F87171' },
-  cardBorderMain: { borderColor: '#FBBF24' },
-  cardBorderWaitlist: { borderColor: '#334155' },
+  matchCardCancelled: { backgroundColor: '#1E293B' },
 
   sideStatusBar: {
     position: 'absolute',

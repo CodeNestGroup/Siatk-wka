@@ -281,22 +281,18 @@ export default function ScheduleScreen() {
           const finished = isMatchFinished(item.date, item.time_end, item.time_start);
           const isFull = (item.mainCount ?? 0) >= (item.capacityLimit ?? 10);
           const isActionLoading = actionLoadingId === item.id;
+          const isWaitlist = item.registrationStatus === 'waitlist';
           
           return (
             <TouchableOpacity
-              style={[
-                styles.matchCard,
-                isCancelled && styles.matchCardCancelled,
-                !isCancelled && currentPlayer && item.isRegistered && item.registrationStatus === 'main' && styles.cardBorderMain,
-                !isCancelled && currentPlayer && item.isRegistered && item.registrationStatus === 'waitlist' && styles.cardBorderWaitlist,
-              ]}
+              style={[styles.matchCard, isCancelled && styles.matchCardCancelled]}
               onPress={() => router.push(`/(match)/${item.id}`)}
               activeOpacity={0.9}
             >
-              {!isCancelled && currentPlayer && item.isRegistered && (
+              {!isCancelled && !finished && currentPlayer && item.isRegistered && (
                 <View style={[
                   styles.sideStatusBar,
-                  item.registrationStatus === 'waitlist' ? styles.sideBarWaitlist : styles.sideBarMain
+                  isWaitlist ? styles.sideBarWaitlist : styles.sideBarMain
                 ]} />
               )}
 
@@ -310,7 +306,7 @@ export default function ScheduleScreen() {
                   <View style={{ flex: 1, marginLeft: 12 }}>
                     <View style={styles.titleRow}>
                       <Text style={[styles.matchTitle, isCancelled && styles.matchTitleCancelled]} numberOfLines={1}>
-                        {item.title || 'Trening'}
+                        {item.title || 'Trening Siatkówki'}
                       </Text>
                       
                       {isCancelled ? (
@@ -321,20 +317,20 @@ export default function ScheduleScreen() {
                         currentPlayer && item.isRegistered && (
                           <View style={[
                             styles.inlineStatusBadge,
-                            item.registrationStatus === 'waitlist' ? styles.badgeWaitlistBg : styles.badgeMainBg
+                            isWaitlist ? styles.badgeWaitlistBg : styles.badgeMainBg
                           ]}>
                             <Text style={[
                               styles.inlineStatusText,
-                              item.registrationStatus === 'waitlist' ? styles.badgeWaitlistText : styles.badgeMainText
+                              isWaitlist ? styles.badgeWaitlistText : styles.badgeMainText
                             ]}>
-                              {item.registrationStatus === 'waitlist' ? '⏳ Rezerwa' : '✅ Zapisany'}
+                              {isWaitlist ? '⏳ Rezerwa' : '✅ Zapisany'}
                             </Text>
                           </View>
                         )
                       )}
                     </View>
 
-                    <Text style={styles.matchInfo}>🕒 {formatTime(item.time_start)} | 📍 {item.location}</Text>
+                    <Text style={styles.matchInfo}>📍 {item.location} | 🕒 {formatTime(item.time_start)}</Text>
                     <Text style={styles.matchInfoBold}>👥 Zapisanych: {item.totalRegistrationsCount}/{item.capacityLimit}</Text>
                   </View>
                 </View>
@@ -443,8 +439,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E293B',
     marginHorizontal: 20,
     marginTop: 16,
-    borderRadius: 16,
-    padding: 6,
+    borderRadius: 18,
+    padding: 4,
     borderWidth: 2,
     borderColor: '#334155',
   },
@@ -453,10 +449,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
+    borderRadius: 14,
   },
   tabButtonActive: { backgroundColor: '#FBBF24' },
-  tabText: { fontSize: 13, fontWeight: '700', color: '#94A3B8' },
+  tabText: { fontSize: 14, fontWeight: '700', color: '#94A3B8' },
   tabTextActive: { color: '#0F172A', fontWeight: '900' },
 
   listContainer: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 },
@@ -465,14 +461,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E293B',
     borderRadius: 20,
     marginBottom: 14,
-    borderWidth: 2,
-    borderColor: '#334155',
+    borderWidth: 0,
     overflow: 'hidden',
     position: 'relative',
   },
-  matchCardCancelled: { backgroundColor: '#1E293B', borderColor: '#F87171' },
-  cardBorderMain: { borderColor: '#FBBF24' },
-  cardBorderWaitlist: { borderColor: '#F59E0B' },
+  matchCardCancelled: { backgroundColor: '#1E293B' },
 
   sideStatusBar: {
     position: 'absolute',
@@ -482,7 +475,7 @@ const styles = StyleSheet.create({
     width: 6,
   },
   sideBarMain: { backgroundColor: '#FBBF24' },
-  sideBarWaitlist: { backgroundColor: '#F59E0B' },
+  sideBarWaitlist: { backgroundColor: '#64748B' },
 
   cardInnerContainer: {
     padding: 14,
@@ -490,19 +483,19 @@ const styles = StyleSheet.create({
   },
   cardMainRow: { flexDirection: 'row', alignItems: 'center' },
   dateBox: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
+    width: 60,
+    height: 60,
+    borderRadius: 16,
     backgroundColor: '#0F172A',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#334155',
   },
-  dateBoxCancelled: { borderColor: '#F87171', backgroundColor: '#0F172A' },
-  dateDay: { fontSize: 18, fontWeight: '900', color: '#FBBF24' },
+  dateBoxCancelled: { borderColor: '#F87171' },
+  dateDay: { fontSize: 20, fontWeight: '800', color: '#FBBF24' },
   dateDayCancelled: { color: '#F87171' },
-  dateMonth: { fontSize: 11, color: '#94A3B8', textTransform: 'uppercase', fontWeight: '800' },
+  dateMonth: { fontSize: 12, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase' },
   dateMonthCancelled: { color: '#F87171' },
 
   titleRow: {
@@ -516,20 +509,20 @@ const styles = StyleSheet.create({
 
   inlineStatusBadge: {
     paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 8,
   },
-  badgeMainBg: { backgroundColor: 'rgba(251, 191, 36, 0.15)', borderWidth: 1, borderColor: '#FBBF24' },
-  badgeWaitlistBg: { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderWidth: 1, borderColor: '#F59E0B' },
+  badgeMainBg: { backgroundColor: '#0F172A', borderWidth: 2, borderColor: '#FBBF24' },
+  badgeWaitlistBg: { backgroundColor: '#0F172A', borderWidth: 2, borderColor: '#64748B' },
   inlineStatusText: { fontSize: 11, fontWeight: '800' },
   badgeMainText: { color: '#FBBF24' },
-  badgeWaitlistText: { color: '#F59E0B' },
+  badgeWaitlistText: { color: '#94A3B8' },
 
-  badgeCancelledBg: { backgroundColor: 'rgba(248, 113, 113, 0.15)', borderWidth: 1, borderColor: '#F87171', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 8 },
+  badgeCancelledBg: { backgroundColor: '#0F172A', borderWidth: 2, borderColor: '#F87171', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   badgeCancelledText: { fontSize: 11, fontWeight: '800', color: '#F87171' },
 
-  matchInfo: { fontSize: 13, color: '#94A3B8', marginBottom: 3, fontWeight: '500' },
-  matchInfoBold: { fontSize: 13, fontWeight: '800', color: '#FFFFFF', marginTop: 3 },
+  matchInfo: { fontSize: 13, color: '#94A3B8', marginBottom: 6, fontWeight: '500' },
+  matchInfoBold: { fontSize: 13, fontWeight: '800', color: '#FFFFFF', marginTop: 2 },
 
   cardFooter: {
     marginTop: 12,
@@ -542,20 +535,20 @@ const styles = StyleSheet.create({
   },
   quickSignupBtn: {
     backgroundColor: '#FBBF24',
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 10,
     flex: 1,
     alignItems: 'center',
   },
-  quickWaitlistBtn: { backgroundColor: '#F59E0B' },
+  quickWaitlistBtn: { backgroundColor: '#64748B' },
   quickSignupText: { color: '#0F172A', fontSize: 13, fontWeight: '900' },
   
   quickCancelBtnInline: {
     borderWidth: 2,
     borderColor: '#F87171',
-    borderRadius: 12,
-    paddingVertical: 9,
+    borderRadius: 14,
+    paddingVertical: 10,
     flex: 1,
     alignItems: 'center',
     backgroundColor: '#0F172A',
@@ -563,5 +556,5 @@ const styles = StyleSheet.create({
   quickCancelText: { color: '#F87171', fontSize: 13, fontWeight: '800' },
 
   emptyState: { paddingVertical: 40, alignItems: 'center' },
-  emptyText: { fontSize: 14, color: '#94A3B8', fontWeight: '500' },
+  emptyText: { fontSize: 15, color: '#94A3B8', fontStyle: 'italic', fontWeight: '500' },
 });
