@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useLayoutEffect } from "react"
+import { Space_Grotesk, Oswald } from "next/font/google"
 import {
   Users,
   Search,
@@ -21,16 +22,66 @@ import {
   ArrowDown,
   Coffee,
   Heart,
-  Copy,
-  Check,
-  Sparkles
+  Download,
+  CheckSquare,
+  Square
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
+import { SupportModal } from "@/components/dashboard/support-modal"
+import { Modal } from "@/components/ui/modal"
+import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
 import { supabase } from "@/lib/supabase"
-import { Badge } from "@/components/dashboard/ui-bits"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
+
+// ────────────────────────────────────────────────────────────────
+// Te same tokeny co reszta dashboardu ("Under the Lights")
+// ────────────────────────────────────────────────────────────────
+const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "600", "700"] })
+const score = Oswald({ subsets: ["latin"], weight: ["500", "600", "700"] })
+
+const INK = "#0B1120"
+const INK_SOFT = "#121B33"
+const COBALT = "#2C4BFF"
+const YELLOW = "#FFD23F"
+const CORAL = "#FF5A5F"
+const MINT = "#00C48C"
+const VIOLET = "#7A5CFF"
+
+const netPattern: React.CSSProperties = {
+  backgroundImage:
+    "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
+}
+
+// Płynne podliczanie liczb — ten sam komponent co na stronie głównej
+function CountUp({ value, decimals = 0 }: { value: number; decimals?: number }) {
+  const [displayValue, setDisplayValue] = useState(value)
+  const prevValue = useRef(value)
+
+  useEffect(() => {
+    const from = prevValue.current
+    const to = value
+    if (from === to) return
+
+    const duration = 600
+    const start = performance.now()
+    let raf: number
+
+    function tick(now: number) {
+      const progress = Math.min(1, (now - start) / duration)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setDisplayValue(from + (to - from) * eased)
+      if (progress < 1) raf = requestAnimationFrame(tick)
+      else prevValue.current = to
+    }
+
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value])
+
+  return <>{displayValue.toFixed(decimals)}</>
+}
 
 type GlobalPlayer = {
   id: string
@@ -54,6 +105,10 @@ type PlayerHistory = {
   fee: number
 }
 
+function buildPlayerSearchTokens(p: GlobalPlayer): string[] {
+  return normalizeSearchText(`${p.full_name || ""} ${p.email || ""}`).split(/[^a-z0-9]+/).filter(Boolean)
+}
+
 export default function PlayersPage() {
   const [players, setPlayers] = useState<GlobalPlayer[]>([])
   const [pendingPlayers, setPendingPlayers] = useState<GlobalPlayer[]>([])
@@ -62,10 +117,20 @@ export default function PlayersPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [statusFilter, setStatusFilter] = useState<"core" | "active" | "inactive" | "all">("core")
+  const [toast, setToast] = useState<string | null>(null)
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
+
+  // Suwak pod aktywną zakładką filtra — ten sam mechanizm co na stronie głównej
+  const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, top: 0, height: 0 })
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+
+  // Masowe akcje admina w widoku tabeli
+  const [isSelectionMode, setIsSelectionMode] = useState(false)
+  const [selectedBulkIds, setSelectedBulkIds] = useState<string[]>([])
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false)
 
   // Modal wsparcia / zrzutki
   const [showSupportModal, setShowSupportModal] = useState(false)
-  const [copiedBlik, setCopiedBlik] = useState(false)
 
   const [isAdding, setIsAdding] = useState(false)
   const [newFullName, setNewFullName] = useState("")
@@ -94,9 +159,20 @@ export default function PlayersPage() {
     fetchPlayers()
   }, [])
 
+  useLayoutEffect(() => {
+    const el = tabRefs.current[statusFilter]
+    if (el) {
+      setPillStyle({ left: el.offsetLeft, width: el.offsetWidth, top: el.offsetTop, height: el.offsetHeight })
+    }
+  }, [statusFilter, isLoading])
+
+  function notify(msg: string) {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3000)
+  }
+
   async function handleLogout() {
     localStorage.removeItem("volley_user")
-    localStorage.clear()
     sessionStorage.clear()
     await supabase.auth.signOut()
     setUser(null)
@@ -212,7 +288,7 @@ export default function PlayersPage() {
       .eq("id", player.id)
 
     if (error) {
-      alert(`Błąd aktualizacji: ${error.message}`)
+      notify(`Błąd aktualizacji: ${error.message}`)
     } else {
       setPlayers((prev) =>
         prev.map((p) =>
@@ -248,9 +324,12 @@ export default function PlayersPage() {
     )
   }
 
-  async function togglePlayerStatus(player: GlobalPlayer, e: React.MouseEvent) {
+  function togglePlayerStatus(player: GlobalPlayer, e: React.MouseEvent) {
     e.stopPropagation()
+    performStatusToggleConfirm([player])
+  }
 
+  async function performStatusToggleConfirm(targetPlayers: GlobalPlayer[]) {
     const { data: statusList } = await supabase
       .from("player_status")
       .select("*")
@@ -268,25 +347,101 @@ export default function PlayersPage() {
           s.name?.toLowerCase().includes("zawies")
       )?.id || (statusList && statusList.length > 1 ? statusList[1].id : 2)
 
-    const isCurrentlyActive = player.player_status_id === activeStatusId || !player.player_status_id
-    const targetStatusId = isCurrentlyActive ? inactiveStatusId : activeStatusId
+    if (targetPlayers.length === 1) {
+      const player = targetPlayers[0]
+      const isCurrentlyActive = player.player_status_id === activeStatusId || !player.player_status_id
+      const targetStatusId = isCurrentlyActive ? inactiveStatusId : activeStatusId
 
-    const actionText = isCurrentlyActive ? "dezaktywować (wyłączyć konto z powołań)" : "aktywować"
-    if (!confirm(`Czy na pewno chcesz ${actionText} zawodnika "${player.full_name}"?`)) return
+      setConfirmDialog({
+        title: isCurrentlyActive ? "Dezaktywować zawodnika?" : "Aktywować zawodnika?",
+        message: isCurrentlyActive
+          ? `"${player.full_name}" zniknie z listy powołań, dopóki nie aktywujesz konta ponownie.`
+          : `"${player.full_name}" wróci do puli aktywnych zawodników.`,
+        confirmLabel: isCurrentlyActive ? "Dezaktywuj" : "Aktywuj",
+        danger: isCurrentlyActive,
+        onConfirm: () => applyStatusChange([player.id], targetStatusId)
+      })
+    }
+  }
 
-    const { error } = await supabase
-      .from("players")
-      .update({ player_status_id: targetStatusId })
-      .eq("id", player.id)
+  async function applyStatusChange(ids: string[], targetStatusId: number) {
+    setConfirmDialog(null)
+    const { error } = await supabase.from("players").update({ player_status_id: targetStatusId }).in("id", ids)
 
     if (error) {
-      alert(`Błąd aktualizacji statusu: ${error.message}`)
+      notify(`Błąd aktualizacji statusu: ${error.message}`)
     } else {
+      notify(ids.length > 1 ? `Zaktualizowano status ${ids.length} zawodników.` : "Zaktualizowano status zawodnika.")
       await fetchPlayers()
     }
   }
 
-  async function approvePlayer(id: string) {
+  function handleBulkSetStatus(active: boolean) {
+    if (selectedBulkIds.length === 0) return
+    setConfirmDialog({
+      title: active ? "Aktywować zaznaczonych?" : "Dezaktywować zaznaczonych?",
+      message: `Zmiana obejmie ${selectedBulkIds.length} zaznaczonych zawodników.`,
+      confirmLabel: active ? "Aktywuj" : "Dezaktywuj",
+      danger: !active,
+      onConfirm: () => performBulkStatus(active)
+    })
+  }
+
+  async function performBulkStatus(active: boolean) {
+    setIsBulkProcessing(true)
+    const { data: statusList } = await supabase.from("player_status").select("*").order("id", { ascending: true })
+    const activeStatusId =
+      statusList?.find((s: any) => s.name?.toLowerCase().includes("aktyw") && !s.name?.toLowerCase().includes("nie"))?.id || 1
+    const inactiveStatusId =
+      statusList?.find(
+        (s: any) =>
+          s.name?.toLowerCase().includes("nieaktyw") ||
+          s.name?.toLowerCase().includes("zablok") ||
+          s.name?.toLowerCase().includes("zawies")
+      )?.id || (statusList && statusList.length > 1 ? statusList[1].id : 2)
+
+    await applyStatusChange(selectedBulkIds, active ? activeStatusId : inactiveStatusId)
+    setSelectedBulkIds([])
+    setIsSelectionMode(false)
+    setIsBulkProcessing(false)
+  }
+
+  function handleBulkDelete() {
+    if (selectedBulkIds.length === 0) return
+    setConfirmDialog({
+      title: "Usunąć zaznaczonych zawodników?",
+      message: `Ta operacja jest nieodwracalna. ${selectedBulkIds.length} zawodników zniknie z bazy razem ze statystykami.`,
+      confirmLabel: "Usuń trwale",
+      danger: true,
+      onConfirm: performBulkDelete
+    })
+  }
+
+  async function performBulkDelete() {
+    setConfirmDialog(null)
+    setIsBulkProcessing(true)
+    const { error } = await supabase.from("players").delete().in("id", selectedBulkIds)
+
+    if (error) {
+      notify(`Błąd usuwania: ${error.message}`)
+    } else {
+      notify(`Usunięto ${selectedBulkIds.length} zawodników z bazy.`)
+      setSelectedBulkIds([])
+      setIsSelectionMode(false)
+      await fetchPlayers()
+    }
+    setIsBulkProcessing(false)
+  }
+
+  function toggleBulkSelect(id: string) {
+    setSelectedBulkIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  function approvePlayer(id: string) {
+    performApprove(id)
+  }
+
+  async function performApprove(id: string) {
     const { data: statusList } = await supabase.from("player_status").select("*")
     const activeId =
       statusList?.find(
@@ -299,20 +454,31 @@ export default function PlayersPage() {
       .eq("id", id)
 
     if (error) {
-      alert(`Błąd zatwierdzania: ${error.message}`)
+      notify(`Błąd zatwierdzania: ${error.message}`)
     } else {
+      notify("Konto zatwierdzone.")
       fetchPlayers()
     }
   }
 
-  async function rejectPlayer(id: string) {
-    if (!confirm("Czy na pewno chcesz odrzucić i usunąć to zgłoszenie?")) return
+  function rejectPlayer(id: string, name: string) {
+    setConfirmDialog({
+      title: "Odrzucić zgłoszenie?",
+      message: `Zgłoszenie "${name}" zostanie trwale usunięte z bazy.`,
+      confirmLabel: "Odrzuć",
+      danger: true,
+      onConfirm: () => performReject(id)
+    })
+  }
 
+  async function performReject(id: string) {
+    setConfirmDialog(null)
     const { error } = await supabase.from("players").delete().eq("id", id)
 
     if (error) {
-      alert(`Błąd odrzucania: ${error.message}`)
+      notify(`Błąd odrzucania: ${error.message}`)
     } else {
+      notify("Zgłoszenie odrzucone.")
       fetchPlayers()
     }
   }
@@ -353,9 +519,9 @@ export default function PlayersPage() {
     ])
 
     if (error) {
-      console.error("Błąd zapisu w Supabase:", error.message)
-      alert(`Błąd zapisu w bazie danych: ${error.message}`)
+      notify(`Błąd zapisu w bazie danych: ${error.message}`)
     } else {
+      notify(`Dodano "${newFullName.trim()}" do bazy.`)
       setNewFullName("")
       setNewEmail("")
       setNewIsCore(false)
@@ -366,67 +532,109 @@ export default function PlayersPage() {
     setIsSubmitting(false)
   }
 
-  async function deletePlayer(id: string, e: React.MouseEvent) {
+  function deletePlayer(player: GlobalPlayer, e: React.MouseEvent) {
     e.stopPropagation()
+    setConfirmDialog({
+      title: "Usunąć zawodnika z bazy?",
+      message: `Ta operacja jest nieodwracalna. "${player.full_name}" zniknie również ze statystyk i historii meczów.`,
+      confirmLabel: "Usuń trwale",
+      danger: true,
+      onConfirm: () => performDeletePlayer(player.id)
+    })
+  }
 
-    const playerToDelete = players.find((p) => p.id === id)
-    if (!playerToDelete) return
-
-    if (
-      !confirm(
-        `Czy na pewno chcesz trwale usunąć zawodnika "${playerToDelete.full_name}" z bazy? Zniknie on również ze statystyk.`
-      )
-    )
-      return
-
+  async function performDeletePlayer(id: string) {
+    setConfirmDialog(null)
     const { error } = await supabase.from("players").delete().eq("id", id)
 
     if (error) {
-      console.error("Błąd podczas usuwania gracza:", error.message)
-      alert(`Błąd podczas usuwania z bazy: ${error.message}`)
+      notify(`Błąd podczas usuwania z bazy: ${error.message}`)
     } else {
+      notify("Zawodnik usunięty z bazy.")
       fetchPlayers()
     }
   }
 
   async function openPlayerHistory(player: GlobalPlayer) {
-    setSelectedPlayer(player)
-    setIsLoadingHistory(true)
-
-    const { data: matchesData } = await supabase.from("matches").select("*")
-
-    if (!matchesData) {
-      setPlayerHistory([])
-      setIsLoadingHistory(false)
+    if (isSelectionMode) {
+      toggleBulkSelect(player.id)
       return
     }
 
-    const history: PlayerHistory[] = []
-    const pId = String(player.id).toLowerCase().trim()
-    const pName = String(player.full_name).toLowerCase().trim()
+    setSelectedPlayer(player)
+    setIsLoadingHistory(true)
 
-    matchesData.forEach((m: any) => {
-      if (Array.isArray(m.players)) {
-        const found = m.players.find((p: any) => {
-          const matchPid = String(p.id || "").toLowerCase().trim()
-          const matchPName = String(p.name || p.full_name || "").toLowerCase().trim()
-          return (matchPid && matchPid === pId) || (matchPName && matchPName === pName)
-        })
+    // Historia rejestracji żyje w `match_registrations`, nie w polu `players` na `matches`
+    // (którego ta tabela w ogóle nie ma) — stąd poprzednio historia zawsze wychodziła pusta.
+    const [{ data: allRegs }, { data: matchesData }] = await Promise.all([
+      supabase.from("match_registrations").select("*"),
+      supabase.from("matches").select("*")
+    ])
 
-        if (found) {
-          history.push({
-            match_date: m.date || "Brak daty",
-            location: m.location || "Nieznana hala",
-            status: found.role === "waitlist" ? "Rezerwa" : "Główny skład",
-            paid: !!found.paid || !!found.is_paid,
-            fee: Number(m.price_per_player || 25),
-          })
-        }
-      }
+    const matchMap: Record<string, any> = {}
+    matchesData?.forEach((m: any) => { matchMap[m.id] = m })
+
+    const regsByMatch: Record<string, any[]> = {}
+    ;(allRegs || []).forEach((reg: any) => {
+      if (!regsByMatch[reg.match_id]) regsByMatch[reg.match_id] = []
+      regsByMatch[reg.match_id].push(reg)
     })
 
+    const history: PlayerHistory[] = []
+
+    Object.entries(regsByMatch).forEach(([matchId, regs]) => {
+      const m = matchMap[matchId]
+      if (!m) return
+
+      // Kolejność zapisu decyduje kto trafia do składu głównego, a kto na rezerwę — ta sama
+      // reguła co w lib/data.ts (mainRoster/waitlist)
+      const sorted = [...regs].sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime())
+      const myIndex = sorted.findIndex((r) => r.player_id === player.id)
+      if (myIndex === -1) return
+
+      const capacity = Number(m.capacity || m.max_players || 12)
+      const myReg = sorted[myIndex]
+
+      history.push({
+        match_date: m.date || "",
+        location: m.location || "Nieznana hala",
+        status: myIndex < capacity ? "Główny skład" : "Rezerwa",
+        paid: !!(myReg.paid || myReg.is_paid),
+        fee: Number(m.price_per_player || 25),
+      })
+    })
+
+    history.sort((a, b) => b.match_date.localeCompare(a.match_date))
     setPlayerHistory(history)
     setIsLoadingHistory(false)
+  }
+
+  function exportPlayersCsv() {
+    const header = ["Imię i nazwisko", "E-mail", "Status konta", "Stały skład", "Rozegrane mecze", "Suma wpłat (PLN)"]
+    const rows = players.map((p) => {
+      const isActive = p.player_status_id === 1 || !p.player_status_id
+      return [
+        p.full_name,
+        p.email || "",
+        isActive ? "Aktywny" : "Wyłączony",
+        p.is_core_roster ? "Tak" : "Nie",
+        String(p.matches_count || 0),
+        String(p.total_paid || 0)
+      ]
+    })
+
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(";"))
+      .join("\n")
+
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `zawodnicy_${new Date().toISOString().split("T")[0]}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    notify("Wyeksportowano listę zawodników.")
   }
 
   const activePlayers = players.filter((p) => p.player_status_id === 1 || !p.player_status_id)
@@ -448,20 +656,30 @@ export default function PlayersPage() {
     .filter((p) => !p.is_core_roster)
     .sort((a, b) => a.full_name.localeCompare(b.full_name))
 
-  const filteredPlayers = players.filter((p) => {
-    const matchesSearch =
-      p.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.email && p.email.toLowerCase().includes(searchQuery.toLowerCase()))
+  // Filtrowanie wyszukiwarką (fuzzy, tolerancyjna na literówki) — pozycja numeru w składzie
+  // głównym/rezerwie liczona jest z ORYGINALNEJ, nieprzefiltrowanej listy, żeby wyszukiwanie
+  // nie zaburzało numeracji kolejności powołań
+  function matchesSearch(p: GlobalPlayer): boolean {
+    return fuzzySearchMatch(buildPlayerSearchTokens(p), searchQuery)
+  }
 
+  const primaryCoreWithIdx = primaryCorePlayers.map((player, idx) => ({ player, idx })).filter(({ player }) => matchesSearch(player))
+  const reserveCoreWithIdx = reserveCorePlayers.map((player, rIdx) => ({ player, actualIdx: 12 + rIdx })).filter(({ player }) => matchesSearch(player))
+  const filteredNonCoreActive = nonCoreActivePlayers.filter(matchesSearch)
+
+  const filteredPlayers = players.filter((p) => {
+    if (!matchesSearch(p)) return false
     const isActive = p.player_status_id === 1 || !p.player_status_id
 
-    if (statusFilter === "active") return matchesSearch && isActive
-    if (statusFilter === "inactive") return matchesSearch && !isActive
-    return matchesSearch
+    if (statusFilter === "active") return isActive
+    if (statusFilter === "inactive") return !isActive
+    return true
   })
 
+  const visibleBulkIds = filteredPlayers.map((p) => p.id)
+
   return (
-    <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
+    <div className="flex min-h-screen bg-[#F5F6FA] text-[#14181F]">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -469,34 +687,39 @@ export default function PlayersPage() {
         onLogout={handleLogout}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* NAGŁÓWEK ZE WSPARCIEM */}
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-amber-200/50 bg-gradient-to-r from-amber-50/90 via-white/95 to-amber-50/90 px-6 py-3.5 backdrop-blur-md shadow-sm">
-          <div className="flex-1 flex items-center gap-3 overflow-hidden">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-slate-950 shadow-sm animate-pulse">
-              <Coffee className="h-4 w-4 stroke-[2.5]" />
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        <div
+          className="pointer-events-none absolute inset-0 z-0"
+          style={{
+            background:
+              "radial-gradient(640px circle at 10% -8%, rgba(44,75,255,0.07), transparent 60%), radial-gradient(520px circle at 92% 16%, rgba(255,210,63,0.10), transparent 55%), radial-gradient(760px circle at 45% 100%, rgba(0,196,140,0.05), transparent 60%)"
+          }}
+        />
+
+        {/* NAGŁÓWEK — ten sam wzorzec co reszta appki */}
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0">
+          <div className="flex-1 flex items-center gap-2.5 overflow-hidden">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120]">
+              <Coffee className="h-3.5 w-3.5 stroke-[2.5]" />
             </div>
 
-            <p className="text-xs font-semibold text-slate-700 truncate">
-              Podoba Ci się nasza inicjatywa?{" "}
-              <strong className="text-slate-900 font-bold">
-                Postaw kawę organizatorom lub wesprzyj rozwój projektu! ☕
-              </strong>
+            <p className="text-xs font-medium text-slate-500 truncate">
+              Podoba Ci się nasza inicjatywa? <strong className="text-slate-700 font-semibold">Postaw kawę organizatorom lub wesprzyj rozwój projektu!</strong>
             </p>
 
             <button
               onClick={() => setShowSupportModal(true)}
-              className="ml-auto hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs px-4 py-2 shadow-sm transition-all cursor-pointer hover:scale-105 shrink-0 border border-amber-400"
+              className="ml-auto hidden sm:inline-flex items-center gap-1.5 rounded-full bg-[#0B1120] hover:bg-[#1A2340] text-white font-bold text-xs px-4 py-2 shadow-sm transition-all cursor-pointer active:scale-[0.97] shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF] focus-visible:ring-offset-2"
             >
-              <Heart className="h-3.5 w-3.5 fill-slate-950 text-slate-950" />
+              <Heart className="h-3.5 w-3.5 fill-[#FFD23F] text-[#FFD23F]" />
               Postaw kawę
             </button>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0 ml-4">
+          <div className="flex items-center gap-3 shrink-0 ml-auto pl-4">
             <button
               onClick={() => setShowSupportModal(true)}
-              className="sm:hidden flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500 text-slate-950 shadow-sm"
+              className="sm:hidden flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120] shadow-sm cursor-pointer active:scale-90 transition-transform"
               title="Postaw kawę"
             >
               <Coffee className="h-4 w-4" />
@@ -506,14 +729,14 @@ export default function PlayersPage() {
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-8 lg:px-8">
+        <main className="relative z-10 mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-8 lg:px-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
-                <Users className="h-6 w-6 text-blue-600" />
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-[#2C4BFF] border border-slate-200 shadow-xs">
+                <Users className="h-5 w-5" />
               </div>
               <div>
-                <h1 className="text-xl font-black tracking-tight text-slate-900">Baza Zawodników</h1>
+                <h1 className={cn(display.className, "text-xl font-bold text-slate-900 tracking-tight")}>Baza Zawodników</h1>
                 <p className="text-xs text-slate-500 font-medium">
                   Zarządzaj kolejnością powołań, stałym składem i rezerwą meczową.
                 </p>
@@ -521,14 +744,23 @@ export default function PlayersPage() {
             </div>
 
             {isAdmin && (
-              <Button
-                size="sm"
-                className="gap-2 rounded-2xl font-black bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white cursor-pointer shadow-md shadow-blue-500/20 px-5 py-2.5 text-xs"
-                onClick={() => setIsAdding(true)}
-              >
-                <Plus className="h-4 w-4" />
-                Dodaj zawodnika do bazy
-              </Button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={exportPlayersCsv}
+                  className="h-10 rounded-2xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 px-4 cursor-pointer active:scale-[0.97] shadow-xs transition-all"
+                >
+                  <Download className="h-4 w-4" />
+                  Eksport CSV
+                </button>
+                <button
+                  onClick={() => setIsAdding(true)}
+                  className="h-10 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 text-white cursor-pointer active:scale-[0.97] shadow-md transition-all"
+                  style={{ background: COBALT, boxShadow: `0 4px 14px -4px ${COBALT}80` }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Dodaj zawodnika
+                </button>
+              </div>
             )}
           </div>
 
@@ -537,15 +769,28 @@ export default function PlayersPage() {
             <div className="relative w-full max-w-md">
               <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
-                type="search"
+                type="text"
                 placeholder="Szukaj zawodnika po imieniu lub e-mailu..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-xs font-medium outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all"
+                className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-9 text-xs font-medium outline-none placeholder:text-slate-400 focus:border-[#2C4BFF] focus:ring-2 focus:ring-[#2C4BFF]/20 shadow-xs transition-all"
               />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  title="Wyczyść wyszukiwanie"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80">
+            <div className="relative flex items-center gap-1.5 overflow-x-auto bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80">
+              <div
+                className="absolute rounded-xl bg-[#0B1120] shadow-md transition-all duration-300 ease-out"
+                style={{ left: pillStyle.left, width: pillStyle.width, top: pillStyle.top, height: pillStyle.height }}
+              />
               {[
                 { id: "core", label: `Stały skład (${allCorePlayersSorted.length})` },
                 { id: "active", label: "Aktywni" },
@@ -554,12 +799,11 @@ export default function PlayersPage() {
               ].map((tab) => (
                 <button
                   key={tab.id}
+                  ref={(el) => { tabRefs.current[tab.id] = el }}
                   onClick={() => setStatusFilter(tab.id as any)}
                   className={cn(
-                    "rounded-xl px-4 py-2 text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
-                    statusFilter === tab.id
-                      ? "bg-blue-600 text-white shadow-md shadow-blue-500/20 font-black"
-                      : "text-slate-600 hover:text-slate-900"
+                    "relative z-10 rounded-xl px-4 py-2 text-xs font-bold transition-colors duration-300 cursor-pointer active:scale-[0.97] whitespace-nowrap",
+                    statusFilter === tab.id ? "text-white" : "text-slate-600 hover:text-slate-900"
                   )}
                 >
                   {tab.label}
@@ -570,10 +814,10 @@ export default function PlayersPage() {
 
           {/* KAFEL ZGŁOSZEŃ OCZEKUJĄCYCH */}
           {isAdmin && pendingPlayers.length > 0 && (
-            <div className="rounded-3xl border border-amber-300 bg-amber-50/80 p-5 space-y-3 shadow-sm">
+            <div className="rounded-[28px] border border-[#FFD23F]/40 bg-[#FFD23F]/[0.08] p-5 space-y-3 shadow-xs animate-in fade-in slide-in-from-top-2 duration-400">
               <div className="flex items-center justify-between">
-                <h2 className="text-xs font-black uppercase tracking-wider text-amber-900 flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-amber-600" />
+                <h2 className="text-xs font-black uppercase tracking-wider text-[#7A5C00] flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
                   Konta oczekujące na zatwierdzenie ({pendingPlayers.length})
                 </h2>
               </div>
@@ -582,7 +826,7 @@ export default function PlayersPage() {
                 {pendingPlayers.map((p) => (
                   <div
                     key={p.id}
-                    className="flex items-center justify-between bg-white p-3.5 rounded-2xl border border-amber-200 shadow-sm text-xs font-bold"
+                    className="flex items-center justify-between bg-white p-3.5 rounded-2xl border border-[#FFD23F]/30 shadow-xs text-xs font-bold"
                   >
                     <div>
                       <p className="text-slate-900 font-extrabold">{p.full_name}</p>
@@ -590,21 +834,19 @@ export default function PlayersPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
+                      <button
                         onClick={() => approvePlayer(p.id)}
-                        className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] gap-1.5 h-8 px-3 cursor-pointer shadow-sm"
+                        className="rounded-xl text-white font-bold text-[11px] gap-1.5 h-8 px-3 cursor-pointer active:scale-[0.96] shadow-xs flex items-center transition-transform"
+                        style={{ background: MINT }}
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" /> Zatwierdź
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => rejectPlayer(p.id)}
-                        className="rounded-xl hover:bg-rose-50 text-rose-600 font-bold text-[11px] h-8 px-3 cursor-pointer"
+                      </button>
+                      <button
+                        onClick={() => rejectPlayer(p.id, p.full_name)}
+                        className="rounded-xl hover:bg-[#FF5A5F]/10 text-[#FF5A5F] font-bold text-[11px] h-8 px-3 cursor-pointer active:scale-[0.96] transition-all"
                       >
                         Odrzuć
-                      </Button>
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -612,61 +854,71 @@ export default function PlayersPage() {
             </div>
           )}
 
-          {/* PIONOWY, KOLOROWY I PRZEJRZYSTY WIDOK STAŁEGO SKŁADU */}
+          {/* WIDOK STAŁEGO SKŁADU */}
           {statusFilter === "core" ? (
             <div className="space-y-7">
-              {/* Podsumowanie z gradientem */}
-              <div className="rounded-3xl border border-blue-200/80 bg-gradient-to-br from-blue-50/90 via-indigo-50/40 to-white p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
-                    <ShieldCheck className="h-5 w-5 text-blue-600" />
-                    Kolejność Powołań i Stała Rezerwa
-                  </h2>
-                  <p className="text-xs text-slate-600 font-medium">
-                    Gracze wchodzą na mecze ściśle według pozycji od #1 do #12. Jeśli ktoś wypadnie ze składu, automatycznie wchodzi gracz R1.
-                  </p>
-                </div>
+              {/* Podsumowanie — ciemna karta w stylu hero */}
+              <div
+                className="relative overflow-hidden rounded-[28px] p-5 sm:p-6 text-white shadow-[0_24px_60px_-24px_rgba(11,17,32,0.55)] border border-white/10 animate-in fade-in slide-in-from-top-3 duration-500 fill-mode-both"
+                style={{ background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)` }}
+              >
+                <div className="absolute inset-0 pointer-events-none opacity-70" style={netPattern} />
+                <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <h2 className="text-base font-bold text-white flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5 text-[#FFD23F]" />
+                      Kolejność Powołań i Stała Rezerwa
+                    </h2>
+                    <p className="text-xs text-slate-300 font-medium max-w-md">
+                      Gracze wchodzą na mecze ściśle według pozycji od #1 do #12. Jeśli ktoś wypadnie ze składu, automatycznie wchodzi gracz R1.
+                    </p>
+                  </div>
 
-                <div className="flex items-center gap-2.5 text-xs font-black shrink-0">
-                  <span className="px-3.5 py-2 rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-600/20">
-                    Skład główny: {primaryCorePlayers.length}/12
-                  </span>
-                  {reserveCorePlayers.length > 0 && (
-                    <span className="px-3.5 py-2 rounded-2xl bg-purple-600 text-white shadow-md shadow-purple-600/20">
-                      Rezerwa: +{reserveCorePlayers.length}
+                  <div className="flex items-center gap-2.5 text-xs font-black shrink-0">
+                    <span className="px-3.5 py-2 rounded-2xl text-white shadow-md" style={{ background: COBALT, boxShadow: `0 4px 14px -4px ${COBALT}99` }}>
+                      Skład główny: <CountUp value={primaryCorePlayers.length} />/12
                     </span>
-                  )}
+                    {reserveCorePlayers.length > 0 && (
+                      <span className="px-3.5 py-2 rounded-2xl text-white shadow-md" style={{ background: VIOLET, boxShadow: `0 4px 14px -4px ${VIOLET}99` }}>
+                        Rezerwa: +<CountUp value={reserveCorePlayers.length} />
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* 1. PIONOWY SKŁAD GŁÓWNY (1-12) */}
+              {/* 1. SKŁAD GŁÓWNY (1-12) */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between px-1">
-                  <h3 className="text-xs font-black uppercase tracking-wider text-blue-900 flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-blue-600 animate-pulse" />
+                  <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#2C4BFF]" />
                     Skład Główny ({primaryCorePlayers.length}/12)
                   </h3>
                   <span className="text-[11px] font-bold text-slate-400">Pozycje powołane z automatu</span>
                 </div>
 
-                {primaryCorePlayers.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-8 text-center text-xs text-slate-400 font-medium">
-                    Brak zawodników w składzie głównym. Wybierz graczy z listy poniżej.
+                {primaryCoreWithIdx.length === 0 ? (
+                  <div className="rounded-[28px] border border-dashed border-slate-300 bg-white p-8 text-center text-xs text-slate-400 font-medium">
+                    {searchQuery ? "Brak wyników dla podanej frazy." : "Brak zawodników w składzie głównym. Wybierz graczy z listy poniżej."}
                   </div>
                 ) : (
                   <div className="flex flex-col space-y-2.5">
-                    {primaryCorePlayers.map((player, idx) => (
+                    {primaryCoreWithIdx.map(({ player, idx }) => (
                       <div
                         key={player.id}
                         onClick={() => openPlayerHistory(player)}
-                        className="flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-blue-50/70 via-white to-white border border-blue-200/90 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group"
+                        style={{ animationDelay: `${Math.min(idx, 10) * 35}ms` }}
+                        className="group flex items-center justify-between p-3.5 sm:p-4 rounded-[20px] bg-white border border-l-4 border-slate-200/90 border-l-[#2C4BFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both"
                       >
                         <div className="flex items-center gap-3.5 min-w-0">
-                          <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-blue-600 text-white font-black text-xs shrink-0 shadow-md shadow-blue-600/20 group-hover:scale-105 transition-transform">
+                          <span
+                            className={cn(score.className, "flex h-9 w-9 items-center justify-center rounded-2xl text-white font-semibold text-xs shrink-0 shadow-md group-hover:scale-105 transition-transform")}
+                            style={{ background: COBALT, boxShadow: `0 4px 10px -3px ${COBALT}99` }}
+                          >
                             {idx + 1}
                           </span>
                           <div className="min-w-0">
-                            <p className="font-extrabold text-sm text-slate-900 group-hover:text-blue-600 transition-colors truncate">
+                            <p className="font-bold text-sm text-slate-900 group-hover:text-[#2C4BFF] transition-colors truncate">
                               {player.full_name}
                             </p>
                             <p className="text-xs text-slate-400 truncate">{player.email}</p>
@@ -675,12 +927,11 @@ export default function PlayersPage() {
 
                         {isAdmin && (
                           <div className="flex items-center gap-2 shrink-0 ml-3">
-                            {/* Bardzo wyraźne, klikalne przyciski góra/dół */}
-                            <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+                            <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
                               <button
                                 disabled={idx === 0}
                                 onClick={(e) => moveCoreOrder(idx, "up", e)}
-                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-600 hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-blue-600 cursor-pointer"
+                                className="p-1.5 rounded-lg text-[#2C4BFF] hover:bg-[#2C4BFF] hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-[#2C4BFF] cursor-pointer active:scale-90"
                                 title="Przesuń wyżej"
                               >
                                 <ArrowUp className="h-4 w-4 stroke-[2.5]" />
@@ -688,7 +939,7 @@ export default function PlayersPage() {
                               <button
                                 disabled={idx === allCorePlayersSorted.length - 1}
                                 onClick={(e) => moveCoreOrder(idx, "down", e)}
-                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-600 hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-blue-600 cursor-pointer"
+                                className="p-1.5 rounded-lg text-[#2C4BFF] hover:bg-[#2C4BFF] hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-[#2C4BFF] cursor-pointer active:scale-90"
                                 title="Przesuń niżej"
                               >
                                 <ArrowDown className="h-4 w-4 stroke-[2.5]" />
@@ -697,7 +948,7 @@ export default function PlayersPage() {
 
                             <button
                               onClick={(e) => toggleCoreRoster(player, e)}
-                              className="text-xs font-black text-rose-700 bg-rose-50 hover:bg-rose-600 hover:text-white border border-rose-200 px-3 py-2 rounded-xl transition-all cursor-pointer shadow-sm hover:scale-105"
+                              className="text-xs font-bold text-[#FF5A5F] bg-[#FF5A5F]/10 hover:bg-[#FF5A5F] hover:text-white border border-[#FF5A5F]/20 px-3 py-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-xs"
                               title="Usuń ze stałego składu"
                             >
                               Usuń
@@ -710,93 +961,94 @@ export default function PlayersPage() {
                 )}
               </div>
 
-              {/* 2. PIONOWA LISTA REZERWOWA (13+) */}
-              {reserveCorePlayers.length > 0 && (
+              {/* 2. LISTA REZERWOWA (13+) */}
+              {reserveCoreWithIdx.length > 0 && (
                 <div className="space-y-3 pt-2">
                   <div className="flex items-center justify-between px-1">
-                    <h3 className="text-xs font-black uppercase tracking-wider text-purple-900 flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-purple-600" />
+                    <h3 className="text-[11px] font-black uppercase tracking-wider text-[#4B2FB0] flex items-center gap-2">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#7A5CFF]" />
                       Stała Lista Rezerwowa ({reserveCorePlayers.length})
                     </h3>
-                    <span className="text-[11px] font-bold text-purple-600">Wchodzą w tej kolejności w razie nieobecności</span>
+                    <span className="text-[11px] font-bold text-[#7A5CFF]">Wchodzą w tej kolejności w razie nieobecności</span>
                   </div>
 
                   <div className="flex flex-col space-y-2.5">
-                    {reserveCorePlayers.map((player, rIdx) => {
-                      const actualIdx = 12 + rIdx
-                      return (
-                        <div
-                          key={player.id}
-                          onClick={() => openPlayerHistory(player)}
-                          className="flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-purple-50/80 via-white to-white border border-purple-200 shadow-sm hover:border-purple-400 hover:shadow-md transition-all cursor-pointer group"
-                        >
-                          <div className="flex items-center gap-3.5 min-w-0">
-                            <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-purple-600 text-white font-black text-xs shrink-0 shadow-md shadow-purple-600/20 group-hover:scale-105 transition-transform">
-                              R{rIdx + 1}
-                            </span>
-                            <div className="min-w-0">
-                              <p className="font-extrabold text-sm text-slate-900 group-hover:text-purple-600 transition-colors truncate">
-                                {player.full_name}
-                              </p>
-                              <p className="text-xs text-purple-400 truncate">{player.email}</p>
-                            </div>
+                    {reserveCoreWithIdx.map(({ player, actualIdx }, rIdx) => (
+                      <div
+                        key={player.id}
+                        onClick={() => openPlayerHistory(player)}
+                        style={{ animationDelay: `${Math.min(rIdx, 10) * 35}ms` }}
+                        className="group flex items-center justify-between p-3.5 sm:p-4 rounded-[20px] bg-white border border-l-4 border-slate-200/90 border-l-[#7A5CFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both"
+                      >
+                        <div className="flex items-center gap-3.5 min-w-0">
+                          <span
+                            className={cn(score.className, "flex h-9 w-9 items-center justify-center rounded-2xl text-white font-semibold text-xs shrink-0 shadow-md group-hover:scale-105 transition-transform")}
+                            style={{ background: VIOLET, boxShadow: `0 4px 10px -3px ${VIOLET}99` }}
+                          >
+                            R{actualIdx - 11}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="font-bold text-sm text-slate-900 group-hover:text-[#7A5CFF] transition-colors truncate">
+                              {player.full_name}
+                            </p>
+                            <p className="text-xs text-[#7A5CFF]/70 truncate">{player.email}</p>
                           </div>
+                        </div>
 
-                          {isAdmin && (
-                            <div className="flex items-center gap-2 shrink-0 ml-3">
-                              <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-purple-200 shadow-sm">
-                                <button
-                                  onClick={(e) => moveCoreOrder(actualIdx, "up", e)}
-                                  className="p-1.5 rounded-lg text-purple-600 hover:bg-purple-600 hover:text-white transition-all cursor-pointer"
-                                  title="Przesuń wyżej"
-                                >
-                                  <ArrowUp className="h-4 w-4 stroke-[2.5]" />
-                                </button>
-                                <button
-                                  disabled={actualIdx === allCorePlayersSorted.length - 1}
-                                  onClick={(e) => moveCoreOrder(actualIdx, "down", e)}
-                                  className="p-1.5 rounded-lg text-purple-600 hover:bg-purple-600 hover:text-white transition-all disabled:opacity-20 cursor-pointer"
-                                  title="Przesuń niżej"
-                                >
-                                  <ArrowDown className="h-4 w-4 stroke-[2.5]" />
-                                </button>
-                              </div>
-
+                        {isAdmin && (
+                          <div className="flex items-center gap-2 shrink-0 ml-3">
+                            <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
                               <button
-                                onClick={(e) => toggleCoreRoster(player, e)}
-                                className="text-xs font-black text-rose-700 bg-rose-50 hover:bg-rose-600 hover:text-white border border-rose-200 px-3 py-2 rounded-xl transition-all cursor-pointer shadow-sm hover:scale-105"
-                                title="Usuń z rezerwy"
+                                onClick={(e) => moveCoreOrder(actualIdx, "up", e)}
+                                className="p-1.5 rounded-lg text-[#7A5CFF] hover:bg-[#7A5CFF] hover:text-white transition-all cursor-pointer active:scale-90"
+                                title="Przesuń wyżej"
                               >
-                                Usuń
+                                <ArrowUp className="h-4 w-4 stroke-[2.5]" />
+                              </button>
+                              <button
+                                disabled={actualIdx === allCorePlayersSorted.length - 1}
+                                onClick={(e) => moveCoreOrder(actualIdx, "down", e)}
+                                className="p-1.5 rounded-lg text-[#7A5CFF] hover:bg-[#7A5CFF] hover:text-white transition-all disabled:opacity-20 cursor-pointer active:scale-90"
+                                title="Przesuń niżej"
+                              >
+                                <ArrowDown className="h-4 w-4 stroke-[2.5]" />
                               </button>
                             </div>
-                          )}
-                        </div>
-                      )
-                    })}
+
+                            <button
+                              onClick={(e) => toggleCoreRoster(player, e)}
+                              className="text-xs font-bold text-[#FF5A5F] bg-[#FF5A5F]/10 hover:bg-[#FF5A5F] hover:text-white border border-[#FF5A5F]/20 px-3 py-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-xs"
+                              title="Usuń z rezerwy"
+                            >
+                              Usuń
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
 
-              {/* 3. POZOSTALI AKTYWNI GRACZE DO DODANIA (PIONOWA LISTA) */}
-              {isAdmin && nonCoreActivePlayers.length > 0 && (
+              {/* 3. POZOSTALI AKTYWNI GRACZE DO DODANIA */}
+              {isAdmin && filteredNonCoreActive.length > 0 && (
                 <div className="space-y-3 pt-5 border-t border-slate-200">
                   <div className="flex items-center justify-between px-1">
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-2">
-                      <UserPlus className="h-4 w-4 text-blue-600" />
-                      Pozostali aktywni gracze ({nonCoreActivePlayers.length})
+                    <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                      <UserPlus className="h-4 w-4 text-[#2C4BFF]" />
+                      Pozostali aktywni gracze ({filteredNonCoreActive.length})
                     </h3>
                     <span className="text-[11px] font-bold text-slate-400">Kliknij dodaj, aby dołączyć na koniec kolejki</span>
                   </div>
 
                   <div className="flex flex-col space-y-2">
-                    {nonCoreActivePlayers.map((player) => (
+                    {filteredNonCoreActive.map((player) => (
                       <div
                         key={player.id}
-                        className="flex items-center justify-between p-3 sm:p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:border-blue-300 transition-all"
+                        className="flex items-center justify-between p-3 sm:p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition-all"
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-600 font-black text-xs shrink-0 border border-slate-200">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-500 font-bold text-xs shrink-0 border border-slate-200">
                             {player.full_name?.charAt(0).toUpperCase()}
                           </span>
                           <div className="min-w-0">
@@ -807,7 +1059,8 @@ export default function PlayersPage() {
 
                         <button
                           onClick={(e) => toggleCoreRoster(player, e)}
-                          className="flex items-center gap-1.5 text-xs font-black text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-500/20 hover:scale-105 shrink-0 ml-2"
+                          className="flex items-center gap-1.5 text-xs font-bold text-white px-3.5 py-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-xs shrink-0 ml-2"
+                          style={{ background: COBALT }}
                         >
                           <Plus className="h-4 w-4 stroke-[2.5]" /> Dodaj
                         </button>
@@ -819,351 +1072,484 @@ export default function PlayersPage() {
             </div>
           ) : (
             /* STANDARDOWA TABELA */
-            isLoading ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
-                <p className="text-xs text-blue-600 font-bold animate-pulse">
-                  Ładowanie bazy zawodników...
-                </p>
-              </div>
-            ) : filteredPlayers.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
-                <p className="text-xs text-slate-400 font-medium">
-                  Brak zawodników w tej kategorii.
-                </p>
-              </div>
-            ) : (
-              <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-400 bg-slate-50/50">
-                      <th className="px-6 py-4 font-bold">Zawodnik</th>
-                      <th className="px-6 py-4 font-bold">Stały skład</th>
-                      <th className="px-6 py-4 font-bold">Status konta</th>
-                      <th className="px-6 py-4 font-bold">Rozegrane mecze</th>
-                      <th className="px-6 py-4 font-bold">Suma wpłat</th>
-                      {isAdmin && <th className="px-6 py-4 text-right font-bold">Akcje</th>}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredPlayers.map((player) => {
-                      const isCurrentUser =
-                        user?.id === player.id ||
-                        user?.email?.toLowerCase() === player.email?.toLowerCase() ||
-                        user?.full_name?.toLowerCase() === player.full_name?.toLowerCase() ||
-                        user?.name?.toLowerCase() === player.full_name?.toLowerCase()
+            <div className="space-y-3">
+              {isAdmin && (
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => {
+                      setIsSelectionMode(!isSelectionMode)
+                      setSelectedBulkIds([])
+                    }}
+                    className={cn(
+                      "h-9 rounded-xl font-bold text-xs flex items-center gap-2 px-3.5 cursor-pointer active:scale-[0.97] shadow-xs transition-all border",
+                      isSelectionMode
+                        ? "bg-[#0B1120] text-white border-[#0B1120]"
+                        : "border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
+                    )}
+                  >
+                    <CheckSquare className={cn("h-3.5 w-3.5", isSelectionMode ? "text-[#FFD23F]" : "text-slate-500")} />
+                    {isSelectionMode ? "Anuluj zaznaczanie" : "Zarządzaj / Zaznacz"}
+                  </button>
+                  {isSelectionMode && (
+                    <button
+                      onClick={() =>
+                        setSelectedBulkIds((prev) => (prev.length === visibleBulkIds.length ? [] : visibleBulkIds))
+                      }
+                      className="text-xs font-bold text-[#2C4BFF] hover:text-[#1D3AE8] cursor-pointer"
+                    >
+                      {selectedBulkIds.length === visibleBulkIds.length ? "Odznacz wszystkich" : "Zaznacz wszystkich widocznych"}
+                    </button>
+                  )}
+                </div>
+              )}
 
-                      const isActive = player.player_status_id === 1 || !player.player_status_id
+              {isLoading ? (
+                <div className="space-y-2">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white p-4 animate-pulse" style={{ animationDelay: `${i * 100}ms` }}>
+                      <div className="h-9 w-9 shrink-0 rounded-xl bg-slate-100" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-3.5 w-40 rounded-md bg-slate-100" />
+                        <div className="h-3 w-56 rounded-md bg-slate-100" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : filteredPlayers.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 rounded-[28px] border border-dashed border-slate-300 bg-white p-12 text-center">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                    <Search className="h-5 w-5" />
+                  </div>
+                  <p className="text-xs font-semibold text-slate-500">
+                    {searchQuery ? `Brak wyników dla „${searchQuery}”.` : "Brak zawodników w tej kategorii."}
+                  </p>
+                </div>
+              ) : (
+                <>
+                <div className="hidden md:block overflow-hidden overflow-x-auto rounded-[28px] border border-slate-200 bg-white shadow-xs animate-in fade-in duration-300">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-400 bg-slate-50/50">
+                        {isSelectionMode && <th className="px-4 py-4 w-8" />}
+                        <th className="px-6 py-4 font-bold">Zawodnik</th>
+                        <th className="px-6 py-4 font-bold">Stały skład</th>
+                        <th className="px-6 py-4 font-bold">Status konta</th>
+                        <th className="px-6 py-4 font-bold">Rozegrane mecze</th>
+                        <th className="px-6 py-4 font-bold">Suma wpłat</th>
+                        {isAdmin && !isSelectionMode && <th className="px-6 py-4 text-right font-bold">Akcje</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredPlayers.map((player) => {
+                        const isCurrentUser =
+                          user?.id === player.id ||
+                          user?.email?.toLowerCase() === player.email?.toLowerCase() ||
+                          user?.full_name?.toLowerCase() === player.full_name?.toLowerCase() ||
+                          user?.name?.toLowerCase() === player.full_name?.toLowerCase()
 
-                      return (
-                        <tr
-                          key={player.id}
-                          onClick={() => openPlayerHistory(player)}
-                          className={cn(
-                            "group transition-all cursor-pointer",
-                            !isActive && "opacity-60 bg-slate-50/50",
-                            isCurrentUser
-                              ? "bg-blue-50/80 hover:bg-blue-100/80 font-semibold"
-                              : "hover:bg-slate-50"
-                          )}
-                        >
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <span
-                                className={cn(
-                                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-black text-xs border",
-                                  !isActive
-                                    ? "bg-slate-100 text-slate-400 border-slate-200"
-                                    : isCurrentUser
-                                    ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                                    : "bg-blue-50 text-blue-600 border-blue-100"
-                                )}
-                              >
-                                {player.full_name?.charAt(0).toUpperCase()}
-                              </span>
-                              <div>
-                                <p
-                                  className={cn(
-                                    "font-bold transition-colors flex items-center gap-1.5",
-                                    isCurrentUser
-                                      ? "text-blue-600 font-extrabold"
-                                      : "text-slate-900 group-hover:text-blue-600"
-                                  )}
-                                >
-                                  <span>{player.full_name}</span>
-                                  {isCurrentUser && (
-                                    <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-blue-700">
-                                      (Ty)
-                                    </span>
-                                  )}
-                                </p>
-                                <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-                                  <Mail className="h-3 w-3 text-slate-400" />
-                                  {player.email}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
+                        const isActive = player.player_status_id === 1 || !player.player_status_id
+                        const isChecked = selectedBulkIds.includes(player.id)
 
-                          <td className="px-6 py-4">
-                            {isAdmin ? (
-                              <button
-                                onClick={(e) => toggleCoreRoster(player, e)}
-                                className={cn(
-                                  "inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer",
-                                  player.is_core_roster
-                                    ? "bg-blue-50 text-blue-700 border-blue-200 shadow-sm hover:bg-blue-100"
-                                    : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600"
-                                )}
-                              >
-                                <ShieldCheck
-                                  className={cn(
-                                    "h-3.5 w-3.5",
-                                    player.is_core_roster
-                                      ? "text-blue-600"
-                                      : "text-slate-300"
-                                  )}
-                                />
-                                {player.is_core_roster ? "Stały skład" : "Zwykły"}
-                              </button>
-                            ) : (
-                              <span
-                                className={cn(
-                                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-bold border",
-                                  player.is_core_roster
-                                    ? "bg-blue-50 text-blue-700 border-blue-200"
-                                    : "bg-slate-50 text-slate-400 border-slate-200"
-                                )}
-                              >
-                                {player.is_core_roster ? "Stały skład" : "Standardowy"}
-                              </span>
+                        return (
+                          <tr
+                            key={player.id}
+                            onClick={() => openPlayerHistory(player)}
+                            className={cn(
+                              "group transition-all cursor-pointer",
+                              !isActive && "opacity-60 bg-slate-50/50",
+                              isChecked && "bg-[#2C4BFF]/[0.05]",
+                              isCurrentUser && !isChecked
+                                ? "bg-[#2C4BFF]/[0.05] hover:bg-[#2C4BFF]/[0.08] font-semibold"
+                                : "hover:bg-slate-50"
                             )}
-                          </td>
-
-                          <td className="px-6 py-4">
-                            <span
-                              className={cn(
-                                "inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-extrabold border",
-                                isActive
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200/80"
-                                  : "bg-slate-100 text-slate-500 border-slate-200"
-                              )}
-                            >
-                              {isActive ? <UserCheck className="h-3 w-3" /> : <UserX className="h-3 w-3" />}
-                              {isActive ? "Aktywny" : "Wyłączony"}
-                            </span>
-                          </td>
-
-                          <td className="px-6 py-4">
-                            <Badge
-                              tone={
-                                player.matches_count && player.matches_count > 0
-                                  ? "success"
-                                  : "neutral"
-                              }
-                            >
-                              {player.matches_count || 0}{" "}
-                              {player.matches_count === 1 ? "mecz" : "meczy"}
-                            </Badge>
-                          </td>
-
-                          <td className="px-6 py-4 font-bold text-slate-900">
-                            <span className="text-emerald-600">{player.total_paid || 0} PLN</span>
-                          </td>
-
-                          {isAdmin && (
-                            <td className="px-6 py-4 text-right">
-                              <div className="flex items-center justify-end gap-1.5">
-                                <button
-                                  onClick={(e) => togglePlayerStatus(player, e)}
+                          >
+                            {isSelectionMode && (
+                              <td className="px-4 py-4">
+                                <div
+                                  onClick={(e) => { e.stopPropagation(); toggleBulkSelect(player.id) }}
                                   className={cn(
-                                    "rounded-xl p-2 transition-all cursor-pointer border",
-                                    isActive
-                                      ? "bg-slate-50 text-slate-400 hover:bg-amber-50 hover:text-amber-600 border-slate-200"
-                                      : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-200"
+                                    "flex h-6 w-6 items-center justify-center rounded-lg border cursor-pointer transition-all",
+                                    isChecked ? "bg-[#2C4BFF] border-[#2C4BFF] text-white" : "bg-white border-slate-300 text-transparent hover:border-[#2C4BFF]"
                                   )}
-                                  title={
-                                    isActive
-                                      ? "Wyłącz konto (ukryj z powołań)"
-                                      : "Włącz konto ponownie"
-                                  }
                                 >
-                                  <Power className="h-4 w-4" />
-                                </button>
-
-                                <button
-                                  onClick={(e) => deletePlayer(player.id, e)}
-                                  className="rounded-xl p-2 text-slate-400 transition-all hover:bg-rose-50 hover:text-rose-600 border border-slate-200 cursor-pointer"
-                                  title="Usuń trwale z bazy"
+                                  {isChecked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                                </div>
+                              </td>
+                            )}
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <span
+                                  className={cn(
+                                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-bold text-xs border",
+                                    !isActive
+                                      ? "bg-slate-100 text-slate-400 border-slate-200"
+                                      : isCurrentUser
+                                      ? "bg-[#2C4BFF] text-white border-[#2C4BFF] shadow-xs"
+                                      : "bg-[#2C4BFF]/10 text-[#2C4BFF] border-[#2C4BFF]/20"
+                                  )}
                                 >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
+                                  {player.full_name?.charAt(0).toUpperCase()}
+                                </span>
+                                <div>
+                                  <p
+                                    className={cn(
+                                      "font-bold transition-colors flex items-center gap-1.5",
+                                      isCurrentUser ? "text-[#2C4BFF] font-extrabold" : "text-slate-900 group-hover:text-[#2C4BFF]"
+                                    )}
+                                  >
+                                    <span>{player.full_name}</span>
+                                    {isCurrentUser && (
+                                      <span className="rounded-md bg-[#2C4BFF]/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-[#2C4BFF]">
+                                        (Ty)
+                                      </span>
+                                    )}
+                                  </p>
+                                  <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                                    <Mail className="h-3 w-3 text-slate-400" />
+                                    {player.email}
+                                  </p>
+                                </div>
                               </div>
                             </td>
+
+                            <td className="px-6 py-4">
+                              {isAdmin ? (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); toggleCoreRoster(player, e) }}
+                                  className={cn(
+                                    "inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer active:scale-95",
+                                    player.is_core_roster
+                                      ? "bg-[#2C4BFF]/10 text-[#1D3AE8] border-[#2C4BFF]/25 hover:bg-[#2C4BFF]/20"
+                                      : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600"
+                                  )}
+                                >
+                                  <ShieldCheck className={cn("h-3.5 w-3.5", player.is_core_roster ? "text-[#2C4BFF]" : "text-slate-300")} />
+                                  {player.is_core_roster ? "Stały skład" : "Zwykły"}
+                                </button>
+                              ) : (
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-bold border",
+                                    player.is_core_roster ? "bg-[#2C4BFF]/10 text-[#1D3AE8] border-[#2C4BFF]/25" : "bg-slate-50 text-slate-400 border-slate-200"
+                                  )}
+                                >
+                                  {player.is_core_roster ? "Stały skład" : "Standardowy"}
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="px-6 py-4">
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-extrabold border",
+                                  isActive ? "bg-[#00C48C]/10 text-[#00875F] border-[#00C48C]/25" : "bg-slate-100 text-slate-500 border-slate-200"
+                                )}
+                              >
+                                {isActive ? <UserCheck className="h-3 w-3" /> : <UserX className="h-3 w-3" />}
+                                {isActive ? "Aktywny" : "Wyłączony"}
+                              </span>
+                            </td>
+
+                            <td className="px-6 py-4">
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold",
+                                  player.matches_count && player.matches_count > 0
+                                    ? "bg-[#00C48C]/10 text-[#00875F]"
+                                    : "bg-slate-100 text-slate-500"
+                                )}
+                              >
+                                {player.matches_count || 0} {player.matches_count === 1 ? "mecz" : "meczy"}
+                              </span>
+                            </td>
+
+                            <td className="px-6 py-4 font-bold text-slate-900">
+                              <span className="text-[#00875F]">{player.total_paid || 0} PLN</span>
+                            </td>
+
+                            {isAdmin && !isSelectionMode && (
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={(e) => togglePlayerStatus(player, e)}
+                                    className={cn(
+                                      "rounded-xl p-2 transition-all cursor-pointer active:scale-90 border",
+                                      isActive
+                                        ? "bg-slate-50 text-slate-400 hover:bg-[#FFD23F]/15 hover:text-[#946E00] border-slate-200"
+                                        : "bg-[#00C48C]/10 text-[#00875F] hover:bg-[#00C48C]/20 border-[#00C48C]/25"
+                                    )}
+                                    title={isActive ? "Wyłącz konto (ukryj z powołań)" : "Włącz konto ponownie"}
+                                  >
+                                    <Power className="h-4 w-4" />
+                                  </button>
+
+                                  <button
+                                    onClick={(e) => deletePlayer(player, e)}
+                                    className="rounded-xl p-2 text-slate-400 transition-all hover:bg-[#FF5A5F]/10 hover:text-[#FF5A5F] border border-slate-200 cursor-pointer active:scale-90"
+                                    title="Usuń trwale z bazy"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            )}
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Wersja kartowa na mobile — tabela z 6 kolumnami nie mieści się na wąskim ekranie
+                    bez ukrywania większości danych za poziomym scrollem */}
+                <div className="md:hidden space-y-2.5">
+                  {filteredPlayers.map((player) => {
+                    const isCurrentUser =
+                      user?.id === player.id ||
+                      user?.email?.toLowerCase() === player.email?.toLowerCase() ||
+                      user?.full_name?.toLowerCase() === player.full_name?.toLowerCase() ||
+                      user?.name?.toLowerCase() === player.full_name?.toLowerCase()
+
+                    const isActive = player.player_status_id === 1 || !player.player_status_id
+                    const isChecked = selectedBulkIds.includes(player.id)
+
+                    return (
+                      <div
+                        key={player.id}
+                        onClick={() => openPlayerHistory(player)}
+                        className={cn(
+                          "rounded-2xl border p-3.5 shadow-xs transition-all cursor-pointer",
+                          !isActive && "opacity-60 bg-slate-50/50",
+                          isChecked || isCurrentUser ? "bg-[#2C4BFF]/[0.05] border-[#2C4BFF]/25" : "bg-white border-slate-200/90"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            {isSelectionMode && (
+                              <div
+                                onClick={(e) => { e.stopPropagation(); toggleBulkSelect(player.id) }}
+                                className={cn(
+                                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border cursor-pointer transition-all",
+                                  isChecked ? "bg-[#2C4BFF] border-[#2C4BFF] text-white" : "bg-white border-slate-300 text-transparent"
+                                )}
+                              >
+                                {isChecked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                              </div>
+                            )}
+                            <span
+                              className={cn(
+                                "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-bold text-xs border",
+                                !isActive
+                                  ? "bg-slate-100 text-slate-400 border-slate-200"
+                                  : isCurrentUser
+                                  ? "bg-[#2C4BFF] text-white border-[#2C4BFF]"
+                                  : "bg-[#2C4BFF]/10 text-[#2C4BFF] border-[#2C4BFF]/20"
+                              )}
+                            >
+                              {player.full_name?.charAt(0).toUpperCase()}
+                            </span>
+                            <div className="min-w-0">
+                              <p className={cn("font-bold text-xs truncate flex items-center gap-1.5", isCurrentUser ? "text-[#2C4BFF]" : "text-slate-900")}>
+                                {player.full_name}
+                                {isCurrentUser && (
+                                  <span className="rounded-md bg-[#2C4BFF]/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-[#2C4BFF] shrink-0">Ty</span>
+                                )}
+                              </p>
+                              <p className="text-[11px] text-slate-400 truncate">{player.email}</p>
+                            </div>
+                          </div>
+
+                          {isAdmin && !isSelectionMode && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={(e) => togglePlayerStatus(player, e)}
+                                className={cn(
+                                  "rounded-lg p-1.5 transition-all cursor-pointer active:scale-90 border",
+                                  isActive
+                                    ? "bg-slate-50 text-slate-400 border-slate-200"
+                                    : "bg-[#00C48C]/10 text-[#00875F] border-[#00C48C]/25"
+                                )}
+                                title={isActive ? "Wyłącz konto" : "Włącz konto"}
+                              >
+                                <Power className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={(e) => deletePlayer(player, e)}
+                                className="rounded-lg p-1.5 text-slate-400 hover:bg-[#FF5A5F]/10 hover:text-[#FF5A5F] border border-slate-200 cursor-pointer active:scale-90"
+                                title="Usuń trwale"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           )}
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )
+                        </div>
+
+                        <div className="flex items-center gap-1.5 flex-wrap mt-3 pl-0.5">
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border",
+                              player.is_core_roster ? "bg-[#2C4BFF]/10 text-[#1D3AE8] border-[#2C4BFF]/25" : "bg-slate-50 text-slate-400 border-slate-200"
+                            )}
+                          >
+                            <ShieldCheck className="h-3 w-3" />
+                            {player.is_core_roster ? "Stały skład" : "Zwykły"}
+                          </span>
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border",
+                              isActive ? "bg-[#00C48C]/10 text-[#00875F] border-[#00C48C]/25" : "bg-slate-100 text-slate-500 border-slate-200"
+                            )}
+                          >
+                            {isActive ? <UserCheck className="h-3 w-3" /> : <UserX className="h-3 w-3" />}
+                            {isActive ? "Aktywny" : "Wyłączony"}
+                          </span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-600">
+                            {player.matches_count || 0} {player.matches_count === 1 ? "mecz" : "meczy"}
+                          </span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-[#00C48C]/10 text-[#00875F]">
+                            {player.total_paid || 0} PLN
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                </>
+              )}
+            </div>
           )}
         </main>
       </div>
 
-      {/* MODAL WSPARCIA PROJEKTU */}
-      {showSupportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 sm:p-7 shadow-2xl space-y-4 my-8 text-slate-900 text-center">
-            <div className="flex justify-end">
-              <button
-                onClick={() => setShowSupportModal(false)}
-                className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="flex flex-col items-center space-y-2">
-              <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-amber-100 text-amber-600 shadow-md shadow-amber-500/10">
-                <Coffee className="h-8 w-8 animate-pulse" />
-              </div>
-              <h2 className="text-xl font-black text-slate-900">Postaw kawę drużynie! ☕</h2>
-              <p className="text-xs text-slate-500 font-medium max-w-xs">
-                Każda dobrowolna wpłata pomaga nam utrzymać serwery, kupować nowe piłki i sprzęt na treningi.
-              </p>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-left space-y-1.5">
-                <span className="text-[10px] font-black uppercase text-slate-400">Numer telefonu BLIK</span>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-extrabold text-slate-900">+48 500 000 000</span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText("500000000")
-                      setCopiedBlik(true)
-                      setTimeout(() => setCopiedBlik(false), 2000)
-                    }}
-                    className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
-                  >
-                    {copiedBlik ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                    {copiedBlik ? "Skopiowano!" : "Kopiuj"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/60 text-left text-xs font-semibold text-amber-900">
-                💛 Dziękujemy za każdą cegiełkę – to dzięki Wam ta grupa żyje i gra w siatkówkę co tydzień!
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <Button
-                onClick={() => setShowSupportModal(false)}
-                className="w-full rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3 cursor-pointer"
-              >
-                Zamknij okno
-              </Button>
-            </div>
+      {/* PŁYWAJĄCY PASEK MASOWYCH AKCJI */}
+      {isSelectionMode && selectedBulkIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-3xl bg-[#0B1120]/95 backdrop-blur-md px-5 py-3 text-white shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-5 flex-wrap justify-center">
+          <div className="flex items-center gap-2">
+            <span className={cn(score.className, "flex h-7 w-7 items-center justify-center rounded-xl bg-[#FFD23F] text-[#0B1120] text-xs font-bold tabular-nums")}>
+              {selectedBulkIds.length}
+            </span>
+            <span className="text-xs font-bold text-slate-300">zaznaczonych</span>
           </div>
+          <div className="h-4 w-px bg-white/10" />
+          <button
+            onClick={() => handleBulkSetStatus(true)}
+            disabled={isBulkProcessing}
+            className="rounded-2xl text-white font-bold text-xs px-4 py-2 gap-1.5 cursor-pointer active:scale-95 flex items-center shadow-md disabled:opacity-50"
+            style={{ background: MINT }}
+          >
+            <UserCheck className="h-3.5 w-3.5" /> Aktywuj
+          </button>
+          <button
+            onClick={() => handleBulkSetStatus(false)}
+            disabled={isBulkProcessing}
+            className="rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs px-4 py-2 gap-1.5 cursor-pointer active:scale-95 flex items-center disabled:opacity-50"
+          >
+            <UserX className="h-3.5 w-3.5" /> Dezaktywuj
+          </button>
+          <button
+            onClick={handleBulkDelete}
+            disabled={isBulkProcessing}
+            className="rounded-2xl text-white font-bold text-xs px-4 py-2 gap-1.5 cursor-pointer active:scale-95 flex items-center shadow-md disabled:opacity-50"
+            style={{ background: CORAL }}
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Usuń
+          </button>
         </div>
       )}
+
+      <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
 
       {/* MODAL DODAWANIA GRACZA */}
-      {isAdding && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <form
-            onSubmit={handleAddPlayer}
-            className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4"
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h2 className="text-base font-bold text-slate-900">Dodaj nowego zawodnika do bazy</h2>
-              <button
-                type="button"
-                onClick={() => setIsAdding(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
+      <Modal
+        open={isAdding}
+        onClose={() => setIsAdding(false)}
+        overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
+        cardClassName="relative w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl border border-slate-200 space-y-4"
+      >
+        <form onSubmit={handleAddPlayer} className="space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h2 className={cn(display.className, "text-base font-bold text-slate-900")}>Dodaj nowego zawodnika do bazy</h2>
+            <button
+              type="button"
+              onClick={() => setIsAdding(false)}
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer active:scale-90 transition-transform"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="space-y-3 text-xs">
+            <div>
+              <label className="mb-1 block font-semibold text-slate-700">Imię i nazwisko</label>
+              <input
+                type="text"
+                required
+                value={newFullName}
+                onChange={(e) => setNewFullName(e.target.value)}
+                placeholder="np. Jan Kowalski"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 outline-none focus:border-[#2C4BFF] focus:bg-white"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-semibold text-slate-700">Adres e-mail (opcjonalnie)</label>
+              <input
+                type="email"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                placeholder="np. jan@example.com"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 outline-none focus:border-[#2C4BFF] focus:bg-white"
+              />
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="mb-1 block font-semibold text-slate-700">Imię i nazwisko</label>
-                <input
-                  type="text"
-                  required
-                  value={newFullName}
-                  onChange={(e) => setNewFullName(e.target.value)}
-                  placeholder="np. Jan Kowalski"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 outline-none focus:border-blue-500 focus:bg-white"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block font-semibold text-slate-700">
-                  Adres e-mail (opcjonalnie)
-                </label>
-                <input
-                  type="email"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  placeholder="np. jan@example.com"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 outline-none focus:border-blue-500 focus:bg-white"
-                />
-              </div>
-
-              <div
-                className="flex items-center gap-2 p-3 rounded-xl bg-blue-50 border border-blue-200 cursor-pointer"
-                onClick={() => setNewIsCore(!newIsCore)}
-              >
-                <input
-                  type="checkbox"
-                  checked={newIsCore}
-                  onChange={() => {}}
-                  className="rounded border-blue-300 text-blue-600 focus:ring-blue-500 h-4 w-4 pointer-events-none"
-                />
-                <span className="font-bold text-blue-900 text-xs">
-                  Dodaj od razu na koniec kolejki Stałego Składu
-                </span>
-              </div>
+            <div
+              className="flex items-center gap-2 p-3 rounded-xl bg-[#2C4BFF]/[0.05] border border-[#2C4BFF]/20 cursor-pointer"
+              onClick={() => setNewIsCore(!newIsCore)}
+            >
+              <input
+                type="checkbox"
+                checked={newIsCore}
+                onChange={() => {}}
+                className="rounded border-[#2C4BFF]/40 text-[#2C4BFF] focus:ring-[#2C4BFF] h-4 w-4 pointer-events-none"
+              />
+              <span className="font-bold text-[#14204D] text-xs">
+                Dodaj od razu na koniec kolejki Stałego Składu
+              </span>
             </div>
+          </div>
 
-            <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setIsAdding(false)}
-                className="rounded-xl cursor-pointer"
-              >
-                Anuluj
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={isSubmitting}
-                className="rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-md shadow-blue-500/20"
-              >
-                {isSubmitting ? "Zapisywanie..." : "Zapisz w bazie"}
-              </Button>
-            </div>
-          </form>
-        </div>
-      )}
+          <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+            <Button type="button" variant="outline" size="sm" onClick={() => setIsAdding(false)} className="rounded-xl cursor-pointer">
+              Anuluj
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={isSubmitting}
+              className="rounded-xl font-bold bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white cursor-pointer shadow-md shadow-[#2C4BFF]/20"
+            >
+              {isSubmitting ? "Zapisywanie..." : "Zapisz w bazie"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       {/* MODAL HISTORII GRACZA */}
-      {selectedPlayer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="relative w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl max-h-[85vh] flex flex-col border border-slate-200">
+      <Modal
+        open={!!selectedPlayer}
+        onClose={() => setSelectedPlayer(null)}
+        overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
+        cardClassName="relative w-full max-w-lg rounded-[28px] bg-white p-6 shadow-2xl max-h-[85vh] flex flex-col border border-slate-200"
+      >
+        {selectedPlayer && (
+          <>
             <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <h2 className="text-base font-bold text-slate-900">{selectedPlayer.full_name}</h2>
+                <h2 className={cn(display.className, "text-base font-bold text-slate-900")}>{selectedPlayer.full_name}</h2>
                 <p className="text-xs text-slate-400">{selectedPlayer.email}</p>
               </div>
               <button
                 onClick={() => setSelectedPlayer(null)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer"
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer active:scale-90 transition-transform"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1174,9 +1560,7 @@ export default function PlayersPage() {
                 Historia meczów i płatności
               </h3>
               {isLoadingHistory ? (
-                <p className="text-xs text-slate-400 text-center py-8 animate-pulse">
-                  Ładowanie historii...
-                </p>
+                <p className="text-xs text-slate-400 text-center py-8 animate-pulse">Ładowanie historii...</p>
               ) : playerHistory.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-8">
                   Ten zawodnik nie brał jeszcze udziału w żadnym meczu.
@@ -1188,23 +1572,22 @@ export default function PlayersPage() {
                     className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/70 p-3 text-xs font-semibold"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#2C4BFF]/10 text-[#2C4BFF]">
                         <Calendar className="h-4 w-4" />
                       </div>
                       <div>
                         <p className="font-bold text-slate-900">
-                          {item.match_date} ({item.location})
+                          {formatDatePL(item.match_date) || "Brak daty"} ({item.location})
                         </p>
                         <p className="text-[10px] text-slate-400">Status: {item.status}</p>
                       </div>
                     </div>
                     <div className="text-right">
                       <span
-                        className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-extrabold ${
-                          item.paid
-                            ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
-                            : "bg-amber-50 text-amber-600 border border-amber-200"
-                        }`}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-extrabold border",
+                          item.paid ? "bg-[#00C48C]/10 text-[#00875F] border-[#00C48C]/25" : "bg-[#FFD23F]/10 text-[#946E00] border-[#FFD23F]/30"
+                        )}
                       >
                         {item.paid ? <CheckCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
                         {item.paid ? `Opłacono (${item.fee} PLN)` : `Nieopłacone (${item.fee} PLN)`}
@@ -1216,16 +1599,20 @@ export default function PlayersPage() {
             </div>
 
             <div className="mt-4 pt-3 border-t border-slate-100 flex justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSelectedPlayer(null)}
-                className="rounded-xl cursor-pointer"
-              >
+              <Button variant="outline" size="sm" onClick={() => setSelectedPlayer(null)} className="rounded-xl cursor-pointer">
                 Zamknij
               </Button>
             </div>
-          </div>
+          </>
+        )}
+      </Modal>
+
+      <ConfirmDialog state={confirmDialog} onCancel={() => setConfirmDialog(null)} />
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120]/95 backdrop-blur-md px-4 py-2.5 text-xs font-bold text-white shadow-xl animate-in fade-in slide-in-from-bottom-4">
+          <CheckCircle2 className="h-4 w-4 text-[#00E0A2]" />
+          {toast}
         </div>
       )}
     </div>

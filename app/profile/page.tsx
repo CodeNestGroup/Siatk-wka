@@ -1,24 +1,46 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { User, Mail, Shield, Calendar, Trophy, Wallet, CheckCircle2 } from "lucide-react"
+import { Space_Grotesk, Oswald } from "next/font/google"
+import { User, Mail, Shield, Calendar, Trophy, Wallet, Coffee, Heart, ArrowRight, IdCard } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
+import { NotificationsBell } from "@/components/dashboard/notifications-bell"
+import { SupportModal } from "@/components/dashboard/support-modal"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import Link from "next/link"
+
+// ────────────────────────────────────────────────────────────────
+// Te same tokeny co reszta dashboardu ("Under the Lights")
+// ────────────────────────────────────────────────────────────────
+const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "600", "700"] })
+const score = Oswald({ subsets: ["latin"], weight: ["500", "600", "700"] })
+
+const INK = "#0B1120"
+const INK_SOFT = "#121B33"
+const COBALT = "#2C4BFF"
+const YELLOW = "#FFD23F"
+
+const netPattern: React.CSSProperties = {
+  backgroundImage:
+    "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
+}
+
+function perforation(color: string): React.CSSProperties {
+  return { backgroundImage: `repeating-linear-gradient(to bottom, ${color} 0 5px, transparent 5px 12px)` }
+}
 
 export default function ProfilePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const [showSupportModal, setShowSupportModal] = useState(false)
 
   useEffect(() => {
     async function loadUserData() {
-      setLoading(true)
       const localUser = localStorage.getItem("volley_user")
       if (localUser) {
         setUser(JSON.parse(localUser))
-        setLoading(false)
         return
       }
 
@@ -26,106 +48,168 @@ export default function ProfilePage() {
       if (session?.user) {
         setUser(session.user)
       }
-      setLoading(false)
     }
 
     loadUserData()
   }, [])
+
+  async function handleLogout() {
+    localStorage.removeItem("volley_user")
+    sessionStorage.clear()
+    await supabase.auth.signOut()
+    window.location.href = "/login"
+  }
 
   const displayName = user?.full_name || user?.name || (user?.email === "admin@admin.pl" ? "Mateusz Podzorski" : user?.email) || "Użytkownik"
   const isAdmin = user?.email === "admin@admin.pl" || user?.role === "admin" || user?.role_id === 1
   const initials = displayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) || "MP"
 
   return (
-    <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} user={user} />
+    <div className="flex min-h-screen bg-[#F5F6FA] text-[#14181F]">
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} user={user} onLogout={handleLogout} />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-6 py-8">
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        <div
+          className="pointer-events-none absolute inset-0 z-0"
+          style={{
+            background:
+              "radial-gradient(640px circle at 10% -8%, rgba(44,75,255,0.07), transparent 60%), radial-gradient(520px circle at 92% 16%, rgba(255,210,63,0.10), transparent 55%), radial-gradient(760px circle at 45% 100%, rgba(0,196,140,0.05), transparent 60%)"
+          }}
+        />
 
-          {/* Nagłówek spójny z resztą aplikacji (Usunięto Powrót do pulpitu) */}
+        {/* NAGŁÓWEK — ten sam wzorzec co reszta appki */}
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0">
+          <div className="flex-1 flex items-center gap-2.5 overflow-hidden">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120]">
+              <Coffee className="h-3.5 w-3.5 stroke-[2.5]" />
+            </div>
+
+            <p className="text-xs font-medium text-slate-500 truncate">
+              Podoba Ci się nasza inicjatywa? <strong className="text-slate-700 font-semibold">Postaw kawę organizatorom lub wesprzyj rozwój projektu!</strong>
+            </p>
+
+            <button
+              onClick={() => setShowSupportModal(true)}
+              className="ml-auto hidden sm:inline-flex items-center gap-1.5 rounded-full bg-[#0B1120] hover:bg-[#1A2340] text-white font-bold text-xs px-4 py-2 shadow-sm transition-all cursor-pointer active:scale-[0.97] shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF] focus-visible:ring-offset-2"
+            >
+              <Heart className="h-3.5 w-3.5 fill-[#FFD23F] text-[#FFD23F]" />
+              Postaw kawę
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0 ml-auto pl-4">
+            <button
+              onClick={() => setShowSupportModal(true)}
+              className="sm:hidden flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120] shadow-sm cursor-pointer active:scale-90 transition-transform"
+              title="Postaw kawę"
+            >
+              <Coffee className="h-4 w-4" />
+            </button>
+
+            <NotificationsBell onNotificationClick={() => {}} />
+          </div>
+        </header>
+
+        <main className="relative z-10 mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-8 lg:px-8">
+
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-[#2C4BFF] border border-slate-200 shadow-xs">
               <User className="h-5 w-5" />
             </div>
             <div>
-              <h1 className="text-xl font-black tracking-tight text-slate-900">Profil Użytkownika</h1>
-              <p className="text-xs font-medium text-slate-500">Podgląd Twoich danych osobowych oraz statusu w zespole.</p>
+              <h1 className={cn(display.className, "text-xl font-bold text-slate-900 tracking-tight")}>Profil Użytkownika</h1>
+              <p className="text-xs text-slate-500 font-medium">Podgląd Twoich danych osobowych oraz statusu w zespole.</p>
             </div>
           </div>
 
-          {/* Karta Profilowa */}
-          <div className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white p-6 md:p-8 shadow-sm">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-indigo-500/5 to-transparent pointer-events-none" />
+          {/* KARTA PROFILOWA — bilet w stylistyce "Under the Lights" */}
+          <div
+            className="relative overflow-hidden rounded-[28px] text-white shadow-[0_24px_60px_-24px_rgba(11,17,32,0.55)] border border-white/10 animate-in fade-in slide-in-from-top-3 duration-500 fill-mode-both"
+            style={{ background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)` }}
+          >
+            <div className="absolute inset-0 pointer-events-none" style={netPattern} />
+            <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-[#2C4BFF]/20 blur-3xl pointer-events-none" />
+            <div className="absolute -left-20 -bottom-20 h-72 w-72 rounded-full bg-[#FFD23F]/10 blur-3xl pointer-events-none" />
 
-            <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <div className="relative z-10 grid gap-7 p-6 sm:p-8 lg:grid-cols-[1fr_auto_auto] lg:items-center">
               <div className="flex items-center gap-5">
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-black text-2xl shadow-lg shadow-blue-500/20">
+                <div className={cn(score.className, "flex h-16 w-16 sm:h-20 sm:w-20 shrink-0 items-center justify-center rounded-2xl bg-white/10 border border-white/15 text-white font-semibold text-2xl")}>
                   {initials}
                 </div>
-                <div>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <h2 className="text-xl font-black tracking-tight text-slate-900">{displayName}</h2>
-                    <span className={`rounded-xl px-3 py-1 text-[10px] font-black uppercase tracking-wider border ${isAdmin ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-blue-100 text-blue-800 border-blue-200'}`}>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#2C4BFF]/20 border border-[#2C4BFF]/40 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-[#8FA1FF]">
+                      <IdCard className="h-3 w-3 text-[#FFD23F]" />
                       {isAdmin ? "Administrator" : "Zawodnik ESCO"}
                     </span>
                   </div>
-                  <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5 mt-1.5">
-                    <Mail className="h-3.5 w-3.5 text-blue-600" />
+                  <h2 className={cn(display.className, "text-2xl sm:text-3xl font-bold tracking-tight text-white mt-1.5 truncate")}>{displayName}</h2>
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 mt-2">
+                    <Mail className="h-3.5 w-3.5 text-[#FFD23F]" />
                     {user?.email || "brak-emaila@esco.pl"}
                   </p>
                 </div>
               </div>
 
-              <Link href="/settings">
-                <Button variant="outline" className="rounded-xl text-xs font-bold border-slate-200">
-                  Edytuj konto
-                </Button>
-              </Link>
+              <div className="hidden lg:block relative w-px self-stretch">
+                <div className="absolute inset-0" style={perforation("rgba(255,255,255,0.28)")} />
+              </div>
+
+              <div className="border-t lg:border-t-0 border-white/10 pt-5 lg:pt-0">
+                <Link href="/settings">
+                  <Button className="w-full sm:w-auto rounded-2xl bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white font-black text-xs gap-2 px-6 py-3.5 shadow-lg shadow-[#2C4BFF]/30 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-[#FFD23F] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B1120]">
+                    Edytuj konto
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+              </div>
             </div>
           </div>
 
-          {/* Kafelki Szybkich Statystyk Gracza */}
+          {/* KAFELKI SZYBKICH STATYSTYK */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm flex items-center gap-3.5">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100">
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xs flex items-center gap-3.5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#2C4BFF]/10 text-[#2C4BFF] border border-[#2C4BFF]/20">
                 <Trophy className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Status w zespole</p>
-                <p className="text-sm font-black text-slate-900 mt-0.5">Aktywny Gracz</p>
+                <p className="text-sm font-bold text-slate-900 mt-0.5">Aktywny Gracz</p>
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm flex items-center gap-3.5">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100">
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xs flex items-center gap-3.5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#00C48C]/10 text-[#00875F] border border-[#00C48C]/20">
                 <Wallet className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Bilans rozliczeń</p>
-                <p className="text-sm font-black text-emerald-600 mt-0.5">0.00 PLN (Czysto)</p>
+                <p className={cn(score.className, "text-sm font-semibold text-[#00875F] mt-0.5")}>0.00 PLN (Czysto)</p>
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm flex items-center gap-3.5">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-purple-50 text-purple-600 border border-purple-100">
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xs flex items-center gap-3.5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#7A5CFF]/10 text-[#7A5CFF] border border-[#7A5CFF]/20">
                 <Calendar className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Dołączono</p>
-                <p className="text-sm font-black text-slate-900 mt-0.5">Sezon 2026</p>
+                <p className="text-sm font-bold text-slate-900 mt-0.5">Sezon 2026</p>
               </div>
             </div>
           </div>
 
-          {/* Informacje systemowe */}
-          <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm space-y-4">
-            <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-3">Informacje systemowe</h3>
+          {/* INFORMACJE SYSTEMOWE */}
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-xs space-y-4">
+            <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-3">
+              <Shield className="h-3.5 w-3.5 text-slate-300" />
+              Informacje systemowe
+            </h3>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
                 <span className="text-slate-400 font-bold block mb-0.5">Identyfikator użytkownika</span>
-                <span className="font-mono text-slate-900 font-bold block">{user?.id || "local-user-id"}</span>
+                <span className="font-mono text-slate-900 font-bold block truncate">{user?.id || "local-user-id"}</span>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
@@ -137,6 +221,8 @@ export default function ProfilePage() {
 
         </main>
       </div>
+
+      <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
     </div>
   )
 }

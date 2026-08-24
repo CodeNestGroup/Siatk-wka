@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Bell, Calendar, Wallet, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { formatDatePL } from "@/lib/utils"
 
 export type NotificationItem = {
   id: string
@@ -46,7 +47,7 @@ export function NotificationsBell({ onNotificationClick }: { onNotificationClick
           id: `match-${m.id}`,
           dbId: String(m.id),
           title: "Nowy / Zmieniony mecz",
-          description: `Mecz (${m.date}) - ${m.location || 'Hala Jaworze'}`,
+          description: `Mecz (${formatDatePL(m.date)}) - ${m.location || 'Hala Jaworze'}`,
           date: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Dzisiaj",
           type: "match",
           read: false,

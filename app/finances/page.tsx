@@ -1,7 +1,7 @@
-
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react"
+import { Space_Grotesk, Oswald } from "next/font/google"
 import {
   Wallet,
   ArrowUpCircle,
@@ -12,25 +12,78 @@ import {
   Search,
   CheckCircle2,
   PiggyBank,
-  Loader2,
   Trash2,
   Download,
-  X
+  X,
+  Coffee,
+  Heart
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
+import { SupportModal } from "@/components/dashboard/support-modal"
+import { Modal } from "@/components/ui/modal"
+import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import { getTransactions, getPlayerBalances } from "@/lib/data"
 
+// ────────────────────────────────────────────────────────────────
+// Te same tokeny co reszta dashboardu ("Under the Lights")
+// ────────────────────────────────────────────────────────────────
+const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "600", "700"] })
+const score = Oswald({ subsets: ["latin"], weight: ["500", "600", "700"] })
+
+const INK = "#0B1120"
+const INK_SOFT = "#121B33"
+const COBALT = "#2C4BFF"
+const YELLOW = "#FFD23F"
+const CORAL = "#FF5A5F"
+const MINT = "#00C48C"
+const VIOLET = "#7A5CFF"
+
+const netPattern: React.CSSProperties = {
+  backgroundImage:
+    "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
+}
+
+// Kolejne barwy marki dla wstęgi sponsorów — zamiast przypadkowych kolorów Tailwind per sponsor
 const sponsors = [
-  { code: "BSC", name: "Beskid Sport Center", desc: "Partner Sprzętowy", color: "bg-emerald-100 text-emerald-700" },
-  { code: "SKO", name: "Skoczów Park", desc: "Oficjalny Partner", color: "bg-amber-100 text-amber-700" },
-  { code: "VOLLEY", name: "VolleyStore", desc: "Sklep Siatkarski", color: "bg-purple-100 text-purple-700" },
-  { code: "AZ", name: "AZ-Cloud Solutions", desc: "Infrastruktura IT", color: "bg-blue-100 text-blue-700" },
-  { code: "ESCO", name: "ESCO Jaworze", desc: "Sponsor Tytularny", color: "bg-indigo-100 text-indigo-700" },
+  { code: "BSC", name: "Beskid Sport Center", desc: "Partner Sprzętowy", color: MINT },
+  { code: "SKO", name: "Skoczów Park", desc: "Oficjalny Partner", color: YELLOW },
+  { code: "VOLLEY", name: "VolleyStore", desc: "Sklep Siatkarski", color: VIOLET },
+  { code: "AZ", name: "AZ-Cloud Solutions", desc: "Infrastruktura IT", color: COBALT },
+  { code: "ESCO", name: "ESCO Jaworze", desc: "Sponsor Tytularny", color: CORAL },
 ]
+
+// Płynne podliczanie liczb — ten sam komponent co na pozostałych stronach
+function CountUp({ value, decimals = 2 }: { value: number; decimals?: number }) {
+  const [displayValue, setDisplayValue] = useState(value)
+  const prevValue = useRef(value)
+
+  useEffect(() => {
+    const from = prevValue.current
+    const to = value
+    if (from === to) return
+
+    const duration = 700
+    const start = performance.now()
+    let raf: number
+
+    function tick(now: number) {
+      const progress = Math.min(1, (now - start) / duration)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setDisplayValue(from + (to - from) * eased)
+      if (progress < 1) raf = requestAnimationFrame(tick)
+      else prevValue.current = to
+    }
+
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value])
+
+  return <>{displayValue.toFixed(decimals)}</>
+}
 
 type Transaction = {
   id: string
@@ -48,15 +101,20 @@ type PlayerOverpayment = {
   balance: number
 }
 
+function buildTxSearchTokens(t: Transaction): string[] {
+  return normalizeSearchText(`${t.title || ""} ${t.collected_by || ""} ${t.category || ""}`).split(/[^a-z0-9]+/).filter(Boolean)
+}
+
 export default function FinancesPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [searchTerm, setSearchTerm] = useState("")
+  const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense">("all")
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showSupportModal, setShowSupportModal] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-
-  const [activeModal, setActiveModal] = useState<"income" | "expense" | null>(null)
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
 
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [playerBalances, setPlayerBalances] = useState<PlayerOverpayment[]>([])
@@ -67,6 +125,10 @@ export default function FinancesPage() {
   const [newCollectedBy, setNewCollectedBy] = useState("Mateusz Podzorski")
   const [newCategory, setNewCategory] = useState("mecz")
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Suwak pod aktywną zakładką filtra — ten sam mechanizm co na pozostałych stronach
+  const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, top: 0, height: 0 })
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
   const isAdmin =
     user?.role === "admin" ||
@@ -89,6 +151,13 @@ export default function FinancesPage() {
     loadData()
   }, [])
 
+  useLayoutEffect(() => {
+    const el = tabRefs.current[typeFilter]
+    if (el) {
+      setPillStyle({ left: el.offsetLeft, width: el.offsetWidth, top: el.offsetTop, height: el.offsetHeight })
+    }
+  }, [typeFilter, isLoading, user])
+
   async function loadData() {
     setIsLoading(true)
     const [txData, balancesData] = await Promise.all([
@@ -108,41 +177,49 @@ export default function FinancesPage() {
 
   async function handleLogout() {
     localStorage.removeItem("volley_user")
-    localStorage.clear()
     sessionStorage.clear()
     await supabase.auth.signOut()
     setUser(null)
     window.location.href = "/login"
   }
 
-  function exportFinancesToCSV(itemsToExport = transactions, filename = "Raport_Finansowy_ESCO.csv") {
-    if (itemsToExport.length === 0) return alert("Brak danych do wyeksportowania!")
+  function exportFinancesToCSV(itemsToExport: Transaction[], filename: string) {
+    if (itemsToExport.length === 0) return
+
+    const esc = (val: string | number) => `"${String(val).replace(/"/g, '""')}"`
 
     const headers = "Lp.,Data,Tytul,Kategoria,Osoba Zbierajaca,Kwota (PLN)\n"
     const rows = itemsToExport.map((t, i) => {
       const amountStr = t.type === "income" ? `+${t.amount}` : `-${t.amount}`
-      return `${itemsToExport.length - i},"${t.date}","${t.title}","${t.category}","${t.collected_by}","${amountStr}"`
+      return [itemsToExport.length - i, esc(t.date), esc(t.title), esc(t.category), esc(t.collected_by), esc(amountStr)].join(",")
     }).join("\n")
 
-    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" })
+    const blob = new Blob(["﻿" + headers + rows], { type: "text/csv;charset=utf-8;" })
     const url = URL.createObjectURL(blob)
     const link = document.createElement("a")
     link.setAttribute("href", url)
     link.setAttribute("download", filename)
-    document.body.appendChild(link)
     link.click()
-    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
     notify("Pobrano plik CSV!")
   }
 
-  async function handleDeleteTransaction(id: string) {
-    if (!confirm("Czy na pewno chcesz usunąć ten wpis z bazy finansowej?")) return
+  function handleDeleteTransaction(id: string, title: string) {
+    setConfirmDialog({
+      title: "Usunąć wpis z kasy?",
+      message: `Operacja "${title}" zniknie z księgi rozliczeń bezpowrotnie.`,
+      confirmLabel: "Usuń trwale",
+      danger: true,
+      onConfirm: () => performDeleteTransaction(id)
+    })
+  }
 
+  async function performDeleteTransaction(id: string) {
+    setConfirmDialog(null)
     setTransactions((prev) => prev.filter((t) => t.id !== id))
     const { error } = await supabase.from('transactions').delete().eq('id', id)
 
     if (error) {
-      console.error("Błąd usuwania transakcji:", error.message)
       notify(`Błąd usuwania: ${error.message}`)
       loadData()
     } else {
@@ -183,7 +260,6 @@ export default function FinancesPage() {
       .select()
 
     if (error) {
-      console.error("Błąd zapisu Supabase:", error.message)
       notify(`Błąd zapisu: ${error.message}`)
     } else if (data && data.length > 0) {
       setTransactions([data[0], ...transactions])
@@ -196,15 +272,24 @@ export default function FinancesPage() {
     setIsSubmitting(false)
   }
 
-  const filteredTransactions = transactions.filter(t =>
-    t.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    t.collected_by?.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  const searchMatchedTx = transactions.filter((t) => fuzzySearchMatch(buildTxSearchTokens(t), searchTerm))
+
+  const filterCounts = {
+    all: searchMatchedTx.length,
+    income: searchMatchedTx.filter((t) => t.type === "income").length,
+    expense: searchMatchedTx.filter((t) => t.type === "expense").length
+  }
+
+  const filteredTransactions = searchMatchedTx.filter((t) => {
+    if (typeFilter === "income") return t.type === "income"
+    if (typeFilter === "expense") return t.type === "expense"
+    return true
+  })
 
   if (!user) return null
 
   return (
-    <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
+    <div className="flex min-h-screen bg-[#F5F6FA] text-[#14181F]">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -212,9 +297,17 @@ export default function FinancesPage() {
         onLogout={handleLogout}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* Ustandaryzowany nagłówek ze sponsorami i dzwoneczkiem */}
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/80 px-6 py-3.5 backdrop-blur-md">
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        <div
+          className="pointer-events-none absolute inset-0 z-0"
+          style={{
+            background:
+              "radial-gradient(640px circle at 10% -8%, rgba(44,75,255,0.07), transparent 60%), radial-gradient(520px circle at 92% 16%, rgba(255,210,63,0.10), transparent 55%), radial-gradient(760px circle at 45% 100%, rgba(0,196,140,0.05), transparent 60%)"
+          }}
+        />
+
+        {/* Header z wstęgą sponsorów */}
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/80 pl-16 pr-6 py-3.5 lg:px-6 backdrop-blur-md">
           <style jsx>{`
             @keyframes marquee { 0% { transform: translateX(0%); } 100% { transform: translateX(-50%); } }
             .animate-marquee { display: flex; width: max-content; animation: marquee 30s linear infinite; }
@@ -224,7 +317,12 @@ export default function FinancesPage() {
             <div className="animate-marquee gap-8 flex items-center">
               {[...sponsors, ...sponsors].map((s, index) => (
                 <div key={index} className="flex items-center gap-2 shrink-0">
-                  <span className={cn("flex h-6 w-6 items-center justify-center rounded-lg font-black text-[9px]", s.color)}>{s.code}</span>
+                  <span
+                    className="flex h-6 w-6 items-center justify-center rounded-lg font-black text-[9px] text-white"
+                    style={{ background: s.color }}
+                  >
+                    {s.code}
+                  </span>
                   <span className="text-xs font-extrabold text-slate-500">{s.name}</span>
                 </div>
               ))}
@@ -232,192 +330,308 @@ export default function FinancesPage() {
           </div>
 
           <div className="flex items-center gap-3 shrink-0 ml-6">
+            <button
+              onClick={() => setShowSupportModal(true)}
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120] shadow-sm cursor-pointer active:scale-90 transition-transform"
+              title="Postaw kawę"
+            >
+              <Coffee className="h-4 w-4" />
+            </button>
             <NotificationsBell
-              onNotificationClick={(notif: NotificationItem) => {
-                // obsługa powiadomień
-              }}
+              onNotificationClick={(notif: NotificationItem) => {}}
             />
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8">
+        <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8">
 
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-[#00875F] border border-slate-200 shadow-xs">
                 <Wallet className="h-5 w-5" />
               </div>
               <div>
-                <h1 className="text-xl font-black tracking-tight text-slate-900">Rozliczenie Kasy Zespołu</h1>
+                <h1 className={cn(display.className, "text-xl font-bold text-slate-900 tracking-tight")}>Rozliczenie Kasy Zespołu</h1>
                 <p className="text-xs font-medium text-slate-500">Śledź wpływy z meczy, wydatki na salę oraz nadpłaty zawodników.</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button onClick={() => exportFinancesToCSV(transactions, "Raport_Finansowy_Pelny.csv")} variant="outline" className="gap-2 rounded-2xl text-xs font-bold border-slate-200 bg-white cursor-pointer">
-                <Download className="h-4 w-4 text-blue-600" />
-                Pobierz raport CSV
-              </Button>
+            {isAdmin && (
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="h-10 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 text-white cursor-pointer active:scale-[0.97] shadow-md transition-all"
+                style={{ background: COBALT, boxShadow: `0 4px 14px -4px ${COBALT}80` }}
+              >
+                <Plus className="h-4 w-4" />
+                Dodaj wpłatę / wydatek
+              </button>
+            )}
+          </div>
 
-              {isAdmin && (
-                <Button onClick={() => setShowAddModal(true)} className="gap-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-lg shadow-blue-500/25 cursor-pointer">
-                  <Plus className="h-4 w-4" />
-                  Dodaj wpłatę / wydatek
-                </Button>
-              )}
+          {/* HERO — aktualny stan kasy, w stylu głównego dashboardu */}
+          <div
+            className="relative overflow-hidden rounded-[28px] p-6 sm:p-8 text-white shadow-[0_24px_60px_-24px_rgba(11,17,32,0.55)] border border-white/10 animate-in fade-in slide-in-from-top-3 duration-500 fill-mode-both"
+            style={{ background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)` }}
+          >
+            <div className="absolute inset-0 pointer-events-none opacity-70" style={netPattern} />
+            <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-[#00C48C]/20 blur-3xl pointer-events-none" />
+            <div className="absolute -left-20 -bottom-20 h-72 w-72 rounded-full bg-[#FFD23F]/10 blur-3xl pointer-events-none" />
+
+            <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+              <div className="flex items-center gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#00C48C]/20 border border-[#00C48C]/40 text-[#00E0A2] shrink-0">
+                  <PiggyBank className="h-7 w-7" />
+                </div>
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Aktualny Stan Kasy</p>
+                  <h2 className={cn(score.className, "text-4xl font-semibold mt-0.5 tabular-nums", currentCash < 0 ? "text-[#FF9296]" : "text-white")}>
+                    <CountUp value={currentCash} /> <span className="text-lg text-slate-400 font-medium">PLN</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 font-medium mt-0.5">Dostępny budżet zespołu</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => exportFinancesToCSV(filteredTransactions, "Raport_Finansowy_ESCO.csv")}
+                disabled={filteredTransactions.length === 0}
+                className="inline-flex items-center gap-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-white font-bold text-xs px-4 py-2.5 cursor-pointer active:scale-[0.97] transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              >
+                <Download className="h-4 w-4" />
+                Pobierz raport CSV
+              </button>
             </div>
           </div>
 
           {/* Kafelki Podsumowania */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-
-            <div className="rounded-3xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/60 to-white p-5 shadow-sm flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600">Aktualny Stan Kasy</p>
-                <h3 className={cn("mt-1 text-xl font-black", currentCash < 0 ? "text-rose-600" : "text-slate-900")}>
-                  {currentCash.toFixed(2)} PLN
-                </h3>
-                <p className="mt-0.5 text-[11px] font-medium text-slate-400">Dostępny budżet</p>
-              </div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 border border-emerald-200/50">
-                <PiggyBank className="h-6 w-6" />
-              </div>
-            </div>
-
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <button
-              onClick={() => setActiveModal("income")}
-              className="rounded-3xl border border-blue-200/80 bg-gradient-to-br from-blue-50/60 to-white p-5 shadow-sm flex items-center justify-between text-left hover:border-blue-400 transition-all cursor-pointer"
+              onClick={() => setTypeFilter(typeFilter === "income" ? "all" : "income")}
+              className={cn(
+                "rounded-[24px] border p-5 shadow-xs flex items-center justify-between text-left transition-all cursor-pointer active:scale-[0.98] hover:-translate-y-0.5 hover:shadow-md",
+                typeFilter === "income" ? "border-[#2C4BFF] ring-2 ring-[#2C4BFF]/20 bg-[#2C4BFF]/[0.04]" : "border-slate-200/90 bg-white"
+              )}
             >
               <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-wider text-blue-600">Suma Wpływów</p>
-                <h3 className="mt-1 text-xl font-black text-slate-900">+{totalIncome.toFixed(2)} PLN</h3>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#2C4BFF]">Suma Wpływów</p>
+                <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}>+<CountUp value={totalIncome} /> PLN</h3>
                 <p className="mt-0.5 text-[11px] font-medium text-slate-400">Wszystkie przychody</p>
               </div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 border border-blue-200/50 shrink-0">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#2C4BFF]/10 text-[#2C4BFF] border border-[#2C4BFF]/20 shrink-0">
                 <ArrowUpCircle className="h-6 w-6" />
               </div>
             </button>
 
             <button
-              onClick={() => setActiveModal("expense")}
-              className="rounded-3xl border border-rose-200/80 bg-gradient-to-br from-rose-50/60 to-white p-5 shadow-sm flex items-center justify-between text-left hover:border-rose-400 transition-all cursor-pointer"
+              onClick={() => setTypeFilter(typeFilter === "expense" ? "all" : "expense")}
+              className={cn(
+                "rounded-[24px] border p-5 shadow-xs flex items-center justify-between text-left transition-all cursor-pointer active:scale-[0.98] hover:-translate-y-0.5 hover:shadow-md",
+                typeFilter === "expense" ? "border-[#FF5A5F] ring-2 ring-[#FF5A5F]/20 bg-[#FF5A5F]/[0.04]" : "border-slate-200/90 bg-white"
+              )}
             >
               <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-wider text-rose-600">Suma Wydatków</p>
-                <h3 className="mt-1 text-xl font-black text-slate-900">-{totalExpense.toFixed(2)} PLN</h3>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#FF5A5F]">Suma Wydatków</p>
+                <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}>-<CountUp value={totalExpense} /> PLN</h3>
                 <p className="mt-0.5 text-[11px] font-medium text-slate-400">Wszystkie koszty</p>
               </div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 border border-rose-200/50 shrink-0">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FF5A5F]/10 text-[#FF5A5F] border border-[#FF5A5F]/20 shrink-0">
                 <ArrowDownCircle className="h-6 w-6" />
               </div>
             </button>
 
-            <div className="rounded-3xl border border-purple-200/80 bg-gradient-to-br from-purple-50/60 to-white p-5 shadow-sm flex items-center justify-between">
+            <div className="rounded-[24px] border border-slate-200/90 bg-white p-5 shadow-xs flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-wider text-purple-600">Nadpłaty Graczy</p>
-                <h3 className="mt-1 text-xl font-black text-slate-900">{totalOverpayments.toFixed(2)} PLN</h3>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#7A5CFF]">Nadpłaty Graczy</p>
+                <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}><CountUp value={totalOverpayments} /> PLN</h3>
                 <p className="mt-0.5 text-[11px] font-medium text-slate-400">Zaliczki zawodników</p>
               </div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-100 text-purple-600 border border-purple-200/50">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#7A5CFF]/10 text-[#7A5CFF] border border-[#7A5CFF]/20 shrink-0">
                 <TrendingUp className="h-6 w-6" />
               </div>
             </div>
-
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
             <div className="lg:col-span-2 space-y-4">
-              <div className="relative max-w-md w-full">
-                <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="search"
-                  placeholder="Szukaj wpłaty, zbierającego…"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-xs font-medium outline-none focus:border-blue-500 shadow-sm transition-all"
-                />
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="relative w-full max-w-md">
+                  <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Szukaj wpłaty, zbierającego…"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-9 text-xs font-medium outline-none focus:border-[#2C4BFF] focus:ring-2 focus:ring-[#2C4BFF]/20 shadow-xs transition-all"
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors cursor-pointer"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="relative flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80 shrink-0">
+                  <div
+                    className="absolute rounded-xl bg-[#0B1120] shadow-md transition-all duration-300 ease-out"
+                    style={{ left: pillStyle.left, width: pillStyle.width, top: pillStyle.top, height: pillStyle.height }}
+                  />
+                  {[
+                    { id: "all", label: `Wszystkie (${filterCounts.all})` },
+                    { id: "income", label: `Wpływy (${filterCounts.income})` },
+                    { id: "expense", label: `Wydatki (${filterCounts.expense})` },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      ref={(el) => { tabRefs.current[tab.id] = el }}
+                      onClick={() => setTypeFilter(tab.id as any)}
+                      className={cn(
+                        "relative z-10 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors duration-300 cursor-pointer active:scale-[0.97] whitespace-nowrap",
+                        typeFilter === tab.id ? "text-white" : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="rounded-3xl border border-slate-200/80 bg-white overflow-hidden shadow-sm">
+              <div className="rounded-[28px] border border-slate-200/80 bg-white overflow-hidden shadow-xs">
                 {isLoading ? (
-                  <div className="p-12 text-center text-slate-400 text-xs font-bold flex items-center justify-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                    Ładowanie księgi rozliczeń z bazy...
+                  <div className="p-4 space-y-2">
+                    {[0, 1, 2, 3].map((i) => (
+                      <div key={i} className="flex items-center gap-4 rounded-2xl border border-slate-100 p-4 animate-pulse" style={{ animationDelay: `${i * 100}ms` }}>
+                        <div className="h-3.5 w-16 rounded-md bg-slate-100" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-3.5 w-40 rounded-md bg-slate-100" />
+                          <div className="h-3 w-24 rounded-md bg-slate-100" />
+                        </div>
+                        <div className="h-4 w-20 rounded-md bg-slate-100" />
+                      </div>
+                    ))}
                   </div>
                 ) : filteredTransactions.length === 0 ? (
-                  <div className="p-12 text-center text-slate-400 text-xs font-medium">
-                    Brak opłat spełniających kryteria.
+                  <div className="flex flex-col items-center gap-3 p-12 text-center">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                      <Search className="h-5 w-5" />
+                    </div>
+                    <p className="text-xs font-semibold text-slate-500">
+                      {searchTerm ? `Brak wyników dla „${searchTerm}”.` : "Brak opłat spełniających kryteria."}
+                    </p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="border-b border-slate-100 bg-slate-50/80 text-slate-400 uppercase text-[10px] font-extrabold tracking-wider">
-                        <tr>
-                          <th className="p-4">Lp.</th>
-                          <th className="p-4">Data</th>
-                          <th className="p-4">Opis operacji / Tytuł</th>
-                          <th className="p-4">Osoba zbierająca</th>
-                          <th className="p-4 text-right">Kwota</th>
-                          {isAdmin && <th className="p-4 text-right">Akcje</th>}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                        {filteredTransactions.map((tx, idx) => (
-                          <tr key={tx.id || idx} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="p-4 text-slate-400 font-extrabold">{filteredTransactions.length - idx}</td>
-                            <td className="p-4 text-slate-900 font-bold whitespace-nowrap">{tx.date}</td>
-                            <td className="p-4 text-slate-900">
-                              <p className="font-bold">{tx.title}</p>
-                              <span className="text-[10px] text-slate-400 uppercase font-extrabold">{tx.category}</span>
-                            </td>
-                            <td className="p-4">
-                              <span className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700 border border-slate-200/60">
-                                <UserCheck className="h-3 w-3 text-blue-600" />
-                                {tx.collected_by}
-                              </span>
-                            </td>
-                            <td className={cn(
-                              "p-4 text-right font-black text-sm whitespace-nowrap",
-                              tx.type === "income" ? "text-emerald-600" : "text-rose-600"
+                  <>
+                    {/* Tabela — od md w górę */}
+                    <div className="hidden md:block overflow-x-auto animate-in fade-in duration-300">
+                      <table className="w-full text-left text-xs">
+                        <thead className="border-b border-slate-100 bg-slate-50/80 text-slate-400 uppercase text-[10px] font-extrabold tracking-wider">
+                          <tr>
+                            <th className="p-4">Lp.</th>
+                            <th className="p-4">Data</th>
+                            <th className="p-4">Opis operacji / Tytuł</th>
+                            <th className="p-4">Osoba zbierająca</th>
+                            <th className="p-4 text-right">Kwota</th>
+                            {isAdmin && <th className="p-4 text-right">Akcje</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                          {filteredTransactions.map((tx, idx) => (
+                            <tr key={tx.id || idx} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="p-4 text-slate-400 font-extrabold">{filteredTransactions.length - idx}</td>
+                              <td className="p-4 text-slate-900 font-bold whitespace-nowrap">{formatDatePL(tx.date)}</td>
+                              <td className="p-4 text-slate-900">
+                                <p className="font-bold">{tx.title}</p>
+                                <span className="text-[10px] text-slate-400 uppercase font-extrabold">{tx.category}</span>
+                              </td>
+                              <td className="p-4">
+                                <span className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700 border border-slate-200/60">
+                                  <UserCheck className="h-3 w-3 text-[#2C4BFF]" />
+                                  {tx.collected_by}
+                                </span>
+                              </td>
+                              <td className={cn(
+                                "p-4 text-right font-black text-sm whitespace-nowrap",
+                                tx.type === "income" ? "text-[#00875F]" : "text-[#E0454A]"
+                              )}>
+                                {tx.type === "income" ? "+" : "-"}{Number(tx.amount).toFixed(2)} PLN
+                              </td>
+                              {isAdmin && (
+                                <td className="p-4 text-right">
+                                  <button
+                                    onClick={() => handleDeleteTransaction(tx.id, tx.title)}
+                                    className="p-1.5 rounded-xl text-slate-400 hover:bg-[#FF5A5F]/10 hover:text-[#FF5A5F] transition-colors cursor-pointer active:scale-90"
+                                    title="Usuń wpis"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Karty — poniżej md, żeby uniknąć poziomego scrolla tabeli */}
+                    <div className="md:hidden divide-y divide-slate-100">
+                      {filteredTransactions.map((tx, idx) => (
+                        <div key={tx.id || idx} className="p-4 space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-900 text-xs truncate">{tx.title}</p>
+                              <p className="text-[10px] text-slate-400 uppercase font-extrabold mt-0.5">{tx.category} • {formatDatePL(tx.date)}</p>
+                            </div>
+                            <span className={cn(
+                              "font-black text-sm whitespace-nowrap shrink-0",
+                              tx.type === "income" ? "text-[#00875F]" : "text-[#E0454A]"
                             )}>
                               {tx.type === "income" ? "+" : "-"}{Number(tx.amount).toFixed(2)} PLN
-                            </td>
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700 border border-slate-200/60">
+                              <UserCheck className="h-3 w-3 text-[#2C4BFF]" />
+                              {tx.collected_by}
+                            </span>
                             {isAdmin && (
-                              <td className="p-4 text-right">
-                                <button
-                                  onClick={() => handleDeleteTransaction(tx.id)}
-                                  className="p-1.5 rounded-xl text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors cursor-pointer"
-                                  title="Usuń wpis"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </td>
+                              <button
+                                onClick={() => handleDeleteTransaction(tx.id, tx.title)}
+                                className="p-1.5 rounded-xl text-slate-400 hover:bg-[#FF5A5F]/10 hover:text-[#FF5A5F] transition-colors cursor-pointer active:scale-90"
+                                title="Usuń wpis"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
                             )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             </div>
 
             <div className="space-y-4">
-              <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-sm">
-                <h2 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                  <PiggyBank className="h-4 w-4 text-purple-600" />
+              <div className="bg-white p-4 rounded-[24px] border border-slate-200/80 shadow-xs">
+                <h2 className={cn(display.className, "text-sm font-bold text-slate-900 flex items-center gap-2")}>
+                  <PiggyBank className="h-4 w-4 text-[#7A5CFF]" />
                   Nadpłaty Zawodników
                 </h2>
                 <p className="text-[11px] text-slate-400 mt-0.5 font-medium">Saldo zaliczek graczy na mecze</p>
               </div>
 
-              <div className="rounded-3xl border border-slate-200/80 bg-white p-4 space-y-2.5 shadow-sm">
+              <div className="rounded-[24px] border border-slate-200/80 bg-white p-4 space-y-2.5 shadow-xs">
                 {playerBalances.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-4 font-medium">Brak wpisanych nadpłat.</p>
                 ) : (
-                  playerBalances.map((player) => (
-                    <div key={player.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                  playerBalances.map((player, idx) => (
+                    <div
+                      key={player.id}
+                      style={{ animationDelay: `${Math.min(idx, 10) * 35}ms` }}
+                      className="flex items-center justify-between p-3 rounded-2xl bg-slate-50/80 border border-slate-100 animate-in fade-in slide-in-from-bottom-1 fill-mode-both"
+                    >
                       <div>
                         <p className="text-xs font-bold text-slate-900">{player.name}</p>
                         <p className="text-[10px] text-slate-400 font-medium">
@@ -428,7 +642,7 @@ export default function FinancesPage() {
                       <span className={cn(
                         "text-xs font-black px-2.5 py-1 rounded-xl border",
                         Number(player.balance) > 0
-                          ? "bg-purple-100 text-purple-700 border-purple-200"
+                          ? "bg-[#7A5CFF]/10 text-[#4B2FB0] border-[#7A5CFF]/25"
                           : "bg-slate-100 text-slate-400 border-slate-200"
                       )}>
                         +{Number(player.balance).toFixed(2)} PLN
@@ -444,153 +658,104 @@ export default function FinancesPage() {
         </main>
       </div>
 
-      {/* MODAL: Szczegóły Wpływów lub Wydatków */}
-      {activeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4 text-slate-900">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h2 className="text-base font-black flex items-center gap-2">
-                {activeModal === "income" ? (
-                  <>
-                    <ArrowUpCircle className="h-5 w-5 text-emerald-600" />
-                    Wykaz Wpływów do Kasy
-                  </>
-                ) : (
-                  <>
-                    <ArrowDownCircle className="h-5 w-5 text-rose-600" />
-                    Wykaz Wydatków Zespołu
-                  </>
+      <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
+
+      {/* MODAL: Dodaj operację */}
+      <Modal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
+        cardClassName="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl space-y-4 text-slate-900"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <h2 className={cn(display.className, "text-base font-bold text-slate-900")}>Dodaj nową operację do Kasy</h2>
+          <button onClick={() => setShowAddModal(false)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer active:scale-90 transition-transform">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleAddTransaction} className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">Typ operacji</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setNewType("income")}
+                className={cn(
+                  "py-2 rounded-xl text-xs font-extrabold border transition-all cursor-pointer active:scale-95",
+                  newType === "income" ? "bg-[#00C48C]/10 text-[#00875F] border-[#00C48C]/40" : "bg-slate-100 text-slate-500 border-slate-200"
                 )}
-              </h2>
-              <button onClick={() => setActiveModal(null)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer">
-                <X className="h-5 w-5" />
+              >
+                + Wpływ (Przychód)
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewType("expense")}
+                className={cn(
+                  "py-2 rounded-xl text-xs font-extrabold border transition-all cursor-pointer active:scale-95",
+                  newType === "expense" ? "bg-[#FF5A5F]/10 text-[#E0454A] border-[#FF5A5F]/40" : "bg-slate-100 text-slate-500 border-slate-200"
+                )}
+              >
+                - Wydatek (Opłata)
               </button>
             </div>
+          </div>
 
-            <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
-              {(activeModal === "income" ? incomeItems : expenseItems).length === 0 ? (
-                <p className="py-8 text-center text-xs text-slate-400 font-medium">Brak pozycji w tej kategorii.</p>
-              ) : (
-                (activeModal === "income" ? incomeItems : expenseItems).map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100 text-xs">
-                    <div>
-                      <p className="font-bold text-slate-900">{item.title}</p>
-                      <p className="text-[10px] text-slate-400">{item.date} • {item.collected_by}</p>
-                    </div>
-                    <span className={cn("font-black text-sm", activeModal === "income" ? "text-emerald-600" : "text-rose-600")}>
-                      {activeModal === "income" ? "+" : "-"}{Number(item.amount).toFixed(2)} PLN
-                    </span>
-                  </div>
-                ))
-              )}
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">Tytuł / Opis operacji</label>
+            <input
+              type="text"
+              required
+              placeholder="np. Wpłata od Marka / Zapłata za halę"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2 text-xs font-medium outline-none focus:border-[#2C4BFF] focus:bg-white"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Kwota (PLN)</label>
+              <input
+                type="number"
+                step="0.01"
+                required
+                placeholder="0.00"
+                value={newAmount}
+                onChange={(e) => setNewAmount(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2 text-xs font-black outline-none focus:border-[#2C4BFF] focus:bg-white"
+              />
             </div>
 
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-              <Button
-                onClick={() => exportFinancesToCSV(
-                  activeModal === "income" ? incomeItems : expenseItems,
-                  `Raport_${activeModal === "income" ? "Wplywy" : "Wydatki"}_ESCO.csv`
-                )}
-                variant="outline"
-                className="gap-2 rounded-xl text-xs font-bold border-slate-200 cursor-pointer"
-              >
-                <Download className="h-4 w-4 text-blue-600" /> Pobierz raport CSV
-              </Button>
-              <Button onClick={() => setActiveModal(null)} className="rounded-xl text-xs font-bold bg-slate-900 text-white cursor-pointer">
-                Zamknij
-              </Button>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Kto zbierał / płacił?</label>
+              <input
+                type="text"
+                required
+                placeholder="np. Krzysiek, Marek"
+                value={newCollectedBy}
+                onChange={(e) => setNewCollectedBy(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2 text-xs font-medium outline-none focus:border-[#2C4BFF] focus:bg-white"
+              />
             </div>
           </div>
-        </div>
-      )}
 
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4 text-slate-900">
-            <h2 className="text-base font-black">Dodaj nową operację do Kasy</h2>
-
-            <form onSubmit={handleAddTransaction} className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Typ operacji</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewType("income")}
-                    className={cn(
-                      "py-2 rounded-xl text-xs font-extrabold border transition-colors cursor-pointer",
-                      newType === "income" ? "bg-emerald-100 text-emerald-700 border-emerald-300" : "bg-slate-100 text-slate-500 border-slate-200"
-                    )}
-                  >
-                    + Wpływ (Przychód)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewType("expense")}
-                    className={cn(
-                      "py-2 rounded-xl text-xs font-extrabold border transition-colors cursor-pointer",
-                      newType === "expense" ? "bg-rose-100 text-rose-700 border-rose-300" : "bg-slate-100 text-slate-500 border-slate-200"
-                    )}
-                  >
-                    - Wydatek (Opłata)
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Tytuł / Opis operacji</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="np. Wpłata od Marka / Zapłata za halę"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2 text-xs font-medium outline-none focus:border-blue-500 focus:bg-white"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Kwota (PLN)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="0.00"
-                    value={newAmount}
-                    onChange={(e) => setNewAmount(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2 text-xs font-black outline-none focus:border-blue-500 focus:bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Kto zbierał / płacił?</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="np. Krzysiek, Marek"
-                    value={newCollectedBy}
-                    onChange={(e) => setNewCollectedBy(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2 text-xs font-medium outline-none focus:border-blue-500 focus:bg-white"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                <Button type="button" variant="ghost" onClick={() => setShowAddModal(false)} className="rounded-xl text-xs font-bold cursor-pointer">
-                  Anuluj
-                </Button>
-                <Button type="submit" disabled={isSubmitting} className="rounded-xl text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer">
-                  {isSubmitting ? "Zapisywanie..." : "Zapisz operację"}
-                </Button>
-              </div>
-            </form>
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <Button type="button" variant="ghost" onClick={() => setShowAddModal(false)} className="rounded-xl text-xs font-bold cursor-pointer">
+              Anuluj
+            </Button>
+            <Button type="submit" disabled={isSubmitting} className="rounded-xl text-xs bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white font-bold cursor-pointer shadow-md shadow-[#2C4BFF]/20">
+              {isSubmitting ? "Zapisywanie..." : "Zapisz operację"}
+            </Button>
           </div>
-        </div>
-      )}
+        </form>
+      </Modal>
+
+      <ConfirmDialog state={confirmDialog} onCancel={() => setConfirmDialog(null)} />
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-xl">
-          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120]/95 backdrop-blur-md px-4 py-2.5 text-xs font-bold text-white shadow-xl animate-in fade-in slide-in-from-bottom-4">
+          <CheckCircle2 className="h-4 w-4 text-[#00E0A2]" />
           {toast}
         </div>
       )}

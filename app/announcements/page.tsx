@@ -1,26 +1,47 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { Space_Grotesk, Oswald } from "next/font/google"
 import {
   Megaphone,
   Pin,
   Plus,
   Search,
   Trash2,
-  Calendar,
-  User,
   CheckCircle2,
   Send,
   AlertTriangle,
-  Flame,
-  Sparkles,
   Ban,
-  CalendarCheck
+  CalendarCheck,
+  X,
+  Coffee
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sidebar } from "@/components/dashboard/sidebar"
-import { cn } from "@/lib/utils"
+import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
+import { SupportModal } from "@/components/dashboard/support-modal"
+import { Modal } from "@/components/ui/modal"
+import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
+import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
+
+// ────────────────────────────────────────────────────────────────
+// Te same tokeny co reszta dashboardu ("Under the Lights")
+// ────────────────────────────────────────────────────────────────
+const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "600", "700"] })
+const score = Oswald({ subsets: ["latin"], weight: ["500", "600", "700"] })
+
+const INK = "#0B1120"
+const INK_SOFT = "#121B33"
+const COBALT = "#2C4BFF"
+const YELLOW = "#FFD23F"
+const CORAL = "#FF5A5F"
+
+const netPattern: React.CSSProperties = {
+  backgroundImage:
+    "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
+}
 
 type Announcement = {
   id: string
@@ -42,6 +63,7 @@ type Category = {
 }
 
 export default function AnnouncementsPage() {
+  const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -50,6 +72,8 @@ export default function AnnouncementsPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [showSupportModal, setShowSupportModal] = useState(false)
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
 
   const isAdmin = user?.role === "admin" || user?.is_admin || user?.email === "admin@admin.pl" || user?.name === "Mateusz Podzorski" || user?.full_name === "Mateusz Podzorski"
 
@@ -111,7 +135,6 @@ export default function AnnouncementsPage() {
 
   async function handleLogout() {
     localStorage.removeItem("volley_user")
-    localStorage.clear()
     sessionStorage.clear()
     await supabase.auth.signOut()
     setUser(null)
@@ -161,7 +184,18 @@ export default function AnnouncementsPage() {
     setNewIsPinned(false)
   }
 
-  async function handleDelete(id: string) {
+  function handleDelete(id: string, title: string) {
+    setConfirmDialog({
+      title: "Usunąć ogłoszenie?",
+      message: `"${title}" zniknie z tablicy dla wszystkich — tej operacji nie da się cofnąć.`,
+      confirmLabel: "Usuń trwale",
+      danger: true,
+      onConfirm: () => performDelete(id)
+    })
+  }
+
+  async function performDelete(id: string) {
+    setConfirmDialog(null)
     setAnnouncements((prev) => prev.filter((a) => a.id !== id))
     const { error } = await supabase.from('announcements').delete().eq('id', id)
 
@@ -184,10 +218,12 @@ export default function AnnouncementsPage() {
       .eq('id', id)
   }
 
+  function buildAnnouncementTokens(a: Announcement): string[] {
+    return normalizeSearchText(`${a.title || ""} ${a.content || ""}`).split(/[^a-z0-9]+/).filter(Boolean)
+  }
+
   const filtered = announcements.filter((a) => {
-    const matchesSearch =
-      a.title.toLowerCase().includes(search.toLowerCase()) ||
-      a.content.toLowerCase().includes(search.toLowerCase())
+    const matchesSearch = fuzzySearchMatch(buildAnnouncementTokens(a), search)
 
     let matchesCat = true
     if (selectedCategory !== "all") {
@@ -199,33 +235,17 @@ export default function AnnouncementsPage() {
 
   const sorted = [...filtered].sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned))
 
-  // Pomocnik do wyznaczania koloru przycisku w zależności od nazwy kategorii
-  function getCategoryButtonClass(catName: string, isSelected: boolean) {
+  // Kolor akcentu w zależności od kategorii — te same tokeny marki co reszta appki
+  function getCategoryAccent(catName: string): { color: string; bg: string; border: string; text: string } {
     const name = catName.toLowerCase()
-
-    if (name.includes("odwołan")) {
-      return isSelected
-        ? "bg-rose-600 text-white shadow-md shadow-rose-600/20 font-black border-rose-600"
-        : "text-rose-700 bg-rose-50/70 border-rose-200 hover:bg-rose-100"
-    }
-    if (name.includes("ważn")) {
-      return isSelected
-        ? "bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-black border-amber-500"
-        : "text-amber-800 bg-amber-50/80 border-amber-200 hover:bg-amber-100"
-    }
-    if (name.includes("zapro")) {
-      return isSelected
-        ? "bg-blue-600 text-white shadow-md shadow-blue-600/20 font-black border-blue-600"
-        : "text-blue-700 bg-blue-50/70 border-blue-200 hover:bg-blue-100"
-    }
-    // Domyślne / Ogólne
-    return isSelected
-      ? "bg-slate-800 text-white shadow-md shadow-slate-800/20 font-black border-slate-800"
-      : "text-slate-600 bg-slate-50 border-slate-200 hover:bg-slate-100"
+    if (name.includes("odwołan")) return { color: CORAL, bg: "bg-[#FF5A5F]/10", border: "border-[#FF5A5F]/25", text: "text-[#E0454A]" }
+    if (name.includes("ważn")) return { color: YELLOW, bg: "bg-[#FFD23F]/10", border: "border-[#FFD23F]/30", text: "text-[#946E00]" }
+    if (name.includes("zapro")) return { color: COBALT, bg: "bg-[#2C4BFF]/10", border: "border-[#2C4BFF]/25", text: "text-[#1D3AE8]" }
+    return { color: "#94A3B8", bg: "bg-slate-100", border: "border-slate-200", text: "text-slate-600" }
   }
 
   return (
-    <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
+    <div className="flex min-h-screen bg-[#F5F6FA] text-[#14181F]">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -233,53 +253,81 @@ export default function AnnouncementsPage() {
         onLogout={handleLogout}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        <div
+          className="pointer-events-none absolute inset-0 z-0"
+          style={{
+            background:
+              "radial-gradient(640px circle at 10% -8%, rgba(44,75,255,0.07), transparent 60%), radial-gradient(520px circle at 92% 16%, rgba(255,210,63,0.10), transparent 55%), radial-gradient(760px circle at 45% 100%, rgba(0,196,140,0.05), transparent 60%)"
+          }}
+        />
 
-        <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-6 py-8">
+        {/* Header — ta strona wcześniej w ogóle go nie miała (brak dzwonka, brak wsparcia) */}
+        <header className="sticky top-0 z-30 flex items-center justify-end border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowSupportModal(true)}
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120] shadow-sm cursor-pointer active:scale-90 transition-transform"
+              title="Postaw kawę"
+            >
+              <Coffee className="h-4 w-4" />
+            </button>
+            <NotificationsBell onNotificationClick={(notif: NotificationItem) => {}} />
+          </div>
+        </header>
+
+        <main className="relative z-10 mx-auto w-full max-w-5xl flex-1 space-y-6 px-6 py-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm">
-                <Megaphone className="h-6 w-6" />
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-[#2C4BFF] border border-slate-200 shadow-xs">
+                <Megaphone className="h-5 w-5" />
               </div>
               <div>
-                <h1 className="text-xl font-black tracking-tight text-slate-900">Tablica Ogłoszeń</h1>
+                <h1 className={cn(display.className, "text-xl font-bold text-slate-900 tracking-tight")}>Tablica Ogłoszeń</h1>
                 <p className="text-xs font-medium text-slate-500">Ważne komunikaty i informacje dla całego zespołu.</p>
               </div>
             </div>
 
             {isAdmin && (
-              <Button
-                size="sm"
+              <button
                 onClick={() => setIsModalOpen(true)}
-                className="gap-2 rounded-2xl font-black bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs shadow-md shadow-blue-500/20 px-4 py-2.5 cursor-pointer"
+                className="h-10 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 text-white cursor-pointer active:scale-[0.97] shadow-md transition-all shrink-0"
+                style={{ background: COBALT, boxShadow: `0 4px 14px -4px ${COBALT}80` }}
               >
                 <Plus className="h-4 w-4 stroke-[2.5]" />
                 Dodaj ogłoszenie
-              </Button>
+              </button>
             )}
           </div>
 
-          {/* WYSZUKIWARKA I KOLOROWE ZAKŁADKI KATEGORII */}
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+          {/* WYSZUKIWARKA I ZAKŁADKI KATEGORII */}
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
             <div className="relative w-full sm:w-72">
               <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
-                type="search"
+                type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Szukaj w ogłoszeniach…"
-                className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 shadow-sm transition-all"
+                className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-9 text-xs outline-none focus:border-[#2C4BFF] focus:ring-2 focus:ring-[#2C4BFF]/20 shadow-xs transition-all"
               />
+              {search && (
+                <button
+                  onClick={() => setSearch("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
 
-            {/* Pasek kategorii z dopasowanymi kolorami */}
             <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 border border-slate-200/80 w-full sm:w-auto overflow-x-auto">
               <button
                 onClick={() => setSelectedCategory("all")}
                 className={cn(
-                  "rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all shrink-0 border cursor-pointer",
+                  "rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all shrink-0 border cursor-pointer active:scale-95",
                   selectedCategory === "all"
-                    ? "bg-slate-900 text-white shadow-md shadow-slate-900/20 font-black border-slate-900"
+                    ? "bg-[#0B1120] text-white shadow-md shadow-[#0B1120]/20 border-[#0B1120]"
                     : "text-slate-600 bg-white border-transparent hover:bg-slate-50"
                 )}
               >
@@ -288,15 +336,16 @@ export default function AnnouncementsPage() {
 
               {categories.map((cat) => {
                 const isSelected = selectedCategory === cat.id.toString()
-                const catClass = getCategoryButtonClass(cat.name, isSelected)
+                const accent = getCategoryAccent(cat.name)
 
                 return (
                   <button
                     key={cat.id}
                     onClick={() => setSelectedCategory(cat.id.toString())}
+                    style={isSelected ? { background: accent.color, boxShadow: `0 4px 10px -3px ${accent.color}99` } : undefined}
                     className={cn(
-                      "rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all shrink-0 border cursor-pointer",
-                      catClass
+                      "rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all shrink-0 border cursor-pointer active:scale-95",
+                      isSelected ? "text-white border-transparent" : cn(accent.text, accent.bg, accent.border, "hover:opacity-80")
                     )}
                   >
                     {cat.name}
@@ -307,96 +356,158 @@ export default function AnnouncementsPage() {
           </div>
 
           {/* LISTA OGŁOSZEŃ */}
-          <div className="space-y-4">
+          <div className="space-y-3.5">
             {isLoading ? (
-              <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
-                <p className="text-xs text-blue-600 font-bold animate-pulse">Ładowanie ogłoszeń z bazy...</p>
+              <div className="space-y-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="rounded-[24px] border border-slate-200/90 bg-white p-5 space-y-3 animate-pulse" style={{ animationDelay: `${i * 100}ms` }}>
+                    <div className="h-4 w-24 rounded-md bg-slate-100" />
+                    <div className="h-4 w-2/3 rounded-md bg-slate-100" />
+                    <div className="h-3 w-full rounded-md bg-slate-100" />
+                  </div>
+                ))}
               </div>
             ) : sorted.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
-                <p className="text-xs text-slate-400 font-medium">Brak ogłoszeń na tablicy.</p>
+              <div className="flex flex-col items-center gap-3 rounded-[28px] border border-dashed border-slate-300 bg-white p-12 text-center">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                  <Search className="h-5 w-5" />
+                </div>
+                <p className="text-xs font-semibold text-slate-500">
+                  {search ? `Brak wyników dla „${search}”.` : "Brak ogłoszeń na tablicy."}
+                </p>
               </div>
             ) : (
-              sorted.map((item) => {
+              sorted.map((item, idx) => {
                 const currentCategory = categories.find((c) => c.id === item.category_id)
                 const catName = currentCategory?.name?.toLowerCase() || ""
 
-                const isMatchCancelled = item.match_id || item.title.toLowerCase().includes("odwołan") || catName.includes("odwołan")
-                const isImportant = catName.includes("ważn") || item.title.toLowerCase().includes("ważn")
-                const isInvitation = catName.includes("zapro") || item.title.toLowerCase().includes("zapro")
+                // Odznaka wynika wyłącznie z realnie wybranej kategorii (nie z treści tytułu) —
+                // wcześniej dopasowanie fragmentu słowa w tytule ("zapro", "ważn"...) potrafiło
+                // nadać złą odznakę niezależnie od kategorii faktycznie ustawionej przez admina.
+                const isMatchCancelled = !!item.match_id || catName.includes("odwołan")
+                const isImportant = catName.includes("ważn")
+                const isInvitation = catName.includes("zapro")
+
+                const accent = isMatchCancelled
+                  ? { color: CORAL, bg: "bg-[#FF5A5F]/10", border: "border-[#FF5A5F]/25", text: "text-[#E0454A]" }
+                  : isImportant
+                  ? { color: YELLOW, bg: "bg-[#FFD23F]/10", border: "border-[#FFD23F]/30", text: "text-[#946E00]" }
+                  : isInvitation
+                  ? { color: COBALT, bg: "bg-[#2C4BFF]/10", border: "border-[#2C4BFF]/25", text: "text-[#1D3AE8]" }
+                  : { color: "#94A3B8", bg: "bg-slate-100", border: "border-slate-200", text: "text-slate-600" }
 
                 const authorName = item.players?.full_name
+
+                const badgeContent = isMatchCancelled ? (
+                  <><Ban className="h-3 w-3" /> Spotkanie odwołane</>
+                ) : isImportant ? (
+                  <><AlertTriangle className="h-3 w-3" /> Ważne ogłoszenie</>
+                ) : isInvitation ? (
+                  <><CalendarCheck className="h-3 w-3" /> {currentCategory ? currentCategory.name : "Zaproszenie"}</>
+                ) : (
+                  <>{currentCategory ? currentCategory.name : "Ogólne"}</>
+                )
+
+                // Przypięte ogłoszenia dostają "hero" (ciemna karta) — zawsze najważniejsze na tablicy
+                if (item.is_pinned) {
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => { if (isMatchCancelled) router.push("/") }}
+                      style={{
+                        background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)`,
+                        animationDelay: `${Math.min(idx, 6) * 40}ms`
+                      }}
+                      className={cn(
+                        "relative overflow-hidden rounded-[24px] p-5 sm:p-6 space-y-3 text-white shadow-lg border border-white/10 animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
+                        isMatchCancelled && "cursor-pointer"
+                      )}
+                    >
+                      <div className="absolute inset-0 pointer-events-none opacity-70" style={netPattern} />
+                      <div className="relative z-10 flex items-start justify-between gap-3">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="flex items-center gap-1 rounded-lg bg-[#FFD23F]/20 border border-[#FFD23F]/40 text-[#FFD23F] px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider">
+                              <Pin className="h-3 w-3 fill-[#FFD23F]" />
+                              Przypięte
+                            </span>
+                            <span
+                              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider border"
+                              style={{ background: `${accent.color}25`, borderColor: `${accent.color}55`, color: accent.color }}
+                            >
+                              {badgeContent}
+                            </span>
+                          </div>
+                          <h3 className={cn(display.className, "text-lg font-bold text-white leading-snug")}>{item.title}</h3>
+                        </div>
+
+                        {isAdmin && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); togglePin(item.id, item.is_pinned) }}
+                              className="p-2 rounded-xl text-[#FFD23F] bg-[#FFD23F]/10 hover:bg-[#FFD23F]/20 transition-colors cursor-pointer active:scale-90"
+                              title="Odepnij ogłoszenie"
+                            >
+                              <Pin className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDelete(item.id, item.title) }}
+                              className="p-2 rounded-xl text-slate-300 hover:text-[#FF9296] hover:bg-[#FF5A5F]/10 transition-colors cursor-pointer active:scale-90"
+                              title="Usuń ogłoszenie"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <p className="relative z-10 text-xs font-medium leading-relaxed whitespace-pre-line text-slate-300">
+                        {item.content}
+                      </p>
+
+                      <div className="relative z-10 flex items-center justify-between border-t border-white/10 pt-3 text-[11px] text-slate-400 font-medium">
+                        <span>{authorName || "Organizator"}</span>
+                        <span>{formatDatePL(item.created_at?.split("T")[0]) || new Date(item.created_at).toLocaleDateString("pl-PL")}</span>
+                      </div>
+                    </div>
+                  )
+                }
 
                 return (
                   <div
                     key={item.id}
-                    onClick={() => { if (isMatchCancelled) window.location.href = "/" }}
+                    onClick={() => { if (isMatchCancelled) router.push("/") }}
+                    style={{
+                      borderLeftColor: accent.color,
+                      animationDelay: `${Math.min(idx, 6) * 40}ms`
+                    }}
                     className={cn(
-                      "rounded-3xl border p-5 sm:p-6 space-y-3 transition-all relative overflow-hidden shadow-sm",
-                      isMatchCancelled
-                        ? "border-rose-300 bg-gradient-to-r from-rose-50/90 via-rose-50/50 to-white hover:border-rose-400 cursor-pointer shadow-rose-500/5"
-                        : isImportant
-                        ? "border-amber-300 bg-gradient-to-r from-amber-50/90 via-amber-50/40 to-white hover:border-amber-400 shadow-amber-500/5"
-                        : isInvitation
-                        ? "border-blue-200 bg-gradient-to-r from-blue-50/70 via-indigo-50/30 to-white hover:border-blue-300 shadow-blue-500/5"
-                        : item.is_pinned
-                        ? "border-slate-300 bg-gradient-to-r from-slate-50 via-white to-white"
-                        : "border-slate-200/90 bg-white hover:border-slate-300"
+                      "rounded-[24px] border border-l-4 p-5 sm:p-6 space-y-3 transition-all shadow-xs bg-white hover:shadow-md hover:-translate-y-0.5 animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
+                      isMatchCancelled ? "cursor-pointer" : ""
                     )}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {item.is_pinned && (
-                            <span className="flex items-center gap-1 rounded-lg bg-amber-500 text-slate-950 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-sm">
-                              <Pin className="h-3 w-3 fill-slate-950" />
-                              Przypięte
-                            </span>
-                          )}
-
-                          {/* Wyraziste badge z dopasowanym stylem */}
-                          {isMatchCancelled ? (
-                            <span className="inline-flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider border bg-rose-100 text-rose-800 border-rose-300">
-                              <Ban className="h-3 w-3 text-rose-600" />
-                              Spotkanie odwołane
-                            </span>
-                          ) : isImportant ? (
-                            <span className="inline-flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider border bg-amber-100 text-amber-900 border-amber-300 shadow-sm">
-                              <AlertTriangle className="h-3 w-3 text-amber-600 animate-pulse" />
-                              Ważne ogłoszenie
-                            </span>
-                          ) : isInvitation ? (
-                            <span className="inline-flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider border bg-blue-100 text-blue-800 border-blue-200">
-                              <CalendarCheck className="h-3 w-3 text-blue-600" />
-                              {currentCategory ? currentCategory.name : "Zaproszenie"}
-                            </span>
-                          ) : (
-                            <span className="rounded-lg px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider border bg-slate-100 text-slate-700 border-slate-200">
-                              {currentCategory ? currentCategory.name : "Ogólne"}
-                            </span>
-                          )}
-                        </div>
-
-                        <h3 className={cn(
-                          "text-base font-black leading-snug",
-                          isMatchCancelled ? "text-rose-950" : isImportant ? "text-amber-950" : "text-slate-900"
-                        )}>
-                          {item.title}
-                        </h3>
+                      <div className="space-y-1.5">
+                        <span
+                          className={cn("inline-flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider border", accent.bg, accent.border, accent.text)}
+                        >
+                          {badgeContent}
+                        </span>
+                        <h3 className="text-base font-bold leading-snug text-slate-900">{item.title}</h3>
                       </div>
 
                       {isAdmin && (
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 shrink-0">
                           <button
-                            onClick={(e) => { e.stopPropagation(); togglePin(item.id, item.is_pinned); }}
-                            className={cn("p-2 rounded-xl transition-colors cursor-pointer", item.is_pinned ? "text-amber-600 bg-amber-100/80" : "text-slate-400 hover:bg-slate-100")}
-                            title={item.is_pinned ? "Odepnij ogłoszenie" : "Przypnij na górze"}
+                            onClick={(e) => { e.stopPropagation(); togglePin(item.id, item.is_pinned) }}
+                            className="p-2 rounded-xl text-slate-400 hover:bg-[#FFD23F]/15 hover:text-[#946E00] transition-colors cursor-pointer active:scale-90"
+                            title="Przypnij na górze"
                           >
                             <Pin className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-                            className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                            onClick={(e) => { e.stopPropagation(); handleDelete(item.id, item.title) }}
+                            className="p-2 rounded-xl text-slate-400 hover:text-[#FF5A5F] hover:bg-[#FF5A5F]/10 transition-colors cursor-pointer active:scale-90"
                             title="Usuń ogłoszenie"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -405,16 +516,13 @@ export default function AnnouncementsPage() {
                       )}
                     </div>
 
-                    <p className={cn(
-                      "text-xs font-medium leading-relaxed whitespace-pre-line",
-                      isMatchCancelled ? "text-rose-900/80" : isImportant ? "text-amber-950/80 font-semibold" : "text-slate-600"
-                    )}>
+                    <p className="text-xs font-medium leading-relaxed whitespace-pre-line text-slate-600">
                       {item.content}
                     </p>
 
-                    <div className="flex items-center justify-between border-t border-slate-200/50 pt-3 text-[11px] text-slate-400 font-medium">
+                    <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-[11px] text-slate-400 font-medium">
                       <span>{authorName || "Organizator"}</span>
-                      <span>{new Date(item.created_at).toLocaleDateString("pl-PL")}</span>
+                      <span>{formatDatePL(item.created_at?.split("T")[0]) || new Date(item.created_at).toLocaleDateString("pl-PL")}</span>
                     </div>
                   </div>
                 )
@@ -424,41 +532,55 @@ export default function AnnouncementsPage() {
         </main>
       </div>
 
-      {isModalOpen && isAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4 text-slate-900">
-            <h2 className="text-base font-black">Nowe Ogłoszenie</h2>
-            <form onSubmit={handleCreateAnnouncement} className="space-y-4 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Tytuł</label>
-                <input type="text" required value={newTitle} onChange={(e) => setNewTitle(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 outline-none focus:border-blue-500 focus:bg-white font-semibold" />
-              </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Kategoria</label>
-                <select value={newCategoryId} onChange={(e) => setNewCategoryId(Number(e.target.value))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 outline-none focus:border-blue-500 font-semibold">
-                  {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Treść</label>
-                <textarea required rows={4} value={newContent} onChange={(e) => setNewContent(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 outline-none focus:border-blue-500 focus:bg-white font-medium" />
-              </div>
-              <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
-                <input type="checkbox" id="pinCheck" checked={newIsPinned} onChange={(e) => setNewIsPinned(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                <label htmlFor="pinCheck" className="font-bold text-slate-700 cursor-pointer">Przypnij ogłoszenie na samej górze</label>
-              </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} className="rounded-xl cursor-pointer">Anuluj</Button>
-                <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl gap-1.5 font-bold cursor-pointer"><Send className="h-3.5 w-3.5" /> Opublikuj</Button>
-              </div>
-            </form>
-          </div>
+      <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
+
+      {/* MODAL NOWEGO OGŁOSZENIA */}
+      <Modal
+        open={isModalOpen && isAdmin}
+        onClose={() => setIsModalOpen(false)}
+        overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
+        cardClassName="w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl space-y-4 text-slate-900"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <h2 className={cn(display.className, "text-base font-bold text-slate-900")}>Nowe Ogłoszenie</h2>
+          <button onClick={() => setIsModalOpen(false)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer active:scale-90 transition-transform">
+            <X className="h-5 w-5" />
+          </button>
         </div>
-      )}
+        <form onSubmit={handleCreateAnnouncement} className="space-y-4 text-xs">
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">Tytuł</label>
+            <input type="text" required value={newTitle} onChange={(e) => setNewTitle(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 outline-none focus:border-[#2C4BFF] focus:bg-white font-semibold" />
+          </div>
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">Kategoria</label>
+            <select value={newCategoryId} onChange={(e) => setNewCategoryId(Number(e.target.value))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 outline-none focus:border-[#2C4BFF] font-semibold">
+              {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">Treść</label>
+            <textarea required rows={4} value={newContent} onChange={(e) => setNewContent(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 outline-none focus:border-[#2C4BFF] focus:bg-white font-medium" />
+          </div>
+          <div
+            className="flex items-center gap-2 p-3 rounded-xl bg-[#FFD23F]/10 border border-[#FFD23F]/25 cursor-pointer"
+            onClick={() => setNewIsPinned(!newIsPinned)}
+          >
+            <input type="checkbox" checked={newIsPinned} onChange={() => {}} className="h-4 w-4 rounded border-[#FFD23F]/50 text-[#946E00] pointer-events-none" />
+            <label className="font-bold text-[#7A5C00] cursor-pointer">Przypnij ogłoszenie na samej górze</label>
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} className="rounded-xl cursor-pointer">Anuluj</Button>
+            <Button type="submit" className="bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white rounded-xl gap-1.5 font-bold cursor-pointer shadow-md shadow-[#2C4BFF]/20"><Send className="h-3.5 w-3.5" /> Opublikuj</Button>
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog state={confirmDialog} onCancel={() => setConfirmDialog(null)} />
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-lg">
-          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120]/95 backdrop-blur-md px-4 py-2.5 text-xs font-bold text-white shadow-xl animate-in fade-in slide-in-from-bottom-4">
+          <CheckCircle2 className="h-4 w-4 text-[#00E0A2]" />
           {toast}
         </div>
       )}
