@@ -86,7 +86,7 @@ export default function LoginScreen() {
     }
   };
 
-  // Główna logika logowania do systemu Supabase
+  // Główna logika logowania przy użyciu bazy danych (funkcja RPC verify_login)[cite: 1]
   const handleLogin = async () => {
     if (!email.trim() || !password) {
       showAlert('Błąd', 'Wypełnij pole e-mail oraz hasło.');
@@ -96,41 +96,40 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
-      // Weryfikacja danych gracza w bazie danych
-      const { data, error } = await supabase
-        .from('players')
-        .select('*')
-        .eq('email', email.trim().toLowerCase())
-        .eq('password', password)
-        .single();
+      // Wywołanie bezpiecznej funkcji RPC w bazie danych do weryfikacji hasha bcrypt[cite: 1]
+      const { data, error } = await supabase.rpc('verify_login', {
+        p_email: email.trim().toLowerCase(),
+        p_password: password,
+      });
 
-      if (error || !data) {
+      if (error || !data || data.error) {
         setLoading(false);
-        showAlert('Błąd logowania', 'Nieprawidłowy e-mail lub hasło.');
+        const errType = data?.error;
+        if (errType === 'pending') {
+          showAlert(
+            'Konto oczekuje na zatwierdzenie',
+            'Twoje konto nie zostało jeszcze zatwierdzone przez administratora. Spróbuj ponownie później.'
+          );
+        } else {
+          showAlert('Błąd logowania', 'Nieprawidłowy e-mail lub hasło.');
+        }
         return;
       }
 
-      // Blokada dla kont niezatwierdzonych przez administratora (role_id === 3)
-      if (data.role_id === 3) {
-        setLoading(false);
-        showAlert(
-          'Konto oczekuje na zatwierdzenie',
-          'Twoje konto nie zostało jeszcze zatwierdzone przez administratora. Spróbuj ponownie później.'
-        );
-        return;
-      }
+      // Dane użytkownika zwrócone poprawnie przez procedurę RPC[cite: 1]
+      const player = data;
 
       // Zapisanie danych sesji lokalnie
-      await AsyncStorage.setItem(CURRENT_PLAYER_KEY, data.id);
+      await AsyncStorage.setItem(CURRENT_PLAYER_KEY, player.id);
       await AsyncStorage.setItem(REMEMBER_ME_KEY, rememberMe ? 'true' : 'false');
-      await AsyncStorage.setItem('current_player_data', JSON.stringify(data));
+      await AsyncStorage.setItem('current_player_data', JSON.stringify(player));
 
       // Pobieranie meczów w celu synchronizacji powiadomień lokalnych przy starcie
       const { data: matchesData } = await supabase.from('matches').select('*');
       const { data: regsData } = await supabase
         .from('match_registrations')
         .select('match_id, player_id')
-        .eq('player_id', data.id);
+        .eq('player_id', player.id);
 
       if (matchesData) {
         const registeredMatchIds = new Set((regsData || []).map((r) => r.match_id));

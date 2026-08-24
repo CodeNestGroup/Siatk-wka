@@ -134,7 +134,7 @@ export default function RegisterScreen() {
     generateCaptcha();
   }, []);
 
-  // Główna logika rejestracji użytkownika
+  // Główna logika rejestracji użytkownika (hasło przesyłane w czystym tekście – baza zaszyfruje je triggerem)[cite: 1, 2]
   const handleRegister = async () => {
     if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
       showAlert('Błąd', 'Wypełnij wszystkie wymagane pola.');
@@ -201,7 +201,7 @@ export default function RegisterScreen() {
         return;
       }
 
-      // Dodanie nowego gracza do bazy
+      // Dodanie nowego gracza do bazy (trigger trg_hash_player_password automatycznie zahashuje hasło)[cite: 1, 2]
       const { data, error: insertError } = await supabase
         .from('players')
         .insert({
