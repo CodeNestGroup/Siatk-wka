@@ -320,15 +320,15 @@ const styles = StyleSheet.create({
     marginBottom: 28 
   },
   logoCircle: { 
-    width: 96, 
-    height: 96, 
-    borderRadius: 48, 
-    backgroundColor: '#1E293B', 
+    width: 110, 
+    height: 110, 
+    borderRadius: 15, 
+    backgroundColor: '#1f2531ff', 
     alignItems: 'center', 
     justifyContent: 'center', 
     marginBottom: 16,
     borderWidth: 2,
-    borderColor: '#334155',
+    borderColor: '#000000ff',
     overflow: 'hidden',
   },
   logoImage: {
