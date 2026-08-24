@@ -10,6 +10,7 @@ import {
   ScrollView,
   Switch,
   Modal,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -174,7 +175,7 @@ export default function LoginScreen() {
           {/* Nagłówek aplikacji */}
           <View style={styles.header}>
             <View style={styles.logoCircle}>
-              <Text style={styles.logo}>🏐</Text>
+              <Image source={require('@/assets/images/icon.png')} style={styles.logoImage} resizeMode="cover"/>
             </View>
             <Text style={styles.title}>Siatkówka App</Text>
             <Text style={styles.subtitle}>Zaloguj się do swojego konta</Text>
@@ -327,10 +328,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center', 
     marginBottom: 16,
     borderWidth: 2,
-    borderColor: '#334155'
+    borderColor: '#334155',
+    overflow: 'hidden',
   },
-  logo: { 
-    fontSize: 48 
+  logoImage: {
+    width: '100%',
+    height: '100%',
   },
   title: { 
     fontSize: 30, 
