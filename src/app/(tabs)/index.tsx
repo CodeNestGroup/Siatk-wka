@@ -7,14 +7,16 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Dimensions,
-  Modal,
+  useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
 import { syncMatchNotifications } from '@/services/notificationService';
+import CustomAlert from '@/components/CustomAlert';
 
 type Match = {
   id: string;
@@ -65,39 +67,6 @@ function formatDateToPL(dateString: string): string {
   return `${day}-${month}-${year}`;
 }
 
-type CustomAlertProps = {
-  visible: boolean;
-  title: string;
-  message: string;
-  onClose: () => void;
-};
-
-function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
-  return (
-    <Modal
-      transparent
-      visible={visible}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={alertStyles.overlay}>
-        <View style={alertStyles.alertBox}>
-          <View style={alertStyles.indicator} />
-          <Text style={alertStyles.title}>{title}</Text>
-          <Text style={alertStyles.message}>{message}</Text>
-          <TouchableOpacity
-            style={alertStyles.button}
-            onPress={onClose}
-            activeOpacity={0.8}
-          >
-            <Text style={alertStyles.buttonText}>OK</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
   try {
     const matchDateTime = new Date(`${matchDateStr}T${matchTimeStartStr}`);
@@ -127,6 +96,11 @@ function getAuthorName(playersField: Announcement['players']): string {
 
 export default function NearestMatchScreen() {
   const router = useRouter();
+  const systemColorScheme = useColorScheme();
+
+  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
+  const isDark = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
+  const styles = getStyles(isDark);
 
   const [match, setMatch] = useState<Match | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
@@ -155,6 +129,17 @@ export default function NearestMatchScreen() {
     if (alertCallback) {
       alertCallback();
       setAlertCallback(null);
+    }
+  };
+
+  const loadThemePreference = async () => {
+    try {
+      const savedTheme = await AsyncStorage.getItem('app_theme_mode');
+      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+        setThemeMode(savedTheme);
+      }
+    } catch (e) {
+      console.error('Błąd wczytywania motywu:', e);
     }
   };
 
@@ -221,9 +206,12 @@ export default function NearestMatchScreen() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useFocusEffect(
+    useCallback(() => {
+      loadThemePreference();
+      loadData();
+    }, [loadData])
+  );
 
   const handleScrollEnd = (e: any) => {
     const contentOffsetX = e.nativeEvent.contentOffset.x;
@@ -266,7 +254,7 @@ export default function NearestMatchScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['top', 'bottom', 'left', 'right']}>
-        <ActivityIndicator size="large" color="#FBBF24" />
+        <ActivityIndicator size="large" color="#2C4BFF" />
       </SafeAreaView>
     );
   }
@@ -362,7 +350,11 @@ export default function NearestMatchScreen() {
         message={alertMessage}
         onClose={handleAlertClose}
       />
+      
+      {/* Karta meczu w stylu biletu */}
       <View style={styles.heroSection}>
+        <View style={styles.ticketSideAccent} />
+        
         <View style={styles.heroTopRow}>
           <Text style={styles.heroBadge}>NADCHODZĄCY MECZ</Text>
           <Text style={styles.heroPrice}>{Number(match.price_per_player)} PLN</Text>
@@ -377,7 +369,7 @@ export default function NearestMatchScreen() {
           </View>
 
           <View style={styles.heroDetailsCol}>
-            <Text style={styles.heroDateMain}>{weekday}, {formatDateToPL(match.date)}</Text>
+            <Text style={styles.heroDateMain}>{weekday}</Text>
             <Text style={styles.heroTimeMain}>🕒 {formatTime(match.time_start)} – {formatTime(match.time_end)}</Text>
             <Text style={styles.heroLocationMain} numberOfLines={1}>📍 {match.location}</Text>
           </View>
@@ -432,7 +424,6 @@ export default function NearestMatchScreen() {
                     <Text style={[styles.playerText, isMe && styles.playerTextHighlight]}>
                       {index + 1}. {playerName} {isMe && '(Ty)'}
                     </Text>
-                    <Text style={styles.playerRoleTag}>Główny</Text>
                   </View>
                 );
               })
@@ -449,9 +440,6 @@ export default function NearestMatchScreen() {
                   <View key={item.id} style={[styles.playerRow, isMe && styles.playerRowHighlight]}>
                     <Text style={[styles.playerText, isMe && styles.playerTextHighlight]}>
                       {index + 1}. {playerName} {isMe && '(Ty)'}
-                    </Text>
-                    <Text style={[styles.playerRoleTag, { backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B' }]}>
-                      Rezerwa
                     </Text>
                   </View>
                 );
@@ -545,285 +533,265 @@ export default function NearestMatchScreen() {
   );
 }
 
-const alertStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  alertBox: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#1E293B',
-    borderRadius: 24,
-    padding: 24,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  indicator: {
-    width: 48,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#FBBF24',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  message: {
-    fontSize: 16,
-    color: '#94A3B8',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  button: {
-    width: '100%',
-    backgroundColor: '#FBBF24',
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#0F172A',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-});
+const getStyles = (isDark: boolean) =>
+  StyleSheet.create({
+    safeArea: { flex: 1, backgroundColor: isDark ? '#0B1120' : '#F8FAFC' },
+    loadingContainer: { 
+      flex: 1, 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      paddingHorizontal: 16 
+    },
+    emptyMainText: { fontSize: 16, color: isDark ? '#94A3B8' : '#64748B', textAlign: 'center', fontWeight: '700' },
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0F172A' },
-  loadingContainer: { 
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    backgroundColor: '#0F172A',
-    paddingHorizontal: 16 
-  },
-  emptyMainText: { fontSize: 16, color: '#94A3B8', textAlign: 'center', fontWeight: '700' },
+    heroSection: {
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: 16,
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      borderBottomWidth: 1,
+      borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      position: 'relative',
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: isDark ? 0.35 : 0.06,
+      shadowRadius: 12,
+      elevation: 6,
+    },
+    ticketSideAccent: {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      bottom: 0,
+      width: 6,
+      backgroundColor: '#2C4BFF',
+    },
+    heroTopRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    heroBadge: {
+      fontSize: 11,
+      fontWeight: '900',
+      color: '#2C4BFF',
+      letterSpacing: 1.2,
+    },
+    heroPrice: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+    },
+    heroTitle: {
+      fontSize: 22,
+      fontWeight: '900',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      marginBottom: 12,
+    },
+    heroInfoCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      borderRadius: 20,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+    },
+    heroDateBox: {
+      width: 58,
+      height: 58,
+      borderRadius: 16,
+      backgroundColor: '#2C4BFF',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 14,
+    },
+    heroDayNumber: {
+      fontSize: 22,
+      fontWeight: '900',
+      color: '#FFFFFF',
+      lineHeight: 24,
+    },
+    heroMonthText: {
+      fontSize: 11,
+      fontWeight: '900',
+      color: '#FFFFFF',
+      textTransform: 'uppercase',
+    },
+    heroDetailsCol: {
+      flex: 1,
+    },
+    heroDateMain: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      marginBottom: 3,
+    },
+    heroTimeMain: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: isDark ? '#94A3B8' : '#64748B',
+      marginBottom: 3,
+    },
+    heroLocationMain: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: isDark ? '#94A3B8' : '#64748B',
+    },
+    cancelledBadge: {
+      marginTop: 10,
+      backgroundColor: isDark ? 'rgba(255, 90, 95, 0.15)' : '#FEF2F2',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: '#FF5A5F',
+      alignItems: 'center',
+    },
+    cancelledBadgeText: {
+      color: '#FF5A5F',
+      fontWeight: '900',
+      fontSize: 13,
+    },
 
-  heroSection: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 16,
-    backgroundColor: '#1E293B',
-    borderBottomWidth: 2,
-    borderBottomColor: '#334155',
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  heroBadge: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: '#FBBF24',
-    letterSpacing: 1,
-  },
-  heroPrice: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  heroTitle: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    marginBottom: 12,
-  },
-  heroInfoCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0F172A',
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  heroDateBox: {
-    width: 58,
-    height: 58,
-    borderRadius: 14,
-    backgroundColor: '#FBBF24',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  heroDayNumber: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: '#0F172A',
-    lineHeight: 24,
-  },
-  heroMonthText: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: '#0F172A',
-    textTransform: 'uppercase',
-  },
-  heroDetailsCol: {
-    flex: 1,
-  },
-  heroDateMain: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 3,
-  },
-  heroTimeMain: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#94A3B8',
-    marginBottom: 3,
-  },
-  heroLocationMain: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  cancelledBadge: {
-    marginTop: 10,
-    backgroundColor: 'rgba(248, 113, 113, 0.15)',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#F87171',
-    alignItems: 'center',
-  },
-  cancelledBadgeText: {
-    color: '#F87171',
-    fontWeight: '900',
-    fontSize: 13,
-  },
+    navSection: {
+      flexDirection: 'row',
+      paddingHorizontal: 20,
+      paddingVertical: 12,
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      borderBottomWidth: 1,
+      borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+    },
+    navButton: {
+      flex: 1,
+      paddingVertical: 10,
+      alignItems: 'center',
+      borderRadius: 16,
+    },
+    navButtonActive: {
+      backgroundColor: '#2C4BFF',
+      shadowColor: '#2C4BFF',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.3,
+      shadowRadius: 4,
+      elevation: 3,
+    },
+    navButtonText: { fontSize: 13, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B' },
+    navButtonTextActive: { color: '#FFFFFF', fontWeight: '900' },
 
-  navSection: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: '#1E293B',
-    borderBottomWidth: 2,
-    borderBottomColor: '#334155',
-  },
-  navButton: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 12,
-  },
-  navButtonActive: {
-    backgroundColor: '#0F172A',
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  navButtonText: { fontSize: 13, fontWeight: '700', color: '#94A3B8' },
-  navButtonTextActive: { color: '#FBBF24', fontWeight: '900' },
+    bottomSectionScroll: { flex: 1 },
+    tabContentPage: {
+      width: SCREEN_WIDTH,
+      flex: 1,
+    },
+    innerListScroll: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 40 },
+    sectionHeading: { fontSize: 16, fontWeight: '900', color: isDark ? '#FFFFFF' : '#0F172A', marginBottom: 10 },
+    emptySubText: { fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', fontStyle: 'italic', marginBottom: 10, fontWeight: '500' },
 
-  bottomSectionScroll: { flex: 1 },
-  tabContentPage: {
-    width: SCREEN_WIDTH,
-    flex: 1,
-  },
-  innerListScroll: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 40 },
-  sectionHeading: { fontSize: 16, fontWeight: '900', color: '#FFFFFF', marginBottom: 10 },
-  emptySubText: { fontSize: 14, color: '#94A3B8', fontStyle: 'italic', marginBottom: 10, fontWeight: '500' },
+    playerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 16,
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      marginBottom: 8,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: isDark ? 0.2 : 0.03,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    playerRowHighlight: {
+      borderColor: '#2C4BFF',
+      backgroundColor: isDark ? 'rgba(44, 75, 255, 0.08)' : '#EFF6FF',
+    },
+    playerText: { fontSize: 14, color: isDark ? '#FFFFFF' : '#0F172A', fontWeight: '600' },
+    playerTextHighlight: { fontWeight: '900', color: '#2C4BFF' },
+    
+    notificationCard: {
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      borderRadius: 20,
+      padding: 16,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: isDark ? 0.2 : 0.03,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    notificationCardPinned: {
+      borderColor: '#2C4BFF',
+      backgroundColor: isDark ? 'rgba(44, 75, 255, 0.05)' : '#EFF6FF',
+    },
+    notifHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    notifTitle: { fontSize: 15, fontWeight: '900', color: isDark ? '#FFFFFF' : '#0F172A', flex: 1, marginRight: 8 },
+    notifDesc: { fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 20, marginBottom: 10, fontWeight: '500' },
+    pinnedBadge: {
+      backgroundColor: isDark ? 'rgba(44, 75, 255, 0.15)' : '#EFF6FF',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: '#2C4BFF',
+    },
+    pinnedBadgeText: { fontSize: 11, fontWeight: '900', color: '#2C4BFF' },
+    notifFooter: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderTopWidth: 1,
+      borderTopColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#F1F5F9',
+      paddingTop: 10,
+      marginTop: 6,
+    },
+    notifAuthor: { fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', fontWeight: '700' },
+    notifDate: { fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', fontWeight: '600' },
 
-  playerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#1E293B',
-    marginBottom: 8,
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  playerRowHighlight: {
-    borderColor: '#FBBF24',
-    backgroundColor: 'rgba(251, 191, 36, 0.08)',
-  },
-  playerText: { fontSize: 14, color: '#FFFFFF', fontWeight: '600' },
-  playerTextHighlight: { fontWeight: '900', color: '#FBBF24' },
-  playerRoleTag: { fontSize: 11, fontWeight: '800', color: '#FBBF24', backgroundColor: 'rgba(251, 191, 36, 0.15)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-
-  notificationCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  notificationCardPinned: {
-    borderColor: '#FBBF24',
-    backgroundColor: 'rgba(251, 191, 36, 0.05)',
-  },
-  notifHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  notifTitle: { fontSize: 15, fontWeight: '900', color: '#FFFFFF', flex: 1, marginRight: 8 },
-  notifDesc: { fontSize: 14, color: '#94A3B8', lineHeight: 20, marginBottom: 10, fontWeight: '500' },
-  pinnedBadge: {
-    backgroundColor: 'rgba(251, 191, 36, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#FBBF24',
-  },
-  pinnedBadgeText: { fontSize: 11, fontWeight: '900', color: '#FBBF24' },
-  notifFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderTopWidth: 2,
-    borderTopColor: '#334155',
-    paddingTop: 10,
-    marginTop: 6,
-  },
-  notifAuthor: { fontSize: 12, color: '#94A3B8', fontWeight: '700' },
-  notifDate: { fontSize: 12, color: '#94A3B8', fontWeight: '600' },
-
-  footerActionContainer: {
-    padding: 16,
-    backgroundColor: '#1E293B',
-    borderTopWidth: 2,
-    borderTopColor: '#334155',
-  },
-  footerSignupBtn: {
-    backgroundColor: '#FBBF24',
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  footerSignupBtnText: { color: '#0F172A', fontSize: 16, fontWeight: '900' },
-  footerRegisteredWrapper: {
-    flexDirection: 'column',
-    alignItems: 'stretch',
-  },
-  footerStatusText: { fontSize: 14, fontWeight: '800', color: '#FFFFFF', marginBottom: 10, textAlign: 'center' },
-  footerCancelBtn: {
-    backgroundColor: '#0F172A',
-    borderWidth: 2,
-    borderColor: '#F87171',
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  footerCancelBtnText: { color: '#F87171', fontSize: 15, fontWeight: '900' },
-  footerLockedText: { fontSize: 13, color: '#94A3B8', fontStyle: 'italic', textAlign: 'center', fontWeight: '700' },
-});
+    footerActionContainer: {
+      padding: 16,
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      borderTopWidth: 1,
+      borderTopColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+    },
+    footerSignupBtn: {
+      backgroundColor: '#2C4BFF',
+      borderRadius: 16,
+      paddingVertical: 16,
+      alignItems: 'center',
+      shadowColor: '#2C4BFF',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 4,
+    },
+    footerSignupBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
+    footerRegisteredWrapper: {
+      flexDirection: 'column',
+      alignItems: 'stretch',
+    },
+    footerStatusText: { fontSize: 14, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A', marginBottom: 10, textAlign: 'center' },
+    footerCancelBtn: {
+      backgroundColor: isDark ? '#0B1120' : '#FEF2F2',
+      borderWidth: 1,
+      borderColor: '#FF5A5F',
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    footerCancelBtnText: { color: '#FF5A5F', fontSize: 15, fontWeight: '900' },
+    footerLockedText: { fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', fontStyle: 'italic', textAlign: 'center', fontWeight: '700' },
+  });

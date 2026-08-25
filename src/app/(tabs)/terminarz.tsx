@@ -6,14 +6,17 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Modal,
+  RefreshControl,
+  useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
 import { syncMatchNotifications } from '@/services/notificationService';
+import CustomAlert from '@/components/CustomAlert';
 
 type MatchItem = {
   id: string;
@@ -35,50 +38,6 @@ type MatchItem = {
 
 type TabType = 'upcoming' | 'past';
 
-type CustomAlertProps = {
-  visible: boolean;
-  title: string;
-  message: string;
-  onClose: () => void;
-};
-
-function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
-  return (
-    <Modal
-      transparent
-      visible={visible}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={alertStyles.overlay}>
-        <View style={alertStyles.alertBox}>
-          <View style={alertStyles.indicator} />
-          <Text style={alertStyles.title}>{title}</Text>
-          <Text style={alertStyles.message}>{message}</Text>
-          <TouchableOpacity
-            style={alertStyles.button}
-            onPress={onClose}
-            activeOpacity={0.8}
-          >
-            <Text style={alertStyles.buttonText}>OK</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
-  try {
-    const matchDateTime = new Date(`${matchDateStr}T${matchTimeStartStr}`);
-    const now = new Date();
-    const diffMs = matchDateTime.getTime() - now.getTime();
-    return diffMs / (1000 * 60 * 60) > 2;
-  } catch {
-    return true;
-  }
-}
-
 function isMatchFinished(dateStr: string, timeEndStr: string, timeStartStr: string): boolean {
   try {
     const timeString = timeEndStr || timeStartStr || '23:59';
@@ -92,10 +51,16 @@ function isMatchFinished(dateStr: string, timeEndStr: string, timeStartStr: stri
 
 export default function ScheduleScreen() {
   const router = useRouter();
+  const systemColorScheme = useColorScheme();
+
+  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
+  const isDark = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
+  const styles = getStyles(isDark);
+
   const [matches, setMatches] = useState<MatchItem[]>([]);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [loading, setLoading] = useState(true);
-  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('upcoming');
 
   const [alertVisible, setAlertVisible] = useState(false);
@@ -108,8 +73,18 @@ export default function ScheduleScreen() {
     setAlertVisible(true);
   };
 
+  const loadThemePreference = async () => {
+    try {
+      const savedTheme = await AsyncStorage.getItem('app_theme_mode');
+      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+        setThemeMode(savedTheme);
+      }
+    } catch (e) {
+      console.error('Błąd wczytywania motywu:', e);
+    }
+  };
+
   const loadSchedule = useCallback(async () => {
-    setLoading(true);
     const player = await getCurrentPlayer();
     setCurrentPlayer(player);
 
@@ -136,7 +111,7 @@ export default function ScheduleScreen() {
 
     const processedMatches: MatchItem[] = matchesData.map((match) => {
       const matchRegs = registrations.filter((r) => r.match_id === match.id);
-      const capacityLimit = match.capacity ?? match.max_players;
+      const capacityLimit = match.capacity ?? match.max_players ?? 10;
 
       const mainList = matchRegs.slice(0, capacityLimit);
       const userReg = player ? matchRegs.find((r) => r.player_id === player.id) : null;
@@ -165,56 +140,16 @@ export default function ScheduleScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      loadThemePreference();
       loadSchedule();
     }, [loadSchedule])
   );
 
-  const executeCancellation = async (match: MatchItem) => {
-    if (!currentPlayer) return;
-
-    setActionLoadingId(match.id);
-    const { error } = await supabase
-      .from('match_registrations')
-      .delete()
-      .eq('match_id', match.id)
-      .eq('player_id', currentPlayer.id);
-
-    if (error) {
-      showAlert('Błąd', 'Nie udało się wypisać z meczu: ' + error.message);
-    }
-    setActionLoadingId(null);
-    loadSchedule();
-  };
-
-  const handleQuickAction = async (match: MatchItem) => {
-    if (!currentPlayer) {
-      showAlert('Błąd', 'Nie wczytano profilu gracza.');
-      return;
-    }
-
-    if (isMatchFinished(match.date, match.time_end, match.time_start) || match.status_id === 2) return;
-
-    if (match.isRegistered) {
-      if (!canCancelMatch(match.date, match.time_start)) {
-        showAlert('Uwaga', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
-        return;
-      }
-
-      await executeCancellation(match);
-    } else {
-      setActionLoadingId(match.id);
-      const { error } = await supabase.from('match_registrations').insert({
-        match_id: match.id,
-        player_id: currentPlayer.id,
-      });
-
-      if (error) {
-        showAlert('Błąd', 'Nie udało się zapisać na mecz: ' + error.message);
-      }
-
-      setActionLoadingId(null);
-      loadSchedule();
-    }
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadThemePreference();
+    await loadSchedule();
+    setRefreshing(false);
   };
 
   const filteredMatches = matches
@@ -230,14 +165,14 @@ export default function ScheduleScreen() {
 
   if (loading && matches.length === 0) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={['top', 'left', 'right']}>
-        <ActivityIndicator size="large" color="#FBBF24" />
+      <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
+        <ActivityIndicator size="large" color="#2C4BFF" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
       <CustomAlert
         visible={alertVisible}
         title={alertTitle}
@@ -245,33 +180,45 @@ export default function ScheduleScreen() {
         onClose={() => setAlertVisible(false)}
       />
 
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Terminarz Meczów</Text>
-      </View>
-
-      <View style={styles.tabsContainer}>
-        <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'upcoming' && styles.tabButtonActive]}
-          onPress={() => setActiveTab('upcoming')}
-        >
-          <Text style={[styles.tabText, activeTab === 'upcoming' && styles.tabTextActive]}>Nadchodzące</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'past' && styles.tabButtonActive]}
-          onPress={() => setActiveTab('past')}
-        >
-          <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>Zakończone</Text>
-        </TouchableOpacity>
-      </View>
-
       <FlatList
         data={filteredMatches}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#2C4BFF"
+          />
+        }
+        ListHeaderComponent={
+          <View>
+            <Text style={styles.headerTitle}>Terminarz Meczów</Text>
+            <Text style={styles.headerSubtitle}>Wszystkie nadchodzące i archiwalne spotkania</Text>
+
+            <View style={styles.tabsContainer}>
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'upcoming' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('upcoming')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.tabText, activeTab === 'upcoming' && styles.tabTextActive]}>Nadchodzące</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'past' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('past')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>Zakończone</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        }
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>
-              {activeTab === 'upcoming' ? 'Brak nadchodzących meczów.' : 'Brak zakończonych lub odwołanych meczów.'}
+              {activeTab === 'upcoming' ? 'Brak nadchodzących meczów.' : 'Brak zakończonych meczów.'}
             </Text>
           </View>
         }
@@ -279,9 +226,10 @@ export default function ScheduleScreen() {
           const { day, month } = formatMatchDate(item.date);
           const isCancelled = item.status_id === 2;
           const finished = isMatchFinished(item.date, item.time_end, item.time_start);
-          const isFull = (item.mainCount ?? 0) >= (item.capacityLimit ?? 10);
-          const isActionLoading = actionLoadingId === item.id;
           const isWaitlist = item.registrationStatus === 'waitlist';
+          const title = item.title?.trim() || 'Trening Siatkówki';
+          const capacityLimit = item.capacityLimit ?? 10;
+          const currentSigned = item.totalRegistrationsCount ?? 0;
           
           return (
             <TouchableOpacity
@@ -300,13 +248,19 @@ export default function ScheduleScreen() {
                 <View style={styles.cardMainRow}>
                   <View style={[styles.dateBox, isCancelled && styles.dateBoxCancelled]}>
                     <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>{day}</Text>
-                    <Text style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]}>{month}</Text>
+                    <Text 
+                      style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]} 
+                      numberOfLines={1} 
+                      adjustsFontSizeToFit
+                    >
+                      {month}
+                    </Text>
                   </View>
 
                   <View style={{ flex: 1, marginLeft: 12 }}>
                     <View style={styles.titleRow}>
                       <Text style={[styles.matchTitle, isCancelled && styles.matchTitleCancelled]} numberOfLines={1}>
-                        {item.title || 'Trening Siatkówki'}
+                        {title}
                       </Text>
                       
                       {isCancelled ? (
@@ -317,11 +271,11 @@ export default function ScheduleScreen() {
                         currentPlayer && item.isRegistered && (
                           <View style={[
                             styles.inlineStatusBadge,
-                            isWaitlist ? styles.badgeWaitlistBg : styles.badgeMainBg
+                            isWaitlist ? styles.badgeWaitlistBg : styles.badgeMainBg,
                           ]}>
                             <Text style={[
                               styles.inlineStatusText,
-                              isWaitlist ? styles.badgeWaitlistText : styles.badgeMainText
+                              isWaitlist ? styles.badgeWaitlistText : styles.badgeMainText,
                             ]}>
                               {isWaitlist ? '⏳ Rezerwa' : '✅ Zapisany'}
                             </Text>
@@ -330,42 +284,28 @@ export default function ScheduleScreen() {
                       )}
                     </View>
 
-                    <Text style={styles.matchInfo}>📍 {item.location} | 🕒 {formatTime(item.time_start)}</Text>
-                    <Text style={styles.matchInfoBold}>👥 Zapisanych: {item.totalRegistrationsCount}/{item.capacityLimit}</Text>
+                    <View style={styles.iconInfoRow}>
+                      <View style={styles.iconContainer}>
+                        <Text style={styles.containerIconText}>📍</Text>
+                      </View>
+                      <Text style={styles.matchInfo} numberOfLines={1}>{item.location}</Text>
+                    </View>
+
+                    <View style={styles.iconInfoRow2}>
+                      <View style={styles.infoPill}>
+                        <Text style={styles.infoPillIcon}>🕒</Text>
+                        <Text style={styles.infoPillText}>{formatTime(item.time_start)}</Text>
+                      </View>
+
+                      <View style={styles.infoPill}>
+                        <Text style={styles.infoPillIcon}>👥</Text>
+                        <Text style={styles.infoPillText}>{currentSigned}/{capacityLimit}</Text>
+                      </View>
+
+                      <Text style={styles.priceText}>{Number(item.price_per_player)} PLN</Text>
+                    </View>
                   </View>
                 </View>
-
-                {!finished && currentPlayer && !isCancelled && (
-                  <View style={styles.cardFooter}>
-                    {item.isRegistered ? (
-                      <TouchableOpacity 
-                        style={styles.quickCancelBtnInline} 
-                        onPress={(e) => { e.stopPropagation(); handleQuickAction(item); }} 
-                        disabled={isActionLoading}
-                      >
-                        {isActionLoading ? (
-                          <ActivityIndicator size="small" color="#F87171" />
-                        ) : (
-                          <Text style={styles.quickCancelText}>Wypisz się z meczu</Text>
-                        )}
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity 
-                        style={[styles.quickSignupBtn, isFull && styles.quickWaitlistBtn]} 
-                        onPress={(e) => { e.stopPropagation(); handleQuickAction(item); }} 
-                        disabled={isActionLoading}
-                      >
-                        {isActionLoading ? (
-                          <ActivityIndicator size="small" color="#0F172A" />
-                        ) : (
-                          <Text style={styles.quickSignupText}>
-                            {isFull ? 'Zapisz się na rezerwę' : 'Zapisz się na mecz'}
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                )}
               </View>
             </TouchableOpacity>
           );
@@ -375,186 +315,209 @@ export default function ScheduleScreen() {
   );
 }
 
-const alertStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  alertBox: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#1E293B',
-    borderRadius: 24,
-    padding: 24,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  indicator: {
-    width: 48,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#FBBF24',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  message: {
-    fontSize: 16,
-    color: '#94A3B8',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  button: {
-    width: '100%',
-    backgroundColor: '#FBBF24',
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#0F172A',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-});
+const getStyles = (isDark: boolean) =>
+  StyleSheet.create({
+    safeArea: { flex: 1, backgroundColor: isDark ? '#0B1120' : '#F8FAFC' },
+    loadingContainer: {
+      flex: 1,
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 16,
+    },
+    listContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32 },
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0F172A' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0F172A' },
-  header: { paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 2, borderBottomColor: '#334155' },
-  headerTitle: { fontSize: 24, fontWeight: '800', color: '#FFFFFF' },
-  
-  tabsContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#1E293B',
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderRadius: 18,
-    padding: 4,
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  tabButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 14,
-  },
-  tabButtonActive: { backgroundColor: '#FBBF24' },
-  tabText: { fontSize: 14, fontWeight: '700', color: '#94A3B8' },
-  tabTextActive: { color: '#0F172A', fontWeight: '900' },
+    headerTitle: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      marginTop: 16,
+    },
+    headerSubtitle: {
+      fontSize: 14,
+      color: isDark ? '#94A3B8' : '#64748B',
+      marginTop: 4,
+      marginBottom: 16,
+      fontWeight: '500',
+    },
 
-  listContainer: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 },
+    tabsContainer: {
+      flexDirection: 'row',
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      borderRadius: 24,
+      padding: 4,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.03,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    tabButton: {
+      flex: 1,
+      paddingVertical: 12,
+      alignItems: 'center',
+      borderRadius: 20,
+    },
+    tabButtonActive: {
+      backgroundColor: '#2C4BFF',
+    },
+    tabText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: isDark ? '#94A3B8' : '#64748B',
+    },
+    tabTextActive: {
+      color: '#FFFFFF',
+      fontWeight: '900',
+    },
 
-  matchCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 20,
-    marginBottom: 14,
-    borderWidth: 0,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  matchCardCancelled: { backgroundColor: '#1E293B' },
+    matchCard: {
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      borderRadius: 24,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      overflow: 'hidden',
+      position: 'relative',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: isDark ? 0.3 : 0.06,
+      shadowRadius: 8,
+      elevation: 3,
+      flexDirection: 'row',
+      alignItems: 'stretch',
+    },
+    matchCardCancelled: { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' },
 
-  sideStatusBar: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 6,
-  },
-  sideBarMain: { backgroundColor: '#FBBF24' },
-  sideBarWaitlist: { backgroundColor: '#64748B' },
+    sideStatusBar: {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      bottom: 0,
+      width: 6,
+    },
+    sideBarMain: { backgroundColor: '#2C4BFF' },
+    sideBarWaitlist: { backgroundColor: '#94A3B8' },
 
-  cardInnerContainer: {
-    padding: 14,
-    paddingLeft: 18,
-  },
-  cardMainRow: { flexDirection: 'row', alignItems: 'center' },
-  dateBox: {
-    width: 60,
-    height: 60,
-    borderRadius: 16,
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  dateBoxCancelled: { borderColor: '#F87171' },
-  dateDay: { fontSize: 20, fontWeight: '800', color: '#FBBF24' },
-  dateDayCancelled: { color: '#F87171' },
-  dateMonth: { fontSize: 12, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase' },
-  dateMonthCancelled: { color: '#F87171' },
+    cardInnerContainer: {
+      flex: 1,
+      padding: 16,
+      paddingLeft: 20,
+    },
+    cardMainRow: { flexDirection: 'row', alignItems: 'center' },
+    
+    dateBox: {
+      width: 68,
+      height: 68,
+      borderRadius: 18,
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: isDark ? '#334155' : '#E2E8F0',
+      paddingHorizontal: 4,
+    },
+    dateBoxCancelled: { borderColor: '#FF5A5F' },
+    dateDay: { fontSize: 20, fontWeight: '800', color: '#2C4BFF' },
+    dateDayCancelled: { color: '#FF5A5F' },
+    dateMonth: { 
+      fontSize: 11, 
+      fontWeight: '700', 
+      color: isDark ? '#94A3B8' : '#64748B', 
+      textTransform: 'uppercase',
+      textAlign: 'center',
+      width: '100%',
+    },
+    dateMonthCancelled: { color: '#FF5A5F' },
 
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  matchTitle: { fontSize: 16, fontWeight: '800', color: '#FFFFFF', flex: 1, marginRight: 6 },
-  matchTitleCancelled: { textDecorationLine: 'line-through', color: '#F87171' },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 6,
+    },
+    matchTitle: { fontSize: 16, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A', flex: 1, marginRight: 6 },
+    matchTitleCancelled: { textDecorationLine: 'line-through', color: isDark ? '#64748B' : '#94A3B8' },
 
-  inlineStatusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  badgeMainBg: { backgroundColor: '#0F172A', borderWidth: 2, borderColor: '#FBBF24' },
-  badgeWaitlistBg: { backgroundColor: '#0F172A', borderWidth: 2, borderColor: '#64748B' },
-  inlineStatusText: { fontSize: 11, fontWeight: '800' },
-  badgeMainText: { color: '#FBBF24' },
-  badgeWaitlistText: { color: '#94A3B8' },
+    inlineStatusBadge: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 10,
+    },
+    badgeMainBg: { 
+      backgroundColor: isDark ? 'rgba(44, 75, 255, 0.25)' : '#EFF6FF', 
+      borderWidth: 1, 
+      borderColor: isDark ? '#4F6FFF' : '#BFDBFE' 
+    },
+    badgeWaitlistBg: { 
+      backgroundColor: isDark ? 'rgba(148, 163, 184, 0.2)' : '#F1F5F9', 
+      borderWidth: 1, 
+      borderColor: isDark ? '#64748B' : '#CBD5E1' 
+    },
+    inlineStatusText: { fontSize: 11, fontWeight: '800' },
+    badgeMainText: { color: isDark ? '#93C5FD' : '#2C4BFF' },
+    badgeWaitlistText: { color: isDark ? '#CBD5E1' : '#475569' },
 
-  badgeCancelledBg: { backgroundColor: '#0F172A', borderWidth: 2, borderColor: '#F87171', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  badgeCancelledText: { fontSize: 11, fontWeight: '800', color: '#F87171' },
+    badgeCancelledBg: { backgroundColor: isDark ? 'rgba(255, 90, 95, 0.2)' : '#FEF2F2', borderWidth: 1, borderColor: '#FF5A5F', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+    badgeCancelledText: { fontSize: 11, fontWeight: '800', color: '#FF5A5F' },
 
-  matchInfo: { fontSize: 13, color: '#94A3B8', marginBottom: 6, fontWeight: '500' },
-  matchInfoBold: { fontSize: 13, fontWeight: '800', color: '#FFFFFF', marginTop: 2 },
+    iconInfoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    iconInfoRow2: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 2,
+    },
+    iconContainer: {
+      width: 24,
+      height: 24,
+      borderRadius: 6,
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      borderWidth: 1,
+      borderColor: isDark ? '#334155' : '#E2E8F0',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 6,
+    },
+    containerIconText: {
+      fontSize: 11,
+    },
+    matchInfo: { fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', fontWeight: '500', flex: 1 },
+    
+    infoPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      borderWidth: 1,
+      borderColor: isDark ? '#334155' : '#E2E8F0',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 10,
+      marginRight: 6,
+    },
+    infoPillIcon: {
+      fontSize: 11,
+      marginRight: 4,
+    },
+    infoPillText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+    },
 
-  cardFooter: {
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 2,
-    borderTopColor: '#334155',
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  quickSignupBtn: {
-    backgroundColor: '#FBBF24',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    flex: 1,
-    alignItems: 'center',
-  },
-  quickWaitlistBtn: { backgroundColor: '#64748B' },
-  quickSignupText: { color: '#0F172A', fontSize: 13, fontWeight: '900' },
-  
-  quickCancelBtnInline: {
-    borderWidth: 2,
-    borderColor: '#F87171',
-    borderRadius: 14,
-    paddingVertical: 10,
-    flex: 1,
-    alignItems: 'center',
-    backgroundColor: '#0F172A',
-  },
-  quickCancelText: { color: '#F87171', fontSize: 13, fontWeight: '800' },
+    priceText: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+    },
 
-  emptyState: { paddingVertical: 40, alignItems: 'center' },
-  emptyText: { fontSize: 15, color: '#94A3B8', fontStyle: 'italic', fontWeight: '500' },
-});
+    emptyState: { paddingVertical: 40, alignItems: 'center' },
+    emptyText: { fontSize: 15, color: isDark ? '#94A3B8' : '#64748B', fontStyle: 'italic', fontWeight: '500' },
+  });

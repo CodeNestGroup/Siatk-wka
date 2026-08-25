@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,95 +9,90 @@ import {
   Platform,
   ScrollView,
   Switch,
-  Modal,
   Image,
+  useColorScheme,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { syncMatchNotifications } from '@/services/notificationService';
+import CustomAlert from '@/components/CustomAlert';
 
-// Klucze lokalnej sesji użytkownika
 const CURRENT_PLAYER_KEY = 'current_player_id';
 const REMEMBER_ME_KEY = 'remember_me_status';
-
-type CustomAlertProps = {
-  visible: boolean;
-  title: string;
-  message: string;
-  onClose: () => void;
-};
-
-// Komponent prostego alertu dostosowany do starszych użytkowników (ogromny czytelny tekst)
-function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
-  return (
-    <Modal
-      transparent
-      visible={visible}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={alertStyles.overlay}>
-        <View style={alertStyles.alertBox}>
-          <View style={alertStyles.indicator} />
-          <Text style={alertStyles.title}>{title}</Text>
-          <Text style={alertStyles.message}>{message}</Text>
-          <TouchableOpacity
-            style={alertStyles.button}
-            onPress={onClose}
-            activeOpacity={0.8}
-          >
-            <Text style={alertStyles.buttonText}>OK</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-}
+const THEME_STORAGE_KEY = 'app_theme_mode';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const systemColorScheme = useColorScheme();
 
-  // Stany formularza logowania
+  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
+  const isDark = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
+  const styles = getStyles(isDark);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  // Stany dedykowanego okna alertu
-  const [alertVisible, setAlertVisible] = useState(false);
-  const [alertTitle, setAlertTitle] = useState('');
-  const [alertMessage, setAlertMessage] = useState('');
-  const [alertCallback, setAlertCallback] = useState<(() => void) | null>(null);
+  const [alertState, setAlertState] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    type: 'error' | 'success' | 'info';
+    onConfirm: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'info',
+    onConfirm: () => {},
+  });
 
-  // Funkcja wywołująca powiadomienie dla użytkownika
-  const showAlert = (title: string, message: string, onCloseCallback?: () => void) => {
-    setAlertTitle(title);
-    setAlertMessage(message);
-    setAlertCallback(() => onCloseCallback || null);
-    setAlertVisible(true);
-  };
-
-  const handleAlertClose = () => {
-    setAlertVisible(false);
-    if (alertCallback) {
-      alertCallback();
-      setAlertCallback(null);
+  // Wczytywanie motywu: domyślnie system, a jeśli użytkownik zmienił w aplikacji, to preferencja z AsyncStorage
+  const loadThemePreference = async () => {
+    try {
+      const savedTheme = await AsyncStorage.getItem(THEME_STORAGE_KEY);
+      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+        setThemeMode(savedTheme);
+      } else {
+        // Pierwsze odpalenie / brak zapisu - wymuś domyślnie z urządzenia
+        setThemeMode('system');
+      }
+    } catch (e) {
+      console.error('Błąd wczytywania motywu na ekranie logowania:', e);
     }
   };
 
-  // Główna logika logowania przy użyciu bazy danych (funkcja RPC verify_login)[cite: 1]
+  useFocusEffect(
+    useCallback(() => {
+      loadThemePreference();
+    }, [])
+  );
+
+  const showAlert = (title: string, message: string, type: 'error' | 'success' | 'info' = 'error', onCloseCallback?: () => void) => {
+    setAlertState({
+      visible: true,
+      title,
+      message,
+      type,
+      onConfirm: () => {
+        setAlertState(prev => ({ ...prev, visible: false }));
+        if (onCloseCallback) onCloseCallback();
+      },
+    });
+  };
+
   const handleLogin = async () => {
     if (!email.trim() || !password) {
-      showAlert('Błąd', 'Wypełnij pole e-mail oraz hasło.');
+      showAlert('Błąd', 'Wypełnij pole e-mail oraz hasło.', 'error');
       return;
     }
 
     setLoading(true);
 
     try {
-      // Wywołanie bezpiecznej funkcji RPC w bazie danych do weryfikacji hasha bcrypt[cite: 1]
       const { data, error } = await supabase.rpc('verify_login', {
         p_email: email.trim().toLowerCase(),
         p_password: password,
@@ -109,23 +104,21 @@ export default function LoginScreen() {
         if (errType === 'pending') {
           showAlert(
             'Konto oczekuje na zatwierdzenie',
-            'Twoje konto nie zostało jeszcze zatwierdzone przez administratora. Spróbuj ponownie później.'
+            'Twoje konto nie zostało jeszcze zatwierdzone przez administratora. Spróbuj ponownie później.',
+            'info'
           );
         } else {
-          showAlert('Błąd logowania', 'Nieprawidłowy e-mail lub hasło.');
+          showAlert('Błąd logowania', 'Nieprawidłowy e-mail lub hasło.', 'error');
         }
         return;
       }
 
-      // Dane użytkownika zwrócone poprawnie przez procedurę RPC[cite: 1]
       const player = data;
 
-      // Zapisanie danych sesji lokalnie
       await AsyncStorage.setItem(CURRENT_PLAYER_KEY, player.id);
       await AsyncStorage.setItem(REMEMBER_ME_KEY, rememberMe ? 'true' : 'false');
       await AsyncStorage.setItem('current_player_data', JSON.stringify(player));
 
-      // Pobieranie meczów w celu synchronizacji powiadomień lokalnych przy starcie
       const { data: matchesData } = await supabase.from('matches').select('*');
       const { data: regsData } = await supabase
         .from('match_registrations')
@@ -150,17 +143,19 @@ export default function LoginScreen() {
       router.replace('/(tabs)');
     } catch (err) {
       setLoading(false);
-      showAlert('Błąd', 'Wystąpił nieoczekiwany błąd podczas logowania.');
+      showAlert('Błąd', 'Wystąpił nieoczekiwany błąd podczas logowania.', 'error');
     }
   };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
       <CustomAlert
-        visible={alertVisible}
-        title={alertTitle}
-        message={alertMessage}
-        onClose={handleAlertClose}
+        visible={alertState.visible}
+        title={alertState.title}
+        message={alertState.message}
+        type={alertState.type}
+        confirmText="OK"
+        onClose={alertState.onConfirm}
       />
       <KeyboardAvoidingView
         style={styles.container}
@@ -177,7 +172,7 @@ export default function LoginScreen() {
             <View style={styles.logoCircle}>
               <Image source={require('@/assets/images/icon.png')} style={styles.logoImage} resizeMode="cover"/>
             </View>
-            <Text style={styles.title}>Siatkówka App</Text>
+            <Text style={styles.title}>ESCO VolleyManager</Text>
             <Text style={styles.subtitle}>Zaloguj się do swojego konta</Text>
           </View>
 
@@ -188,7 +183,7 @@ export default function LoginScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="twoj@email.com"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 value={email}
@@ -201,7 +196,7 @@ export default function LoginScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="••••••••"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
                 secureTextEntry
                 autoCapitalize="none"
                 value={password}
@@ -215,12 +210,12 @@ export default function LoginScreen() {
               <Switch
                 value={rememberMe}
                 onValueChange={setRememberMe}
-                trackColor={{ false: '#334155', true: '#FBBF24' }}
-                thumbColor={Platform.OS === 'ios' ? '#fff' : '#0F172A'}
+                trackColor={{ false: isDark ? '#334155' : '#CBD5E1', true: '#2C4BFF' }}
+                thumbColor={Platform.OS === 'ios' ? '#fff' : (rememberMe ? '#2C4BFF' : '#f4f3f4')}
               />
             </View>
 
-            {/* Główny przycisk akcji logowania (Kolor żółty Mikasy) */}
+            {/* Główny przycisk akcji */}
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleLogin}
@@ -246,172 +241,135 @@ export default function LoginScreen() {
   );
 }
 
-// Stylizacja okna dialogowego
-const alertStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  alertBox: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#1E293B',
-    borderRadius: 24,
-    padding: 24,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  indicator: {
-    width: 48,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#FBBF24',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  message: {
-    fontSize: 16,
-    color: '#94A3B8',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  button: {
-    width: '100%',
-    backgroundColor: '#FBBF24',
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#0F172A',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-});
-
-// Stylizacja ekranu logowania (Motyw Mikasy: Granat + Żółty, duża czytelność)
-const styles = StyleSheet.create({
-  safeArea: { 
-    flex: 1, 
-    backgroundColor: '#0F172A' // Głęboki grafit/granat tła 
-  },
-  container: { 
-    flex: 1 
-  },
-  scrollContent: { 
-    flexGrow: 1, 
-    justifyContent: 'center', 
-    paddingHorizontal: 24, 
-    paddingVertical: 32 
-  },
-  header: { 
-    alignItems: 'center', 
-    marginBottom: 28 
-  },
-  logoCircle: { 
-    width: 110, 
-    height: 110, 
-    borderRadius: 15, 
-    backgroundColor: '#1f2531ff', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: '#000000ff',
-    overflow: 'hidden',
-  },
-  logoImage: {
-    width: '100%',
-    height: '100%',
-  },
-  title: { 
-    fontSize: 30, 
-    fontWeight: '800', 
-    color: '#FFFFFF', 
-    marginBottom: 8 
-  },
-  subtitle: { 
-    fontSize: 16, 
-    color: '#94A3B8', 
-    fontWeight: '500', 
-    textAlign: 'center' 
-  },
-  form: { 
-    backgroundColor: '#1E293B', 
-    borderRadius: 24, 
-    padding: 24,
-    borderWidth: 2,
-    borderColor: '#334155'
-  },
-  inputGroup: { 
-    marginBottom: 18 
-  },
-  label: { 
-    fontSize: 16, 
-    fontWeight: '700', 
-    color: '#F1F5F9', 
-    marginBottom: 8 
-  },
-  input: { 
-    borderWidth: 2, 
-    borderColor: '#334155', 
-    borderRadius: 16, 
-    paddingHorizontal: 16, 
-    paddingVertical: 14, 
-    fontSize: 18, 
-    backgroundColor: '#0F172A', 
-    color: '#FFFFFF' 
-  },
-  rememberRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 20, 
-    marginTop: 6 
-  },
-  rememberText: { 
-    fontSize: 16, 
-    color: '#F1F5F9', 
-    fontWeight: '600' 
-  },
-  button: { 
-    backgroundColor: '#FBBF24', // Żółty kolor piłki Mikasa
-    borderRadius: 16, 
-    paddingVertical: 18, 
-    alignItems: 'center', 
-    marginTop: 8,
-  },
-  buttonDisabled: { 
-    opacity: 0.6 
-  },
-  buttonText: { 
-    color: '#0F172A', // Ciemny kontrastowy tekst na żółtym przycisku
-    fontSize: 18, 
-    fontWeight: '800' 
-  },
-  registerRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'center', 
-    marginTop: 28 
-  },
-  registerText: { 
-    color: '#94A3B8', 
-    fontSize: 16 
-  },
-  registerLink: { 
-    color: '#FBBF24', 
-    fontSize: 16, 
-    fontWeight: '800' 
-  },
-});
+const getStyles = (isDark: boolean) =>
+  StyleSheet.create({
+    safeArea: { 
+      flex: 1, 
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC' 
+    },
+    container: { 
+      flex: 1 
+    },
+    scrollContent: { 
+      flexGrow: 1, 
+      justifyContent: 'center', 
+      paddingHorizontal: 24, 
+      paddingVertical: 32 
+    },
+    header: { 
+      alignItems: 'center', 
+      marginBottom: 28 
+    },
+    logoCircle: { 
+      width: 110, 
+      height: 110, 
+      borderRadius: 28, 
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      overflow: 'hidden',
+      shadowColor: '#2C4BFF',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: isDark ? 0.3 : 0.1,
+      shadowRadius: 16,
+      elevation: 8,
+    },
+    logoImage: {
+      width: '100%',
+      height: '100%',
+    },
+    title: { 
+      fontSize: 30, 
+      fontWeight: '800', 
+      color: isDark ? '#FFFFFF' : '#0F172A', 
+      marginBottom: 8,
+      letterSpacing: 0.5,
+    },
+    subtitle: { 
+      fontSize: 16, 
+      color: isDark ? '#94A3B8' : '#64748B', 
+      fontWeight: '500', 
+      textAlign: 'center' 
+    },
+    form: { 
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF', 
+      borderRadius: 32, 
+      padding: 24,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: isDark ? 0.4 : 0.06,
+      shadowRadius: 20,
+      elevation: 10,
+    },
+    inputGroup: { 
+      marginBottom: 18 
+    },
+    label: { 
+      fontSize: 15, 
+      fontWeight: '700', 
+      color: isDark ? '#F1F5F9' : '#0F172A', 
+      marginBottom: 8 
+    },
+    input: { 
+      borderWidth: 1, 
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : '#CBD5E1', 
+      borderRadius: 16, 
+      paddingHorizontal: 16, 
+      paddingVertical: 14, 
+      fontSize: 16, 
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC', 
+      color: isDark ? '#FFFFFF' : '#0F172A' 
+    },
+    rememberRow: { 
+      flexDirection: 'row', 
+      justifyContent: 'space-between', 
+      alignItems: 'center', 
+      marginBottom: 20, 
+      marginTop: 6 
+    },
+    rememberText: { 
+      fontSize: 15, 
+      color: isDark ? '#F1F5F9' : '#0F172A', 
+      fontWeight: '600' 
+    },
+    button: { 
+      backgroundColor: '#2C4BFF', 
+      borderRadius: 16, 
+      paddingVertical: 18, 
+      alignItems: 'center', 
+      marginTop: 8,
+      shadowColor: '#2C4BFF',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.35,
+      shadowRadius: 10,
+      elevation: 6,
+    },
+    buttonDisabled: { 
+      opacity: 0.6 
+    },
+    buttonText: { 
+      color: '#FFFFFF', 
+      fontSize: 16, 
+      fontWeight: '800',
+      letterSpacing: 1,
+    },
+    registerRow: { 
+      flexDirection: 'row', 
+      justifyContent: 'center', 
+      marginTop: 28 
+    },
+    registerText: { 
+      color: isDark ? '#94A3B8' : '#64748B', 
+      fontSize: 16 
+    },
+    registerLink: { 
+      color: '#2C4BFF', 
+      fontSize: 16, 
+      fontWeight: '800' 
+    },
+  });

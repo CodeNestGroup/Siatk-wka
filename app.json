@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "Siatkówka",
-    "slug": "siatkowka",
+    "name": "ESCO VolleyManager",
+    "slug": "escovolleymanager",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "siatkowka",
+    "scheme": "escovolleymanager",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
       "supportsTablet": true,
-      "bundleIdentifier": "com.bartoszbrudny.siatkowka"
+      "bundleIdentifier": "com.bartoszbrudny.escovolleymanager"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "foregroundImage": "./assets/images/icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.bartoszbrudny.siatkowka"
+      "package": "com.bartoszbrudny.escovolleymanager"
     },
     "web": {
       "output": "static",

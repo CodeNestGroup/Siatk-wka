@@ -8,7 +8,7 @@ import CustomAlert from '@/components/CustomAlert';
 export default function RootLayout() {
   const router = useRouter();
   
-  // Stan alertu – scentralizowane zarządzanie komunikatami dla użytkownika
+  // Stan alertu – scentralizowane zarządzanie komunikatami dla użytkownika z użyciem CustomAlert.tsx
   const [alert, setAlert] = useState<{
     visible: boolean;
     title: string;
@@ -39,7 +39,7 @@ export default function RootLayout() {
     }
   }, [router]);
 
-  // Logika uprawnień i optymalizacji baterii (Android specific)
+  // Logika uprawnień i optymalizacji baterii (Android specific) z użyciem palety INK/COBALT/CORAL
   const requestPermissionsAndBatteryCheck = useCallback(async () => {
     try {
       const { status } = await Notifications.requestPermissionsAsync();
@@ -118,13 +118,16 @@ export default function RootLayout() {
 
   return (
     <>
-      {/* Stack ukrywa domyślny header, co pozwala na pełną kontrolę wyglądu */}
-      <Stack screenOptions={{ headerShown: false }}>
+      {/* Stack ukrywa domyślny header, co pozwala na pełną kontrolę wyglądu w klimacie strony (#0B1120) */}
+      <Stack screenOptions={{ 
+        headerShown: false,
+        contentStyle: { backgroundColor: '#0B1120' } 
+      }}>
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
       </Stack>
 
-      {/* Globalny komponent alertu widoczny nad całą aplikacją */}
+      {/* Globalny komponent CustomAlert widoczny nad całą aplikacją */}
       <CustomAlert
         visible={alert.visible}
         title={alert.title}

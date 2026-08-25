@@ -1,13 +1,15 @@
-import React, { useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, LayoutChangeEvent } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, StyleSheet, ScrollView, useColorScheme, DeviceEventEmitter, LayoutChangeEvent } from 'react-native';
 import { createMaterialTopTabNavigator } from 'expo-router/js-top-tabs';
-import { withLayoutContext } from 'expo-router';
+import { withLayoutContext, useFocusEffect } from 'expo-router';
 import { ParamListBase, TabNavigationState, RouteProp } from 'expo-router/react-navigation';
 import { 
   MaterialTopTabNavigationOptions, 
   MaterialTopTabNavigationEventMap 
 } from '@react-navigation/material-top-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentPlayer } from '@/lib/player';
 import { supabase } from '@/lib/supabase';
 import { syncMatchNotifications } from '@/services/notificationService';
@@ -21,13 +23,12 @@ export const MaterialTopTabs = withLayoutContext<
   MaterialTopTabNavigationEventMap
 >(Navigator);
 
-// Etykiety zakładek dostosowane dla czytelności
-const TAB_LABELS: Record<string, string> = {
-  index: 'Nadchodzący',
-  ogloszenia: 'Ogłoszenia',
-  terminarz: 'Terminarz',
-  'moje-zapisy': 'Moje zapisy',
-  profil: 'Profil',
+const TAB_CONFIG: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
+  index: { active: 'home', inactive: 'home-outline' },
+  ogloszenia: { active: 'megaphone', inactive: 'megaphone-outline' },
+  terminarz: { active: 'calendar', inactive: 'calendar-outline' },
+  'moje-zapisy': { active: 'checkbox', inactive: 'checkbox-outline' },
+  profil: { active: 'person', inactive: 'person-outline' },
 };
 
 type TopTabBarProps = {
@@ -35,11 +36,33 @@ type TopTabBarProps = {
   navigation: any;
 };
 
-// Dolny pasek nawigacyjny w stylu Mikasy (zoptymalizowany pod obsługę kciukiem)
+// Pełnoekranowy dolny pasek nawigacyjny do samego dołu ekranu
 function BottomTabBar({ state, navigation }: TopTabBarProps) {
   const scrollViewRef = useRef<ScrollView>(null);
   const tabLayouts = useRef<{ [key: number]: { x: number; width: number } }>({});
   const insets = useSafeAreaInsets();
+  
+  const systemColorScheme = useColorScheme();
+  const [isDark, setIsDark] = useState(systemColorScheme === 'dark');
+
+  useEffect(() => {
+    const checkTheme = async () => {
+      try {
+        const savedTheme = await AsyncStorage.getItem('app_theme_mode');
+        if (savedTheme) {
+          setIsDark(savedTheme === 'system' ? systemColorScheme === 'dark' : savedTheme === 'dark');
+        } else {
+          setIsDark(systemColorScheme === 'dark');
+        }
+      } catch (e) {
+        // fallback
+      }
+    };
+    checkTheme();
+
+    const sub = DeviceEventEmitter.addListener('themeChanged', checkTheme);
+    return () => sub.remove();
+  }, [systemColorScheme]);
 
   const handleTabPress = (route: RouteProp<ParamListBase>, index: number, isFocused: boolean) => {
     const event = navigation.emit({
@@ -54,7 +77,7 @@ function BottomTabBar({ state, navigation }: TopTabBarProps) {
     const layout = tabLayouts.current[index];
     if (layout && scrollViewRef.current) {
       scrollViewRef.current.scrollTo({
-        x: Math.max(0, layout.x - 60), 
+        x: Math.max(0, layout.x - 40), 
         animated: true,
       });
     }
@@ -65,14 +88,16 @@ function BottomTabBar({ state, navigation }: TopTabBarProps) {
     const layout = tabLayouts.current[currentIndex];
     if (layout && scrollViewRef.current) {
       scrollViewRef.current.scrollTo({
-        x: Math.max(0, layout.x - 60),
+        x: Math.max(0, layout.x - 40),
         animated: true,
       });
     }
   }, [state.index]);
 
+  const styles = getStyles(isDark, insets.bottom);
+
   return (
-    <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+    <View style={styles.container}>
       <ScrollView
         ref={scrollViewRef}
         horizontal
@@ -81,23 +106,28 @@ function BottomTabBar({ state, navigation }: TopTabBarProps) {
       >
         {state.routes.map((route, index: number) => {
           const isFocused = state.index === index;
-          const label = TAB_LABELS[route.name] ?? route.name;
+          const icons = TAB_CONFIG[route.name] || { active: 'ellipse', inactive: 'ellipse-outline' };
 
           return (
-            <TouchableOpacity
+            <View
               key={route.key}
-              onPress={() => handleTabPress(route, index, isFocused)}
               onLayout={(event: LayoutChangeEvent) => {
                 const { x, width } = event.nativeEvent.layout;
                 tabLayouts.current[index] = { x, width };
               }}
-              style={[styles.tabItem, isFocused && styles.tabItemActive]}
-              activeOpacity={0.8}
+              style={styles.tabItemWrapper}
             >
-              <Text style={[styles.tabLabel, isFocused && styles.tabLabelActive]}>
-                {label}
-              </Text>
-            </TouchableOpacity>
+              <View 
+                style={[styles.tabItem, isFocused && styles.tabItemActive]}
+                onTouchEnd={() => handleTabPress(route, index, isFocused)}
+              >
+                <Ionicons 
+                  name={isFocused ? icons.active : icons.inactive} 
+                  size={22} 
+                  color={isFocused ? (isDark ? '#0B1120' : '#FFFFFF') : (isDark ? '#94A3B8' : '#64748B')} 
+                />
+              </View>
+            </View>
           );
         })}
       </ScrollView>
@@ -106,7 +136,42 @@ function BottomTabBar({ state, navigation }: TopTabBarProps) {
 }
 
 export default function TabsLayout() {
-  // Synchronizacja powiadomień po uruchomieniu zakładek
+  const systemColorScheme = useColorScheme();
+  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const isDark = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
+
+  const loadThemePreference = async () => {
+    try {
+      const savedTheme = await AsyncStorage.getItem('app_theme_mode');
+      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+        setThemeMode(savedTheme);
+      }
+    } catch (e) {
+      console.error('Błąd wczytywania motywu w nawigatorze:', e);
+    }
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadThemePreference();
+    }, [])
+  );
+
+  useEffect(() => {
+    loadThemePreference();
+
+    const subscription = DeviceEventEmitter.addListener('themeChanged', () => {
+      loadThemePreference();
+      setRefreshKey((prev) => prev + 1);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
   useEffect(() => {
     const initializeNotifications = async () => {
       try {
@@ -133,7 +198,7 @@ export default function TabsLayout() {
           await syncMatchNotifications(formattedMatches);
         }
       } catch (error) {
-        console.error('Błąd podczas synchronizacji powiadomień w tle:', error);
+        console.error('Błąd synchronizacji powiadomień:', error);
       }
     };
 
@@ -142,57 +207,69 @@ export default function TabsLayout() {
 
   return (
     <MaterialTopTabs
-      // Przeniesienie paska zakładek na dół (pozycja tabów jako 'bottom')
+      key={`${themeMode}-${refreshKey}`}
       tabBar={(props: any) => <BottomTabBar {...props} />}
+      tabBarPosition="bottom"
       screenOptions={{
         swipeEnabled: true,
         animationEnabled: true,
+        lazy: false,
+        // Automatyczne odsuwanie zawartości każdej karty w górę, aby pasek jej nie zasłaniał
+        sceneStyle: {
+          backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+        },
       }}
     >
-      <MaterialTopTabs.Screen name="index" />
-      <MaterialTopTabs.Screen name="ogloszenia" />
-      <MaterialTopTabs.Screen name="terminarz" />
-      <MaterialTopTabs.Screen name="moje-zapisy" />
-      <MaterialTopTabs.Screen name="profil" />
+      <MaterialTopTabs.Screen name="index" options={{ title: 'Start' }} />
+      <MaterialTopTabs.Screen name="ogloszenia" options={{ title: 'Ogłoszenia' }} />
+      <MaterialTopTabs.Screen name="terminarz" options={{ title: 'Terminarz' }} />
+      <MaterialTopTabs.Screen name="moje-zapisy" options={{ title: 'Moje zapisy' }} />
+      <MaterialTopTabs.Screen name="profil" options={{ title: 'Profil' }} />
     </MaterialTopTabs>
   );
 }
 
-// Stylizacja zgodna z motywem Mikasy oraz nastawiona na dużą czytelność
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: '#0F172A', // Głęboki granat/grafit (tło aplikacji)
-    borderTopWidth: 2,
-    borderTopColor: '#1E293B',
-    paddingTop: 8,
-  },
-  tabBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingTop: 35,
-    paddingBottom: 0,
-    gap: 10,
-  },
-  tabItem: {
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1E293B', // Nieaktywny kafel
-    minHeight: 48, // Wygodny obszar kliknięcia dla starszych osób
-  },
-  tabItemActive: {
-    backgroundColor: '#FBBF24', // Żółty Mikasa dla aktywnego elementu
-  },
-  tabLabel: {
-    fontSize: 16, // Większa czcionka dla lepszej czytelności
-    fontWeight: '700',
-    color: '#94A3B8',
-  },
-  tabLabelActive: {
-    color: '#0F172A', // Kontrastowy ciemny tekst na żółtym tle
-    fontWeight: '800',
-  },
-});
+const getStyles = (isDark: boolean, bottomInset: number) =>
+  StyleSheet.create({
+    container: {
+      width: '100%',
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      borderTopWidth: 1,
+      borderTopColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      paddingTop: 5,
+      paddingBottom: 40,
+      
+      elevation: 10,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -4 },
+      shadowRadius: 10,
+      shadowOpacity: isDark ? 0.3 : 0.05,
+    },
+    tabBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-around',
+      width: '100%',
+      paddingHorizontal: 16,
+    },
+    tabItemWrapper: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    tabItem: {
+      width: 50,
+      height: 42,
+      borderRadius: 14,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: 'transparent',
+    },
+    tabItemActive: {
+      backgroundColor: '#2C4BFF',
+      shadowColor: '#2C4BFF',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.3,
+      shadowRadius: 4,
+      elevation: 3,
+    },
+  });

@@ -10,44 +10,14 @@ import {
   ActivityIndicator,
   Platform,
   Modal,
+  useColorScheme,
+  DeviceEventEmitter,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
-
-type CustomAlertProps = {
-  visible: boolean;
-  title: string;
-  message: string;
-  onClose: () => void;
-};
-
-function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
-  return (
-    <Modal
-      transparent
-      visible={visible}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={alertStyles.overlay}>
-        <View style={alertStyles.alertBox}>
-          <View style={alertStyles.indicator} />
-          <Text style={alertStyles.title}>{title}</Text>
-          <Text style={alertStyles.message}>{message}</Text>
-          <TouchableOpacity
-            style={alertStyles.button}
-            onPress={onClose}
-            activeOpacity={0.8}
-          >
-            <Text style={alertStyles.buttonText}>OK</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-}
+import CustomAlert from '@/components/CustomAlert';
 
 type CustomConfirmProps = {
   visible: boolean;
@@ -58,6 +28,7 @@ type CustomConfirmProps = {
   confirmText?: string;
   cancelText?: string;
   destructive?: boolean;
+  isDark: boolean;
 };
 
 function CustomConfirm({
@@ -69,6 +40,7 @@ function CustomConfirm({
   confirmText = 'Tak',
   cancelText = 'Anuluj',
   destructive = false,
+  isDark,
 }: CustomConfirmProps) {
   return (
     <Modal
@@ -77,23 +49,23 @@ function CustomConfirm({
       animationType="fade"
       onRequestClose={onCancel}
     >
-      <View style={alertStyles.overlay}>
-        <View style={alertStyles.alertBox}>
-          <View style={alertStyles.indicator} />
-          <Text style={alertStyles.title}>{title}</Text>
-          <Text style={alertStyles.message}>{message}</Text>
-          <View style={alertStyles.confirmButtonsRow}>
+      <View style={confirmStyles.overlay}>
+        <View style={[confirmStyles.alertBox, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)' }]}>
+          <View style={confirmStyles.indicator} />
+          <Text style={[confirmStyles.title, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>{title}</Text>
+          <Text style={[confirmStyles.message, { color: isDark ? '#94A3B8' : '#64748B' }]}>{message}</Text>
+          <View style={confirmStyles.confirmButtonsRow}>
             <TouchableOpacity
-              style={[alertStyles.confirmButton, alertStyles.cancelButton]}
+              style={[confirmStyles.confirmButton, { backgroundColor: isDark ? '#0B1120' : '#F1F5F9', borderColor: isDark ? '#334155' : '#CBD5E1' }]}
               onPress={onCancel}
               activeOpacity={0.8}
             >
-              <Text style={alertStyles.cancelButtonText}>{cancelText}</Text>
+              <Text style={[confirmStyles.cancelButtonText, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>{cancelText}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
-                alertStyles.confirmButton,
-                destructive ? alertStyles.destructiveButton : alertStyles.primaryButton,
+                confirmStyles.confirmButton,
+                destructive ? confirmStyles.destructiveButton : confirmStyles.primaryButton,
               ]}
               onPress={onConfirm}
               activeOpacity={0.8}
@@ -101,8 +73,8 @@ function CustomConfirm({
               <Text
                 style={
                   destructive
-                    ? alertStyles.destructiveButtonText
-                    : alertStyles.primaryButtonText
+                    ? confirmStyles.destructiveButtonText
+                    : confirmStyles.primaryButtonText
                 }
               >
                 {confirmText}
@@ -117,6 +89,8 @@ function CustomConfirm({
 
 export default function ProfilScreen() {
   const router = useRouter();
+  const systemColorScheme = useColorScheme();
+  
   const [loadingUser, setLoadingUser] = useState(true);
   const [playerId, setPlayerId] = useState<string | null>(null);
 
@@ -134,6 +108,13 @@ export default function ProfilScreen() {
   const [changingPassword, setChangingPassword] = useState(false);
 
   const [notifMatchReminders, setNotifMatchReminders] = useState(true);
+
+  // Stany zarządzania motywem
+  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
+
+  // Wyznaczanie faktycznego motywu (ciemny / jasny)
+  const isDark = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
+  const styles = getStyles(isDark);
 
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
@@ -159,7 +140,30 @@ export default function ProfilScreen() {
 
   useEffect(() => {
     loadPlayerData();
+    loadThemePreference();
   }, []);
+
+  const loadThemePreference = async () => {
+    try {
+      const savedTheme = await AsyncStorage.getItem('app_theme_mode');
+      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+        setThemeMode(savedTheme);
+      }
+    } catch (e) {
+      console.error('Błąd wczytywania motywu:', e);
+    }
+  };
+
+  const changeThemeMode = async (mode: 'system' | 'light' | 'dark') => {
+    setThemeMode(mode);
+    try {
+      await AsyncStorage.setItem('app_theme_mode', mode);
+      // Natychmiastowe powiadomienie nawigatora (zakładek), że motyw się zmienił
+      DeviceEventEmitter.emit('themeChanged');
+    } catch (e) {
+      console.error('Błąd zapisu motywu:', e);
+    }
+  };
 
   const loadPlayerData = async () => {
     setLoadingUser(true);
@@ -299,7 +303,7 @@ export default function ProfilScreen() {
   if (loadingUser) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
-        <ActivityIndicator size="large" color="#FBBF24" />
+        <ActivityIndicator size="large" color="#FFD23F" />
       </SafeAreaView>
     );
   }
@@ -325,6 +329,7 @@ export default function ProfilScreen() {
         destructive
         onCancel={() => setLogoutConfirmVisible(false)}
         onConfirm={executeLogout}
+        isDark={isDark}
       />
 
       <ScrollView
@@ -334,6 +339,69 @@ export default function ProfilScreen() {
       >
         <Text style={styles.headerTitle}>Profil</Text>
         <Text style={styles.headerSubtitle}>Twoje dane i ustawienia konta</Text>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Wygląd i motyw</Text>
+          <Text style={[styles.prefDescription, { marginBottom: 12 }]}>
+            Wybierz preferowany motyw aplikacji lub dopasuj go do ustawień urządzenia (obecny systemowy: {systemColorScheme === 'dark' ? 'Ciemny' : 'Jasny'}).
+          </Text>
+
+          <View style={styles.themeButtonsRow}>
+            <TouchableOpacity
+              style={[
+                styles.themeButton,
+                themeMode === 'system' && styles.themeButtonActive,
+              ]}
+              onPress={() => changeThemeMode('system')}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.themeButtonText,
+                  themeMode === 'system' && styles.themeButtonTextActive,
+                ]}
+              >
+                📱 Urządzenia
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.themeButton,
+                themeMode === 'light' && styles.themeButtonActive,
+              ]}
+              onPress={() => changeThemeMode('light')}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.themeButtonText,
+                  themeMode === 'light' && styles.themeButtonTextActive,
+                ]}
+              >
+                ☀️ Biały
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.themeButton,
+                themeMode === 'dark' && styles.themeButtonActive,
+              ]}
+              onPress={() => changeThemeMode('dark')}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.themeButtonText,
+                  themeMode === 'dark' && styles.themeButtonTextActive,
+                ]}
+              >
+                🌙 Czarny
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Dane profilu</Text>
@@ -365,6 +433,7 @@ export default function ProfilScreen() {
               style={[styles.input, styles.inputReadOnly]}
               value={fullName}
               editable={false}
+              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
             />
           </View>
 
@@ -374,6 +443,7 @@ export default function ProfilScreen() {
               style={[styles.input, styles.inputReadOnly]}
               value={showSensitiveData ? phone : maskedPhone}
               editable={false}
+              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
             />
           </View>
 
@@ -383,6 +453,7 @@ export default function ProfilScreen() {
               style={[styles.input, styles.inputReadOnly]}
               value={showSensitiveData ? email : maskedEmail}
               editable={false}
+              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
             />
           </View>
 
@@ -406,7 +477,7 @@ export default function ProfilScreen() {
             <TextInput
               style={styles.input}
               placeholder="Wpisz obecne hasło"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               secureTextEntry
               value={oldPassword}
               onChangeText={setOldPassword}
@@ -418,7 +489,7 @@ export default function ProfilScreen() {
             <TextInput
               style={styles.input}
               placeholder="Minimum 6 znaków"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               secureTextEntry
               value={newPassword}
               onChangeText={setNewPassword}
@@ -430,7 +501,7 @@ export default function ProfilScreen() {
             <TextInput
               style={styles.input}
               placeholder="Powtórz nowe hasło"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               secureTextEntry
               value={confirmPassword}
               onChangeText={setConfirmPassword}
@@ -462,7 +533,7 @@ export default function ProfilScreen() {
             <Switch
               value={notifMatchReminders}
               onValueChange={toggleMatchReminders}
-              trackColor={{ false: '#334155', true: '#FBBF24' }}
+              trackColor={{ false: isDark ? '#334155' : '#CBD5E1', true: '#2C4BFF' }}
               thumbColor="#fff"
             />
           </View>
@@ -480,7 +551,7 @@ export default function ProfilScreen() {
   );
 }
 
-const alertStyles = StyleSheet.create({
+const confirmStyles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
@@ -491,45 +562,34 @@ const alertStyles = StyleSheet.create({
   alertBox: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: '#1E293B',
     borderRadius: 24,
     padding: 24,
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#334155',
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.4,
+    shadowRadius: 15,
+    elevation: 8,
   },
   indicator: {
     width: 48,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#FBBF24',
+    backgroundColor: '#FFD23F',
     marginBottom: 16,
   },
   title: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#FFFFFF',
     marginBottom: 10,
     textAlign: 'center',
   },
   message: {
     fontSize: 16,
-    color: '#94A3B8',
     textAlign: 'center',
     marginBottom: 24,
     lineHeight: 22,
-  },
-  button: {
-    width: '100%',
-    backgroundColor: '#FBBF24',
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#0F172A',
-    fontSize: 18,
-    fontWeight: '800',
   },
   confirmButtonsRow: {
     flexDirection: 'row',
@@ -541,225 +601,253 @@ const alertStyles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 16,
     alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: '#0F172A',
-    borderWidth: 2,
-    borderColor: '#334155',
+    borderWidth: 1,
   },
   cancelButtonText: {
-    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
   },
   primaryButton: {
-    backgroundColor: '#FBBF24',
+    backgroundColor: '#2C4BFF',
   },
   primaryButtonText: {
-    color: '#0F172A',
+    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '900',
   },
   destructiveButton: {
-    backgroundColor: '#0F172A',
-    borderWidth: 2,
-    borderColor: '#F87171',
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: '#FF5A5F',
   },
   destructiveButtonText: {
-    color: '#F87171',
+    color: '#FF5A5F',
     fontSize: 15,
     fontWeight: '800',
   },
 });
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0F172A' },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40 },
+const getStyles = (isDark: boolean) =>
+  StyleSheet.create({
+    safeArea: { flex: 1, backgroundColor: isDark ? '#0B1120' : '#F8FAFC' },
+    loadingContainer: {
+      flex: 1,
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 16,
+    },
+    scrollContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40 },
 
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginTop: 10,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#94A3B8',
-    marginTop: 4,
-    marginBottom: 20,
-    fontWeight: '500',
-  },
+    headerTitle: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      marginTop: 10,
+    },
+    headerSubtitle: {
+      fontSize: 14,
+      color: isDark ? '#94A3B8' : '#64748B',
+      marginTop: 4,
+      marginBottom: 20,
+      fontWeight: '500',
+    },
 
-  card: {
-    backgroundColor: '#1E293B',
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 16,
-  },
+    card: {
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      borderRadius: 24,
+      padding: 16,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: isDark ? 0.35 : 0.08,
+      shadowRadius: 12,
+      elevation: 6,
+    },
+    cardTitle: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      marginBottom: 16,
+    },
 
-  profileHeaderBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0F172A',
-    padding: 14,
-    borderRadius: 16,
-    marginBottom: 18,
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  profileAvatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FBBF24',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  profileAvatarText: {
-    color: '#0F172A',
-    fontSize: 20,
-    fontWeight: '900',
-  },
-  profileInfoWrap: {
-    flex: 1,
-  },
-  profileFullName: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 6,
-  },
-  badgesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  roleBadge: {
-    backgroundColor: '#FBBF24',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  roleBadgeText: {
-    color: '#0F172A',
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  statusBadge: {
-    backgroundColor: 'rgba(52, 211, 153, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#34D399',
-  },
-  statusBadgeText: {
-    color: '#34D399',
-    fontSize: 11,
-    fontWeight: '800',
-  },
+    themeButtonsRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    themeButton: {
+      flex: 1,
+      backgroundColor: isDark ? '#0B1120' : '#F1F5F9',
+      borderWidth: 1,
+      borderColor: isDark ? '#334155' : '#CBD5E1',
+      borderRadius: 14,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    themeButtonActive: {
+      backgroundColor: '#2C4BFF',
+      borderColor: '#2C4BFF',
+    },
+    themeButtonText: {
+      color: isDark ? '#94A3B8' : '#64748B',
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    themeButtonTextActive: {
+      color: '#FFFFFF',
+      fontWeight: '900',
+    },
 
-  inputGroup: { marginBottom: 14 },
-  label: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 6,
-  },
-  input: {
-    borderWidth: 2,
-    borderColor: '#334155',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: Platform.OS === 'ios' ? 12 : 10,
-    fontSize: 15,
-    backgroundColor: '#0F172A',
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  inputReadOnly: {
-    color: '#94A3B8',
-    opacity: 0.9,
-  },
+    profileHeaderBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      padding: 14,
+      borderRadius: 18,
+      marginBottom: 18,
+      borderWidth: 1,
+      borderColor: isDark ? '#334155' : '#E2E8F0',
+    },
+    profileAvatarPlaceholder: {
+      width: 48,
+      height: 48,
+      borderRadius: 16,
+      backgroundColor: '#FFD23F',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
+    },
+    profileAvatarText: {
+      color: '#0B1120',
+      fontSize: 20,
+      fontWeight: '900',
+    },
+    profileInfoWrap: {
+      flex: 1,
+    },
+    profileFullName: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      marginBottom: 6,
+    },
+    badgesRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    roleBadge: {
+      backgroundColor: '#FFD23F',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 8,
+    },
+    roleBadgeText: {
+      color: '#0B1120',
+      fontSize: 11,
+      fontWeight: '900',
+    },
+    statusBadge: {
+      backgroundColor: isDark ? 'rgba(0, 196, 140, 0.15)' : 'rgba(0, 196, 140, 0.1)',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: '#00C48C',
+    },
+    statusBadgeText: {
+      color: '#00C48C',
+      fontSize: 11,
+      fontWeight: '800',
+    },
 
-  revealButton: {
-    backgroundColor: '#0F172A',
-    borderWidth: 2,
-    borderColor: '#334155',
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  revealButtonText: {
-    color: '#FBBF24',
-    fontSize: 13,
-    fontWeight: '800',
-  },
+    inputGroup: { marginBottom: 14 },
+    label: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      marginBottom: 6,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: isDark ? '#334155' : '#CBD5E1',
+      borderRadius: 16,
+      paddingHorizontal: 14,
+      paddingVertical: Platform.OS === 'ios' ? 12 : 10,
+      fontSize: 15,
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      fontWeight: '500',
+    },
+    inputReadOnly: {
+      color: isDark ? '#94A3B8' : '#64748B',
+      opacity: 0.9,
+    },
 
-  button: {
-    backgroundColor: '#FBBF24',
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: {
-    color: '#0F172A',
-    fontSize: 15,
-    fontWeight: '900',
-  },
+    revealButton: {
+      backgroundColor: isDark ? '#0B1120' : '#F1F5F9',
+      borderWidth: 1,
+      borderColor: isDark ? '#334155' : '#CBD5E1',
+      borderRadius: 16,
+      paddingVertical: 12,
+      alignItems: 'center',
+      marginTop: 6,
+    },
+    revealButtonText: {
+      color: isDark ? '#94A3B8' : '#64748B',
+      fontSize: 13,
+      fontWeight: '800',
+    },
 
-  logoutButton: {
-    backgroundColor: '#0F172A',
-    borderWidth: 2,
-    borderColor: '#F87171',
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 4,
-    marginBottom: 20,
-  },
-  logoutButtonText: {
-    color: '#F87171',
-    fontSize: 15,
-    fontWeight: '800',
-  },
+    button: {
+      backgroundColor: '#2C4BFF',
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      marginTop: 4,
+    },
+    buttonDisabled: { opacity: 0.6 },
+    buttonText: {
+      color: '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '900',
+    },
 
-  prefRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  prefTextWrap: { flex: 1, paddingRight: 12 },
-  prefLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 2,
-  },
-  prefDescription: {
-    fontSize: 12,
-    color: '#94A3B8',
-    lineHeight: 16,
-    fontWeight: '500',
-  },
-});
+    logoutButton: {
+      backgroundColor: isDark ? '#0B1120' : '#FFFFFF',
+      borderWidth: 1,
+      borderColor: '#FF5A5F',
+      borderRadius: 20,
+      paddingVertical: 16,
+      alignItems: 'center',
+      marginTop: 4,
+      marginBottom: 20,
+    },
+    logoutButtonText: {
+      color: '#FF5A5F',
+      fontSize: 15,
+      fontWeight: '800',
+    },
+
+    prefRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 4,
+    },
+    prefTextWrap: { flex: 1, paddingRight: 12 },
+    prefLabel: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      marginBottom: 2,
+    },
+    prefDescription: {
+      fontSize: 12,
+      color: isDark ? '#94A3B8' : '#64748B',
+      lineHeight: 16,
+      fontWeight: '500',
+    },
+  });

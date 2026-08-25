@@ -7,14 +7,16 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Dimensions,
-  Modal,
+  useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
 import { getCurrentPlayer, Player } from '@/lib/player';
 import { syncMatchNotifications } from '@/services/notificationService';
+import CustomAlert from '@/components/CustomAlert';
 
 type Match = {
   id: string;
@@ -60,43 +62,9 @@ type Announcement = {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-type CustomAlertProps = {
-  visible: boolean;
-  title: string;
-  message: string;
-  onClose: () => void;
-};
-
-// Funkcja pomocnicza do formatowania daty z YYYY-MM-DD na DD-MM-YYYY
 function formatDateToPL(dateString: string): string {
   const [year, month, day] = dateString.split('-');
   return `${day}-${month}-${year}`;
-}
-
-function CustomAlert({ visible, title, message, onClose }: CustomAlertProps) {
-  return (
-    <Modal
-      transparent
-      visible={visible}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={alertStyles.overlay}>
-        <View style={alertStyles.alertBox}>
-          <View style={alertStyles.indicator} />
-          <Text style={alertStyles.title}>{title}</Text>
-          <Text style={alertStyles.message}>{message}</Text>
-          <TouchableOpacity
-            style={alertStyles.button}
-            onPress={onClose}
-            activeOpacity={0.8}
-          >
-            <Text style={alertStyles.buttonText}>OK</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
 }
 
 function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
@@ -129,6 +97,11 @@ function getAuthorName(playersField: Announcement['players']): string {
 export default function MatchDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const systemColorScheme = useColorScheme();
+
+  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
+  const isDark = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
+  const styles = getStyles(isDark);
 
   const [match, setMatch] = useState<Match | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
@@ -160,6 +133,17 @@ export default function MatchDetailScreen() {
     }
   };
 
+  const loadThemePreference = async () => {
+    try {
+      const savedTheme = await AsyncStorage.getItem('app_theme_mode');
+      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+        setThemeMode(savedTheme);
+      }
+    } catch (e) {
+      console.error('Błąd wczytywania motywu:', e);
+    }
+  };
+
   const loadData = useCallback(async () => {
     if (!id) return;
     
@@ -180,7 +164,14 @@ export default function MatchDetailScreen() {
 
     const { data: regsData, error: regsError } = await supabase
       .from('match_registrations')
-      .select('id, match_id, player_id, is_paid, created_at, players(full_name)')
+      .select(`
+        id, 
+        match_id, 
+        player_id, 
+        is_paid, 
+        created_at, 
+        players:player_id (full_name)
+      `)
       .eq('match_id', id)
       .order('created_at', { ascending: true });
 
@@ -218,6 +209,7 @@ export default function MatchDetailScreen() {
   }, [id, router]);
 
   useEffect(() => {
+    loadThemePreference();
     loadData();
   }, [loadData]);
 
@@ -262,7 +254,7 @@ export default function MatchDetailScreen() {
   if (loading || !match) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['top', 'bottom', 'left', 'right']}>
-        <ActivityIndicator size="large" color="#FBBF24" />
+        <ActivityIndicator size="large" color="#2C4BFF" />
       </SafeAreaView>
     );
   }
@@ -281,7 +273,7 @@ export default function MatchDetailScreen() {
   
   const isUserInMain = mainList.some((r) => String(r.player_id) === String(currentPlayer?.id));
   const isCancellable = canCancelMatch(match.date, match.time_start);
-  const title = match.title?.trim() || 'Trening Siatkówki';
+  const title = match.title?.trim() || 'Szczegóły Meczu';
   const { weekday, day, month } = formatMatchDate(match.date);
 
   const handleSignUp = async () => {
@@ -349,80 +341,43 @@ export default function MatchDetailScreen() {
         message={alertMessage}
         onClose={handleAlertClose}
       />
+
       <View style={styles.topSection}>
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Text style={styles.backButtonText}>‹ Wróć</Text>
           </TouchableOpacity>
-          <Text style={styles.matchIdTitle} numberOfLines={1}>
-            {title}
-          </Text>
         </View>
 
-        <View style={styles.matchInfoCard}>
-          <View style={styles.dateBoxSm}>
-            <Text style={styles.dateDaySm}>{day}</Text>
-            <Text style={styles.dateMonthSm}>{month}</Text>
+        <View style={styles.heroSection}>
+          <View style={styles.ticketSideAccent} />
+          
+          <View style={styles.heroTopRow}>
+            <Text style={styles.heroBadge}>SZCZEGÓŁY WYDARZENIA</Text>
+            <Text style={styles.heroPrice}>{Number(match.price_per_player)} PLN</Text>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.infoTextBold}>{weekday}, {formatDateToPL(match.date)}</Text>
-            <Text style={styles.infoText}>📍 {match.location}</Text>
-            <Text style={styles.infoText}>
-              🕒 {formatTime(match.time_start)} – {formatTime(match.time_end)}
-            </Text>
-            <Text style={styles.infoText}>
-              👥 Zapisanych: <Text style={styles.bold}>{registrations.length}/{capacity}</Text> |{' '}
-              {Number(match.price_per_player)} PLN
-            </Text>
-            {isCancelled && (
-              <Text style={[styles.infoText, { color: '#F87171', fontWeight: '700', marginTop: 2 }]}>
-                ⚠️ Mecz odwołany
-              </Text>
-            )}
-            {isFinished && !isCancelled && (
-              <Text style={[styles.infoText, { color: '#FBBF24', fontWeight: '700', marginTop: 2 }]}>
-                🏁 Zakończone
-              </Text>
-            )}
-          </View>
-        </View>
 
-        {!isFinished && currentPlayer && (
-          <View style={styles.actionContainer}>
-            {myRegistration ? (
-              <View style={styles.registeredRow}>
-                <Text style={styles.statusTextInfo}>
-                  {!isUserInMain
-                    ? '⏳ Jesteś na liście rezerwowej'
-                    : '✅ Jesteś zapisany w składzie głównym'}
-                </Text>
-                {isCancellable ? (
-                  <TouchableOpacity
-                    style={styles.cancelBtn}
-                    onPress={handleCancel}
-                    disabled={actionLoading}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.cancelBtnText}>Wypisz się</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <Text style={styles.lockedText}>Wypis zablokowany (&lt; 2h)</Text>
-                )}
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={[styles.signupBtn, actionLoading && { opacity: 0.6 }]}
-                onPress={handleSignUp}
-                disabled={actionLoading}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.signupBtnText}>
-                  {isFull ? 'Zapisz się na listę rezerwową' : 'ZAPISZ SIĘ NA MECZ'}
-                </Text>
-              </TouchableOpacity>
-            )}
+          <Text style={styles.heroTitle} numberOfLines={1}>{title}</Text>
+
+          <View style={styles.heroInfoCard}>
+            <View style={styles.heroDateBox}>
+              <Text style={styles.heroDayNumber}>{day}</Text>
+              <Text style={styles.heroMonthText}>{month}</Text>
+            </View>
+
+            <View style={styles.heroDetailsCol}>
+              <Text style={styles.heroDateMain}>{weekday}</Text>
+              <Text style={styles.heroTimeMain}>🕒 {formatTime(match.time_start)} – {formatTime(match.time_end)}</Text>
+              <Text style={styles.heroLocationMain} numberOfLines={1}>📍 {match.location}</Text>
+            </View>
           </View>
-        )}
+
+          {isCancelled && (
+            <View style={styles.cancelledBadge}>
+              <Text style={styles.cancelledBadgeText}>⚠️ Mecz został odwołany</Text>
+            </View>
+          )}
+        </View>
       </View>
 
       <View style={styles.navSection}>
@@ -431,7 +386,7 @@ export default function MatchDetailScreen() {
           onPress={() => switchTab(0)}
         >
           <Text style={[styles.navButtonText, activeTab === 0 && styles.navButtonTextActive]}>
-            Uczestnicy ({registrations.length})
+            Uczestnicy ({registrations.length}/{capacity})
           </Text>
         </TouchableOpacity>
 
@@ -467,7 +422,6 @@ export default function MatchDetailScreen() {
                     <Text style={[styles.playerText, isMe && styles.playerTextHighlight]}>
                       {index + 1}. {playerName} {isMe && '(Ty)'}
                     </Text>
-                    <Text style={styles.playerRoleTag}>Główny</Text>
                   </View>
                 );
               })
@@ -484,9 +438,6 @@ export default function MatchDetailScreen() {
                   <View key={item.id} style={[styles.playerRow, isMe && styles.playerRowHighlight]}>
                     <Text style={[styles.playerText, isMe && styles.playerTextHighlight]}>
                       {index + 1}. {playerName} {isMe && '(Ty)'}
-                    </Text>
-                    <Text style={[styles.playerRoleTag, { backgroundColor: '#334155', color: '#FBBF24' }]}>
-                      Rezerwa
                     </Text>
                   </View>
                 );
@@ -541,224 +492,309 @@ export default function MatchDetailScreen() {
           </ScrollView>
         </View>
       </ScrollView>
+
+      {!isFinished && currentPlayer && (
+        <View style={styles.footerActionContainer}>
+          {myRegistration ? (
+            <View style={styles.footerRegisteredWrapper}>
+              <Text style={styles.footerStatusText}>
+                {!isUserInMain
+                  ? '⏳ Jesteś na liście rezerwowej'
+                  : '✅ Jesteś zapisany w składzie głównym'}
+              </Text>
+              {isCancellable ? (
+                <TouchableOpacity
+                  style={styles.footerCancelBtn}
+                  onPress={handleCancel}
+                  disabled={actionLoading}
+                >
+                  <Text style={styles.footerCancelBtnText}>Wypisz się z meczu</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.footerLockedText}>Wypis zablokowany (&lt; 2h przed meczem)</Text>
+              )}
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.footerSignupBtn, actionLoading && { opacity: 0.6 }]}
+              onPress={handleSignUp}
+              disabled={actionLoading}
+            >
+              <Text style={styles.footerSignupBtnText}>
+                {isFull ? 'Zapisz się na listę rezerwową' : 'Zapisz się na mecz'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
-const alertStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  alertBox: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#1E293B',
-    borderRadius: 24,
-    padding: 24,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  indicator: {
-    width: 48,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#FBBF24',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  message: {
-    fontSize: 16,
-    color: '#94A3B8',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  button: {
-    width: '100%',
-    backgroundColor: '#FBBF24',
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#0F172A',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-});
+const getStyles = (isDark: boolean) =>
+  StyleSheet.create({
+    safeArea: { flex: 1, backgroundColor: isDark ? '#0B1120' : '#F8FAFC' },
+    loadingContainer: { 
+      flex: 1, 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      paddingHorizontal: 16 
+    },
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0F172A' },
-  loadingContainer: { 
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    backgroundColor: '#0F172A',
-    paddingHorizontal: 16 
-  },
+    topSection: {
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+    },
+    headerRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4 },
+    backButton: { paddingVertical: 6, paddingHorizontal: 4 },
+    backButtonText: { fontSize: 16, fontWeight: '800', color: '#2C4BFF' },
 
-  topSection: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 16,
-    borderBottomWidth: 2,
-    borderBottomColor: '#334155',
-    backgroundColor: '#0F172A',
-  },
-  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14, marginTop: 4 },
-  backButton: { marginRight: 12, paddingVertical: 6, paddingHorizontal: 4 },
-  backButtonText: { fontSize: 18, fontWeight: '700', color: '#FBBF24' },
-  matchIdTitle: { flex: 1, fontSize: 20, fontWeight: '800', color: '#FFFFFF' },
+    heroSection: {
+      marginHorizontal: 20,
+      marginTop: 8,
+      padding: 16,
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      position: 'relative',
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: isDark ? 0.35 : 0.06,
+      shadowRadius: 12,
+      elevation: 6,
+    },
+    ticketSideAccent: {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      bottom: 0,
+      width: 6,
+      backgroundColor: '#2C4BFF',
+    },
+    heroTopRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    heroBadge: {
+      fontSize: 11,
+      fontWeight: '900',
+      color: '#2C4BFF',
+      letterSpacing: 1.2,
+    },
+    heroPrice: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+    },
+    heroTitle: {
+      fontSize: 22,
+      fontWeight: '900',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      marginBottom: 12,
+    },
+    heroInfoCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+      borderRadius: 16,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+    },
+    heroDateBox: {
+      width: 58,
+      height: 58,
+      borderRadius: 14,
+      backgroundColor: '#2C4BFF',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 14,
+    },
+    heroDayNumber: {
+      fontSize: 22,
+      fontWeight: '900',
+      color: '#FFFFFF',
+      lineHeight: 24,
+    },
+    heroMonthText: {
+      fontSize: 11,
+      fontWeight: '900',
+      color: '#FFFFFF',
+      textTransform: 'uppercase',
+    },
+    heroDetailsCol: {
+      flex: 1,
+    },
+    heroDateMain: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: isDark ? '#FFFFFF' : '#0F172A',
+      marginBottom: 3,
+    },
+    heroTimeMain: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: isDark ? '#94A3B8' : '#64748B',
+      marginBottom: 3,
+    },
+    heroLocationMain: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: isDark ? '#94A3B8' : '#64748B',
+    },
+    cancelledBadge: {
+      marginTop: 10,
+      backgroundColor: isDark ? 'rgba(255, 90, 95, 0.15)' : '#FEF2F2',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: '#FF5A5F',
+      alignItems: 'center',
+    },
+    cancelledBadgeText: {
+      color: '#FF5A5F',
+      fontWeight: '900',
+      fontSize: 13,
+    },
 
-  matchInfoCard: {
-    flexDirection: 'row',
-    backgroundColor: '#1E293B',
-    borderRadius: 20,
-    padding: 16,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  dateBoxSm: {
-    width: 60,
-    height: 60,
-    borderRadius: 16,
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  dateDaySm: { fontSize: 20, fontWeight: '800', color: '#FBBF24' },
-  dateMonthSm: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
-  infoTextBold: { fontSize: 16, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 },
-  infoText: { fontSize: 15, color: '#94A3B8', marginBottom: 4, fontWeight: '500' },
-  bold: { fontWeight: '800', color: '#FFFFFF' },
+    navSection: {
+      flexDirection: 'row',
+      paddingHorizontal: 20,
+      paddingVertical: 12,
+      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
+    },
+    navButton: {
+      flex: 1,
+      paddingVertical: 10,
+      alignItems: 'center',
+      borderRadius: 16,
+    },
+    navButtonActive: {
+      backgroundColor: '#2C4BFF',
+      shadowColor: '#2C4BFF',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.3,
+      shadowRadius: 4,
+      elevation: 3,
+    },
+    navButtonText: { fontSize: 13, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B' },
+    navButtonTextActive: { color: '#FFFFFF', fontWeight: '900' },
 
-  actionContainer: { marginTop: 16 },
-  signupBtn: {
-    backgroundColor: '#FBBF24',
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  signupBtnText: { color: '#0F172A', fontSize: 18, fontWeight: '800' },
-  registeredRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  statusTextInfo: { fontSize: 15, fontWeight: '700', color: '#FBBF24', flex: 1 },
-  cancelBtn: {
-    backgroundColor: '#0F172A',
-    borderWidth: 2,
-    borderColor: '#F87171',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  cancelBtnText: { color: '#F87171', fontSize: 15, fontWeight: '800' },
-  lockedText: { fontSize: 13, color: '#94A3B8', fontStyle: 'italic', fontWeight: '500' },
+    bottomSectionScroll: { flex: 1 },
+    tabContentPage: {
+      width: SCREEN_WIDTH,
+      flex: 1,
+    },
+    innerListScroll: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 40 },
+    sectionHeading: { fontSize: 16, fontWeight: '900', color: isDark ? '#FFFFFF' : '#0F172A', marginBottom: 10 },
+    emptySubText: { fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', fontStyle: 'italic', marginBottom: 10, fontWeight: '500' },
 
-  navSection: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: '#0F172A',
-    borderBottomWidth: 2,
-    borderBottomColor: '#334155',
-  },
-  navButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderRadius: 14,
-    backgroundColor: '#1E293B',
-    marginHorizontal: 4,
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  navButtonActive: {
-    backgroundColor: '#FBBF24',
-    borderColor: '#FBBF24',
-  },
-  navButtonText: { fontSize: 15, fontWeight: '700', color: '#94A3B8' },
-  navButtonTextActive: { color: '#0F172A', fontWeight: '900' },
+    playerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 16,
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      marginBottom: 8,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: isDark ? 0.2 : 0.03,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    playerRowHighlight: {
+      borderColor: '#2C4BFF',
+      backgroundColor: isDark ? 'rgba(44, 75, 255, 0.08)' : '#EFF6FF',
+    },
+    playerText: { fontSize: 14, color: isDark ? '#FFFFFF' : '#0F172A', fontWeight: '600' },
+    playerTextHighlight: { fontWeight: '900', color: '#2C4BFF' },
+  
+    notificationCard: {
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      borderRadius: 20,
+      padding: 16,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: isDark ? 0.2 : 0.03,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    notificationCardPinned: {
+      borderColor: '#2C4BFF',
+      backgroundColor: isDark ? 'rgba(44, 75, 255, 0.05)' : '#EFF6FF',
+    },
+    notifHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    notifTitle: { fontSize: 15, fontWeight: '900', color: isDark ? '#FFFFFF' : '#0F172A', flex: 1, marginRight: 8 },
+    notifDesc: { fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 20, marginBottom: 10, fontWeight: '500' },
+    pinnedBadge: {
+      backgroundColor: isDark ? 'rgba(44, 75, 255, 0.15)' : '#EFF6FF',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: '#2C4BFF',
+    },
+    pinnedBadgeText: { fontSize: 11, fontWeight: '900', color: '#2C4BFF' },
+    notifFooter: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderTopWidth: 1,
+      borderTopColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#F1F5F9',
+      paddingTop: 10,
+      marginTop: 6,
+    },
+    notifAuthor: { fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', fontWeight: '700' },
+    notifDate: { fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', fontWeight: '600' },
 
-  bottomSectionScroll: { flex: 1, backgroundColor: '#0F172A' },
-  tabContentPage: {
-    width: SCREEN_WIDTH,
-    flex: 1,
-  },
-  innerListScroll: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 },
-  sectionHeading: { fontSize: 18, fontWeight: '800', color: '#FFFFFF', marginBottom: 12 },
-  emptySubText: { fontSize: 15, color: '#94A3B8', fontStyle: 'italic', marginBottom: 12 },
-
-  playerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    backgroundColor: '#1E293B',
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  playerRowHighlight: {
-    borderColor: '#FBBF24',
-    backgroundColor: '#1E293B',
-  },
-  playerText: { fontSize: 16, color: '#FFFFFF', fontWeight: '600' },
-  playerTextHighlight: { fontWeight: '900', color: '#FBBF24' },
-  playerRoleTag: { fontSize: 12, fontWeight: '800', color: '#0F172A', backgroundColor: '#FBBF24', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-
-  notificationCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 20,
-    padding: 18,
-    marginBottom: 14,
-    borderWidth: 2,
-    borderColor: '#334155',
-  },
-  notificationCardPinned: {
-    borderColor: '#FBBF24',
-  },
-  notifHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  notifTitle: { fontSize: 16, fontWeight: '800', color: '#FFFFFF', flex: 1, marginRight: 8 },
-  notifDesc: { fontSize: 15, color: '#94A3B8', lineHeight: 22, marginBottom: 12, fontWeight: '500' },
-  pinnedBadge: {
-    backgroundColor: '#0F172A',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#FBBF24',
-  },
-  pinnedBadgeText: { fontSize: 12, fontWeight: '800', color: '#FBBF24' },
-  notifFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderTopWidth: 2,
-    borderTopColor: '#334155',
-    paddingTop: 12,
-    marginTop: 4,
-  },
-  notifAuthor: { fontSize: 13, color: '#94A3B8', fontWeight: '700' },
-  notifDate: { fontSize: 13, color: '#94A3B8', fontWeight: '500' },
-});
+    footerActionContainer: {
+      padding: 16,
+      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+      borderTopWidth: 1,
+      borderTopColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
+    },
+    footerSignupBtn: {
+      backgroundColor: '#2C4BFF',
+      borderRadius: 16,
+      paddingVertical: 16,
+      alignItems: 'center',
+      shadowColor: '#2C4BFF',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 4,
+    },
+    footerSignupBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
+    footerRegisteredWrapper: {
+      flexDirection: 'column',
+      alignItems: 'stretch',
+    },
+    footerStatusText: { fontSize: 14, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A', marginBottom: 10, textAlign: 'center' },
+    footerCancelBtn: {
+      backgroundColor: isDark ? '#0B1120' : '#FEF2F2',
+      borderWidth: 1,
+      borderColor: '#FF5A5F',
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    footerCancelBtnText: { color: '#FF5A5F', fontSize: 15, fontWeight: '900' },
+    footerLockedText: { fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', fontStyle: 'italic', textAlign: 'center', fontWeight: '700' },
+  });
