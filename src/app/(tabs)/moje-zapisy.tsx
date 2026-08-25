@@ -582,10 +582,7 @@ export default function MojeZapisyScreen() {
   }
 
   return (
-    <SafeAreaView
-      style={styles.safeArea}
-      edges={['bottom', 'left', 'right']}
-    >
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <CustomAlert
         visible={alertVisible}
         title={alertTitle}
@@ -872,7 +869,6 @@ const getStyles = (isDark: boolean) =>
       fontSize: 24,
       fontWeight: '800',
       color: isDark ? '#FFFFFF' : '#0F172A',
-      marginTop: 16,
     },
     headerSubtitle: {
       fontSize: 14,

@@ -343,7 +343,7 @@ export default function NearestMatchScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <CustomAlert
         visible={alertVisible}
         title={alertTitle}

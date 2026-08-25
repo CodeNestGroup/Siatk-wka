@@ -492,7 +492,7 @@ export default function AnnouncementsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <CustomAlert
         visible={alertVisible}
         title={alertTitle}
@@ -592,7 +592,6 @@ const getStyles = (isDark: boolean) =>
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'flex-start',
-      marginTop: 10,
       marginBottom: 20,
     },
     headerTitle: { fontSize: 24, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' },
