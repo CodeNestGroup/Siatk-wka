@@ -42,18 +42,32 @@ const CORAL = "#FF5A5F"
 const MINT = "#00C48C"
 const VIOLET = "#7A5CFF"
 
+// Kategorie operacji — wcześniej pole istniało w bazie i na karcie transakcji, ale formularz
+// nigdy nie dawał wyboru (zawsze zapisywał "mecz"), więc KAŻDA operacja — nawet zakup piłek
+// czy opłata za halę — pokazywała się jako "MECZ". Teraz da się faktycznie wybrać.
+const CATEGORIES: { id: string; label: string; color: string }[] = [
+  { id: "mecz", label: "Mecz", color: COBALT },
+  { id: "sprzet", label: "Sprzęt", color: VIOLET },
+  { id: "hala", label: "Hala", color: YELLOW },
+  { id: "inne", label: "Inne", color: "#94A3B8" },
+]
+
 const netPattern: React.CSSProperties = {
   backgroundImage:
     "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
 }
 
 // Kolejne barwy marki dla wstęgi sponsorów — zamiast przypadkowych kolorów Tailwind per sponsor
-const sponsors = [
-  { code: "BSC", name: "Beskid Sport Center", desc: "Partner Sprzętowy", color: MINT },
-  { code: "SKO", name: "Skoczów Park", desc: "Oficjalny Partner", color: YELLOW },
-  { code: "VOLLEY", name: "VolleyStore", desc: "Sklep Siatkarski", color: VIOLET },
-  { code: "AZ", name: "AZ-Cloud Solutions", desc: "Infrastruktura IT", color: COBALT },
-  { code: "ESCO", name: "ESCO Jaworze", desc: "Sponsor Tytularny", color: CORAL },
+// Jedyny realny sponsor na dziś to ESCO — reszta to świadomie oznaczone wolne miejsca,
+// pokazujące mechanizm wyświetlania przyszłych sponsorów (nie wymyślone nazwy firm, żeby
+// nikt nie pomyślał że to już podpisani partnerzy).
+// `logo` to opcjonalna ścieżka do pliku w /public — jeśli podana, appka pokaże obrazek
+// zamiast kolorowego kwadratu z kodem. Wrzuć plik do public/logos/ i wpisz tu ścieżkę.
+const sponsors: { code: string; name: string; desc: string; color: string; logo?: string }[] = [
+  { code: "ESCO", name: "ESCO Jaworze", desc: "Sponsor Tytularny", color: CORAL, logo: "/logos/esco.png" },
+  { code: "+", name: "Zostań Sponsorem", desc: "Wolne miejsce", color: COBALT },
+  { code: "+", name: "Zostań Sponsorem", desc: "Wolne miejsce", color: MINT },
+  { code: "+", name: "Zostań Sponsorem", desc: "Wolne miejsce", color: YELLOW },
 ]
 
 // Płynne podliczanie liczb — ten sam komponent co na pozostałych stronach
@@ -266,6 +280,7 @@ export default function FinancesPage() {
       setShowAddModal(false)
       setNewTitle("")
       setNewAmount("")
+      setNewCategory("mecz")
       notify("Pomyślnie dodano operację do kasy!")
     }
 
@@ -317,12 +332,16 @@ export default function FinancesPage() {
             <div className="animate-marquee gap-8 flex items-center">
               {[...sponsors, ...sponsors].map((s, index) => (
                 <div key={index} className="flex items-center gap-2 shrink-0">
-                  <span
-                    className="flex h-6 w-6 items-center justify-center rounded-lg font-black text-[9px] text-white"
-                    style={{ background: s.color }}
-                  >
-                    {s.code}
-                  </span>
+                  {s.logo ? (
+                    <img src={s.logo} alt={s.name} className="h-6 w-6 rounded-lg object-contain" />
+                  ) : (
+                    <span
+                      className="flex h-6 w-6 items-center justify-center rounded-lg font-black text-[9px] text-white"
+                      style={{ background: s.color }}
+                    >
+                      {s.code}
+                    </span>
+                  )}
                   <span className="text-xs font-extrabold text-slate-500">{s.name}</span>
                 </div>
               ))}
@@ -624,7 +643,12 @@ export default function FinancesPage() {
 
               <div className="rounded-[24px] border border-slate-200/80 bg-white p-4 space-y-2.5 shadow-xs">
                 {playerBalances.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-4 font-medium">Brak wpisanych nadpłat.</p>
+                  <div className="flex flex-col items-center gap-2.5 py-6 text-center">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#7A5CFF]/10 text-[#7A5CFF]">
+                      <PiggyBank className="h-5 w-5" />
+                    </div>
+                    <p className="text-xs font-semibold text-slate-400">Brak wpisanych nadpłat.</p>
+                  </div>
                 ) : (
                   playerBalances.map((player, idx) => (
                     <div
@@ -698,6 +722,26 @@ export default function FinancesPage() {
               >
                 - Wydatek (Opłata)
               </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">Kategoria</label>
+            <div className="grid grid-cols-4 gap-1.5">
+              {CATEGORIES.map((cat) => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setNewCategory(cat.id)}
+                  style={newCategory === cat.id ? { background: `${cat.color}1A`, borderColor: `${cat.color}66`, color: cat.color } : undefined}
+                  className={cn(
+                    "py-2 rounded-xl text-[11px] font-extrabold border transition-all cursor-pointer active:scale-95",
+                    newCategory !== cat.id && "bg-slate-100 text-slate-500 border-slate-200"
+                  )}
+                >
+                  {cat.label}
+                </button>
+              ))}
             </div>
           </div>
 

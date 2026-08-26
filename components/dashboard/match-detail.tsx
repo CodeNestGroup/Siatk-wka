@@ -16,12 +16,13 @@ import {
   Copy,
   Check,
   Clock,
-  MessageCircle
+  MessageCircle,
+  CalendarPlus
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
 import { type Match, mainRoster, waitlist } from "@/lib/data"
-import { cn, formatDatePL } from "@/lib/utils"
+import { cn, formatDatePL, addMatchToCalendar } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 
 // Te same tokeny co w dashboardzie / sidebarze ("Under the Lights").
@@ -125,6 +126,10 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     window.open(url, "_blank", "noopener,noreferrer")
   }
 
+  function handleAddToCalendar() {
+    addMatchToCalendar({ id: match.id, title: match.title, date: match.date, timeStart: match.time_start, timeEnd: match.time_end, location: match.location, price })
+  }
+
   async function handleSettleAndSave() {
     if (isSettled || rawRoster.length === 0) return
     setIsSaving(true)
@@ -158,7 +163,11 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
       .eq("match_id", match.id)
 
     const collectorName = currentUser?.full_name || currentUser?.name || "Organizator"
-    const matchTitle = match.title || `Zbiórka na hali (${formatDatePL(match.date)})`
+    // Mecze utworzone bez własnego tytułu mają `title` ustawiony na surową datę ISO
+    // (patrz handleCreateMatch w app/page.tsx) — `match.title || ...` nigdy by tego nie
+    // złapało, bo taki tytuł jest "prawdziwy" (nie pusty), tylko akurat brzydki.
+    const hasCustomTitle = match.title && match.title !== match.date
+    const matchTitle = hasCustomTitle ? match.title : `Zbiórka na hali (${formatDatePL(match.date)})`
 
     const newTx = {
       date: new Date().toISOString().split("T")[0],
@@ -266,7 +275,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
 
         <button
           onClick={onClose}
-          className="absolute right-5 top-5 z-10 rounded-xl p-2 text-slate-300 hover:bg-white/10 hover:text-white transition-colors cursor-pointer active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFD23F]"
+          className="absolute right-5 top-5 z-20 rounded-xl p-2 text-slate-300 hover:bg-white/10 hover:text-white transition-colors cursor-pointer active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFD23F]"
         >
           <X className="h-5 w-5" />
         </button>
@@ -299,6 +308,16 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
               <MapPin className="h-4 w-4 text-[#FFD23F]" /> {match.location}
             </span>
           </div>
+
+          {/* Dodaj do kalendarza — sam wybiera Google Calendar albo .ics (Apple/Outlook)
+              zależnie od urządzenia, jeden klik, żadnego wyboru */}
+          <button
+            onClick={handleAddToCalendar}
+            className="mt-3.5 flex items-center gap-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 px-3 py-1.5 text-[11px] font-bold text-white transition-all cursor-pointer active:scale-[0.97]"
+          >
+            <CalendarPlus className="h-3.5 w-3.5 text-[#FFD23F]" />
+            Dodaj do kalendarza
+          </button>
         </div>
       </div>
 
@@ -516,9 +535,11 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
           )}
         </div>
 
-        {/* Dolne przyciski */}
-        <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
-          {!isSettled && (
+        {/* Dolne przyciski — samo zamknięcie robi już X w nagłówku (plus klik w tło / Escape),
+            więc tu zostaje tylko realna akcja (dołącz/wypisz), gdy jest dostępna */}
+        {!isSettled && (
+        <div className="pt-3 border-t border-slate-100 flex items-center gap-3">
+          {(
             isUserInMatch ? (
               <Button
                 variant="outline"
@@ -544,16 +565,8 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
               </Button>
             )
           )}
-
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onClose}
-            className="rounded-xl text-xs font-bold cursor-pointer ml-auto"
-          >
-            Zamknij
-          </Button>
         </div>
+        )}
 
         {toast && (
           <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120] px-4 py-2.5 text-xs font-semibold text-white shadow-lg">

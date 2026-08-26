@@ -9,7 +9,6 @@ import {
   Search,
   Wallet,
   Plus,
-  ChevronRight,
   X,
   CheckCircle2,
   UserCheck,
@@ -28,8 +27,12 @@ import {
   Coffee,
   Heart,
   CheckSquare,
-  Square
+  Square,
+  Megaphone,
+  Pin,
+  CalendarPlus
 } from "lucide-react"
+import Link from "next/link"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { MatchDetail } from "@/components/dashboard/match-detail"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
@@ -38,7 +41,7 @@ import { Modal } from "@/components/ui/modal"
 import { SupportModal } from "@/components/dashboard/support-modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
 import { type Match, mainRoster, waitlist } from "@/lib/data"
-import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
+import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch, addMatchToCalendar } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 
 // ────────────────────────────────────────────────────────────────
@@ -159,6 +162,7 @@ export default function DashboardPage() {
   const [isSelectionMode, setIsSelectionMode] = useState(false)
   const [selectedBatchMatchIds, setSelectedBatchMatchIds] = useState<string[]>([])
   const [isBatchDeleting, setIsBatchDeleting] = useState(false)
+  const [isBatchCancelling, setIsBatchCancelling] = useState(false)
 
   // Modal wsparcia
   const [showSupportModal, setShowSupportModal] = useState(false)
@@ -186,6 +190,7 @@ export default function DashboardPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [readMatchIds, setReadMatchIds] = useState<string[]>([])
   const [selectedMatchRosterPreview, setSelectedMatchRosterPreview] = useState<Match | null>(null)
+  const [pinnedAnnouncement, setPinnedAnnouncement] = useState<any>(null)
 
   const isAdmin = user?.role === "admin" || user?.is_admin || user?.role_id === 1
 
@@ -224,6 +229,7 @@ export default function DashboardPage() {
     }
 
     loadData()
+    loadPinnedAnnouncement()
   }, [])
 
   useEffect(() => {
@@ -297,6 +303,49 @@ export default function DashboardPage() {
   function notify(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
+  }
+
+  // Liczy wszystko wprost (a nie przez efekty reagujące na zmianę stanu) — bo kliknięcie
+  // TEGO SAMEGO presetu drugi raz z rzędu (np. po ręcznym odznaczeniu meczu) nie zmienia
+  // wartości `absencePreset`/`absenceStartDate`, więc efekty w ogóle by się nie odpaliły
+  // i ręcznie odznaczony mecz zostałby odznaczony na zawsze.
+  function applyAbsencePreset(presetId: "1week" | "2weeks" | "1month" | "custom") {
+    setAbsencePreset(presetId)
+    if (presetId === "custom") return
+
+    const start = new Date(absenceStartDate)
+    const end = new Date(start)
+    if (presetId === "1week") end.setDate(start.getDate() + 7)
+    else if (presetId === "2weeks") end.setDate(start.getDate() + 14)
+    else if (presetId === "1month") end.setMonth(start.getMonth() + 1)
+
+    const endStr = end.toISOString().split("T")[0]
+    setAbsenceEndDate(endStr)
+
+    const matchesInRange = matches
+      .filter((m: any) => {
+        const inRange = m.date >= absenceStartDate && m.date <= endStr
+        const isSignedUp = m.players?.some((p: any) => p.id === user?.id)
+        return inRange && isSignedUp
+      })
+      .map((m) => m.id)
+
+    setSelectedMatchesToLeave(matchesInRange)
+  }
+
+  // Najważniejsze ogłoszenie do baneru na stronie głównej — przypięte ma pierwszeństwo,
+  // w braku przypiętego pokazujemy po prostu najnowsze (sortowanie po `is_pinned` desc
+  // stawia `true` przed `false` w Postgresie, więc jedno zapytanie załatwia oba przypadki).
+  async function loadPinnedAnnouncement() {
+    const { data } = await supabase
+      .from("announcements")
+      .select("*")
+      .order("is_pinned", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    setPinnedAnnouncement(data)
   }
 
   async function loadData() {
@@ -401,9 +450,7 @@ export default function DashboardPage() {
     })
   }
 
-  async function performCancelMatch(matchId: string) {
-    setConfirmDialog(null)
-
+  async function resolveCancelledStatusId(): Promise<number> {
     const { data: statusList } = await supabase.from("matches_status").select("*")
 
     let cancelledStatusId = statusList?.find((s: any) =>
@@ -414,7 +461,12 @@ export default function DashboardPage() {
     if (!cancelledStatusId && statusList && statusList.length > 0) {
       cancelledStatusId = statusList[statusList.length - 1].id
     }
-    if (!cancelledStatusId) cancelledStatusId = 4
+    return cancelledStatusId ?? 4
+  }
+
+  async function performCancelMatch(matchId: string) {
+    setConfirmDialog(null)
+    const cancelledStatusId = await resolveCancelledStatusId()
 
     const { error: matchError } = await supabase
       .from("matches")
@@ -462,6 +514,39 @@ export default function DashboardPage() {
       setSelectedBatchMatchIds([])
     } else {
       setSelectedBatchMatchIds(visibleIds)
+    }
+  }
+
+  function handleBatchCancel() {
+    if (selectedBatchMatchIds.length === 0) return
+    setConfirmDialog({
+      title: "Odwołać zaznaczone mecze?",
+      message: `Zaznaczone mecze (${selectedBatchMatchIds.length}) zostaną oznaczone jako odwołane. Zawodnicy zobaczą je jako odwołane, skład zostaje w bazie.`,
+      confirmLabel: "Odwołaj mecze",
+      danger: true,
+      onConfirm: performBatchCancel
+    })
+  }
+
+  async function performBatchCancel() {
+    setConfirmDialog(null)
+    setIsBatchCancelling(true)
+    try {
+      const cancelledStatusId = await resolveCancelledStatusId()
+      const { error } = await supabase.from("matches").update({ status_id: cancelledStatusId }).in("id", selectedBatchMatchIds)
+
+      if (error) {
+        notify(`Błąd odwoływania: ${error.message}`)
+      } else {
+        notify(`Odwołano ${selectedBatchMatchIds.length} meczów.`)
+        setSelectedBatchMatchIds([])
+        setIsSelectionMode(false)
+        await loadData()
+      }
+    } catch (err: any) {
+      notify(`Błąd: ${err?.message}`)
+    } finally {
+      setIsBatchCancelling(false)
     }
   }
 
@@ -670,12 +755,31 @@ export default function DashboardPage() {
     return true
   })
 
-  const sortedMatches = [...filteredMatches].sort((a: any, b: any) => a.date.localeCompare(b.date))
+  // Grupa przed datą: nadchodzące zawsze na górze (najbliższy pierwszy), rozliczone zawsze
+  // na dole (ostatni rozegrany pierwszy — bardziej aktualny niż coś sprzed miesięcy),
+  // odwołane pośrodku. Sam sort po dacie wsadzał stare, rozegrane mecze na sam czubek listy
+  // "Wszystkie", bo rosnąco po dacie = najstarsze pierwsze.
+  function matchGroupOrder(m: any): number {
+    if (isMatchPast(m, todayStr)) return 2
+    if (isMatchCancelled(m)) return 1
+    return 0
+  }
 
-  // Statystyki sezonu
-  const totalSeasonMatches = activeMatches.length
+  const sortedMatches = [...filteredMatches].sort((a: any, b: any) => {
+    const groupDiff = matchGroupOrder(a) - matchGroupOrder(b)
+    if (groupDiff !== 0) return groupDiff
+    return matchGroupOrder(a) === 2 ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)
+  })
+
+  // Statystyki sezonu — "Rozegrane mecze", lider frekwencji i średnia frekwencja mówią o tym,
+  // co się FAKTYCZNIE odbyło, więc liczymy je z `playedMatches` (naprawdę przeszłych), a nie z
+  // `activeMatches` (wszystkie niezanulowane, łącznie z przyszłymi). Wcześniej te kafelki
+  // pokazywały np. "11 rozegranych meczów", mimo że żaden mecz jeszcze się nie odbył — po prostu
+  // liczyły wszystko co zaplanowane i nieodwołane.
+  const playedMatches = activeMatches.filter((m: any) => isMatchPast(m, todayStr))
+  const totalSeasonMatches = playedMatches.length
   const playerMatchCounts: Record<string, { name: string; count: number }> = {}
-  activeMatches.forEach((m) => {
+  playedMatches.forEach((m) => {
     const roster = mainRoster(m)
     roster.forEach((p: any) => {
       const pName = p.name || p.full_name || "Zawodnik"
@@ -693,7 +797,7 @@ export default function DashboardPage() {
     }
   })
 
-  const totalRosterEntries = activeMatches.reduce((acc, m) => acc + mainRoster(m).length, 0)
+  const totalRosterEntries = playedMatches.reduce((acc, m) => acc + mainRoster(m).length, 0)
   const avgAttendance = totalSeasonMatches > 0 ? (totalRosterEntries / totalSeasonMatches).toFixed(1) : "0"
 
   const totalSeasonCollected = activeMatches.reduce((acc, m) => {
@@ -908,13 +1012,25 @@ export default function DashboardPage() {
                     </p>
                   </div>
 
-                  <Button
-                    onClick={() => handleSelectMatch(nearestMatch)}
-                    className="w-full sm:w-auto rounded-2xl bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white font-black text-xs gap-2 px-6 py-3.5 shadow-lg shadow-[#2C4BFF]/30 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-[#FFD23F] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B1120]"
-                  >
-                    Szczegóły &amp; Skład
-                    <ArrowRight className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    {/* Dodaj do kalendarza — sam wybiera Google Calendar albo .ics (Apple/Outlook)
+                        zależnie od urządzenia, jeden klik, żadnego wyboru */}
+                    <button
+                      onClick={() => addMatchToCalendar({ id: nearestMatch.id, title: (nearestMatch as any).title, date: nearestMatch.date, timeStart: (nearestMatch as any).time_start, timeEnd: (nearestMatch as any).time_end, location: nearestMatch.location, price: nearestPrice })}
+                      className="flex shrink-0 items-center gap-1.5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 px-3.5 py-3.5 text-xs font-bold text-white transition-all cursor-pointer active:scale-[0.97]"
+                    >
+                      <CalendarPlus className="h-4 w-4 text-[#FFD23F]" />
+                      Kalendarz
+                    </button>
+
+                    <Button
+                      onClick={() => handleSelectMatch(nearestMatch)}
+                      className="flex-1 sm:flex-initial sm:w-auto rounded-2xl bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white font-black text-xs gap-2 px-6 py-3.5 shadow-lg shadow-[#2C4BFF]/30 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-[#FFD23F] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B1120]"
+                    >
+                      Szczegóły &amp; Skład
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -922,8 +1038,8 @@ export default function DashboardPage() {
               <div className="relative z-10 mx-6 h-px sm:mx-8" style={perforationHorizontal("rgba(255,255,255,0.16)")} />
 
               <div className="relative z-10 px-6 pt-5 sm:px-8">
-                <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-slate-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#FFD23F]" />
+                <span className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-200">
+                  <span className="h-2 w-2 rounded-full bg-[#FFD23F]" />
                   Tablica wyników sezonu
                 </span>
               </div>
@@ -971,6 +1087,34 @@ export default function DashboardPage() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* 2. NAJWAŻNIEJSZE OGŁOSZENIE — przypięte ma pierwszeństwo, inaczej najnowsze.
+              Jedyna informacja z hero, której tam brakowało (reszta: mecz/cena/skład już jest wyżej). */}
+          {pinnedAnnouncement && (
+            <Link
+              href="/announcements"
+              className="flex items-center gap-3.5 rounded-2xl border border-slate-200/80 bg-white px-4 sm:px-5 py-3.5 shadow-xs transition-all hover:shadow-sm hover:border-[#FF5A5F]/30 cursor-pointer group animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FF5A5F]/10 text-[#FF5A5F] border border-[#FF5A5F]/20">
+                <Megaphone className="h-4.5 w-4.5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  {pinnedAnnouncement.is_pinned && (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-[#FFD23F]/15 px-1.5 py-0.5 text-[9px] font-black uppercase text-[#8A6D00] shrink-0">
+                      <Pin className="h-2.5 w-2.5" /> Przypięte
+                    </span>
+                  )}
+                  <p className="text-xs font-black text-slate-900 truncate">{pinnedAnnouncement.title}</p>
+                </div>
+                <p className="text-[11px] text-slate-500 font-medium truncate mt-0.5">{pinnedAnnouncement.content}</p>
+              </div>
+              <span className="hidden sm:inline text-[11px] font-bold text-slate-400 group-hover:text-[#FF5A5F] transition-colors shrink-0">
+                Zobacz ogłoszenia
+              </span>
+              <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-[#FF5A5F] group-hover:translate-x-0.5 transition-all shrink-0" />
+            </Link>
           )}
 
           {/* 3. HARMONOGRAM MECZÓW I PRZYCISKI AKCJI */}
@@ -1330,9 +1474,6 @@ export default function DashboardPage() {
                         </div>
                       )}
 
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 group-hover:bg-[#2C4BFF] group-hover:text-white transition-all ml-1 shadow-xs">
-                        <ChevronRight className="h-5 w-5" />
-                      </div>
                     </div>
                   </div>
                 )
@@ -1355,8 +1496,17 @@ export default function DashboardPage() {
           <div className="h-4 w-px bg-white/10" />
 
           <Button
+            onClick={handleBatchCancel}
+            disabled={isBatchCancelling || isBatchDeleting}
+            className="rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-white font-black text-xs px-5 py-2.5 gap-1.5 cursor-pointer"
+          >
+            <Ban className="h-4 w-4" />
+            {isBatchCancelling ? "Odwoływanie..." : "Odwołaj zaznaczone"}
+          </Button>
+
+          <Button
             onClick={handleBatchDelete}
-            disabled={isBatchDeleting}
+            disabled={isBatchDeleting || isBatchCancelling}
             className="rounded-2xl bg-[#FF5A5F] hover:bg-[#E0454A] text-white font-black text-xs px-5 py-2.5 gap-1.5 cursor-pointer shadow-md shadow-[#FF5A5F]/30"
           >
             <Trash2 className="h-4 w-4" />
@@ -1421,7 +1571,7 @@ export default function DashboardPage() {
                     <button
                       key={opt.id}
                       type="button"
-                      onClick={() => setAbsencePreset(opt.id as any)}
+                      onClick={() => applyAbsencePreset(opt.id as any)}
                       className={cn(
                         "py-3 px-2 rounded-2xl font-black text-xs border transition-all cursor-pointer text-center",
                         absencePreset === opt.id
@@ -1622,9 +1772,6 @@ export default function DashboardPage() {
               )}
             </div>
 
-            <div className="pt-3 border-t border-slate-100 flex justify-end">
-              <Button size="sm" onClick={() => setSelectedMatchRosterPreview(null)} className="rounded-xl text-xs font-bold bg-[#0B1120] text-white cursor-pointer">Zamknij</Button>
-            </div>
           </>
         )}
       </Modal>
@@ -1634,7 +1781,7 @@ export default function DashboardPage() {
         open={showCreateModal && isAdmin}
         onClose={() => setShowCreateModal(false)}
         overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm overflow-y-auto"
-        cardClassName="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl space-y-4 my-8 max-h-[90vh] overflow-y-auto"
+        cardClassName="w-full max-w-2xl rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl space-y-4 my-8 max-h-[90vh] overflow-y-auto"
       >
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h2 className={cn(display.className, "text-lg font-bold text-slate-900")}>Utwórz nowy mecz</h2>
@@ -1644,28 +1791,6 @@ export default function DashboardPage() {
             </div>
 
             <form onSubmit={handleCreateMatch} className="space-y-3.5 text-xs">
-              {/* Podgląd na żywo — mini "bilet" w stylu hero, aktualizowany podczas wypełniania */}
-              <div
-                className="relative overflow-hidden rounded-2xl p-4 text-white"
-                style={{ background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)` }}
-              >
-                <div className="absolute inset-0 pointer-events-none opacity-70" style={netPattern} />
-                <div className="relative z-10 space-y-1">
-                  <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Podgląd biletu</p>
-                  <p className={cn(display.className, "text-base font-bold text-white truncate")}>
-                    {newTitle.trim() || (newDate ? formatDatePL(newDate) : "Wybierz datę meczu")}
-                  </p>
-                  <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-300 flex-wrap">
-                    <span className="flex items-center gap-1 text-white">
-                      <MapPin className="h-3 w-3 text-[#FFD23F]" /> {newLocation || "Lokalizacja"}
-                    </span>
-                    <span className="flex items-center gap-1 text-[#00E0A2] font-bold">
-                      <Wallet className="h-3 w-3" /> {modalPriceNum} PLN / os. · {modalCapacityNum} miejsc
-                    </span>
-                  </div>
-                </div>
-              </div>
-
               <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">1. Podstawowe informacje</p>
               <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3.5 space-y-3">
                 <div>

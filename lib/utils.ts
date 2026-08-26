@@ -78,3 +78,95 @@ export function fuzzySearchMatch(haystackTokens: string[], query: string): boole
   if (queryWords.length === 0) return true
   return queryWords.every((qw) => fuzzyWordMatch(haystackTokens, qw))
 }
+
+// ────────────────────────────────────────────────────────────────
+// "Dodaj do kalendarza" — Google Calendar (link) i .ics (Apple/Outlook)
+// ────────────────────────────────────────────────────────────────
+
+export type MatchCalendarInfo = {
+  id: string
+  title?: string | null
+  date: string
+  timeStart?: string | null
+  timeEnd?: string | null
+  location?: string | null
+  price?: number
+}
+
+// Daty meczów w bazie są "naiwne" (bez strefy czasowej) i zawsze odnoszą się do czasu
+// polskiego — parsując je jako lokalny czas przeglądarki dostajemy poprawny wynik dla
+// każdego użytkownika appki (wszyscy grają/oglądają z Polski), bez biblioteki do stref czasowych.
+function matchDateRange(date: string, timeStart?: string | null, timeEnd?: string | null) {
+  const start = new Date(`${date}T${(timeStart || "19:00:00").slice(0, 8)}`)
+  const end = new Date(`${date}T${(timeEnd || "21:00:00").slice(0, 8)}`)
+  return { start, end }
+}
+
+function toIcsUtc(d: Date): string {
+  return d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z"
+}
+
+function matchCalendarTitle(m: MatchCalendarInfo): string {
+  return m.title && m.title !== m.date ? m.title : `Mecz siatkówki (${formatDatePL(m.date)})`
+}
+
+export function buildGoogleCalendarUrl(m: MatchCalendarInfo): string {
+  const { start, end } = matchDateRange(m.date, m.timeStart, m.timeEnd)
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: matchCalendarTitle(m),
+    dates: `${toIcsUtc(start)}/${toIcsUtc(end)}`,
+    location: m.location || "",
+    details: m.price ? `Składka: ${m.price} PLN / os.` : ""
+  })
+  return `https://calendar.google.com/calendar/render?${params.toString()}`
+}
+
+export function downloadMatchIcs(m: MatchCalendarInfo) {
+  const { start, end } = matchDateRange(m.date, m.timeStart, m.timeEnd)
+
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//ESCO VolleyManager//PL",
+    "BEGIN:VEVENT",
+    `UID:match-${m.id}@volleymanager`,
+    `DTSTAMP:${toIcsUtc(new Date())}`,
+    `DTSTART:${toIcsUtc(start)}`,
+    `DTEND:${toIcsUtc(end)}`,
+    `SUMMARY:${matchCalendarTitle(m).replace(/\r?\n/g, " ")}`,
+    `LOCATION:${(m.location || "").replace(/\r?\n/g, " ")}`,
+    `DESCRIPTION:${m.price ? `Składka: ${m.price} PLN / os.` : ""}`,
+    "END:VEVENT",
+    "END:VCALENDAR"
+  ].join("\r\n")
+
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = `mecz-${m.date}.ics`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+// iPadOS zgłasza się jako "Macintosh" w UA, ale w odróżnieniu od prawdziwego Maca ma ekran
+// dotykowy — stąd dodatkowy warunek na maxTouchPoints, standardowa sztuczka na wykrycie iPada.
+function isApplePlatform(): boolean {
+  if (typeof navigator === "undefined") return false
+  const ua = navigator.userAgent || ""
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1)
+  const isMac = /Macintosh/.test(ua) && !isIOS
+  return isIOS || isMac
+}
+
+// Przycisk sam decyduje: iPhone/iPad/Mac -> pobiera .ics (jedno kliknięcie otwiera go w
+// natywnym Kalendarzu Apple), wszystko inne (głównie Android, na który celuje appka) ->
+// od razu otwiera Google Calendar z gotowym wydarzeniem. Bez wyboru — jeden klik, jedna akcja.
+export function addMatchToCalendar(m: MatchCalendarInfo) {
+  if (isApplePlatform()) {
+    downloadMatchIcs(m)
+  } else {
+    window.open(buildGoogleCalendarUrl(m), "_blank", "noopener,noreferrer")
+  }
+}

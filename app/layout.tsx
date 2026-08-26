@@ -2,8 +2,8 @@ import type { Metadata } from "next"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "VolleyManager",
-  description: "ESCO Volleyball Management System",
+  title: "ESCO VolleyManager",
+  description: "Menadżer lokalnej siatkówki",
 }
 
 export default function RootLayout({

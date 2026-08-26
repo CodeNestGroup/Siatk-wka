@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
-import { Volleyball, Lock, Mail, ArrowRight, Shield, AlertCircle, UserPlus, User, Phone, CheckCircle2 } from "lucide-react"
+import { Lock, Mail, ArrowRight, Shield, AlertCircle, UserPlus, User, Phone, CheckCircle2, Smartphone, Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { supabase } from "@/lib/supabase"
 import { cn } from "@/lib/utils"
@@ -198,10 +198,8 @@ export default function LoginPage() {
             <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-[#2C4BFF]/20 blur-3xl pointer-events-none" />
 
             <div className="relative z-10 space-y-2">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#2C4BFF] text-white shadow-lg shadow-[#2C4BFF]/30">
-                <Volleyball className="h-7 w-7" />
-              </div>
-              <h1 className={cn(display.className, "text-2xl font-bold tracking-tight text-white pt-1")}>VolleyManager</h1>
+              <img src="/logo.png" alt="ESCO VolleyManager" className="mx-auto h-14 w-14 rounded-2xl shadow-lg shadow-[#2C4BFF]/30" />
+              <h1 className={cn(display.className, "text-2xl font-bold tracking-tight text-white pt-1")}>ESCO VolleyManager</h1>
               <p className={cn(score.className, "text-[11px] uppercase tracking-[0.2em] text-slate-400")}>
                 {mode === "login" ? "Zaloguj się do swojego konta" : "Utwórz konto zawodnika"}
               </p>
@@ -382,9 +380,26 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="mt-6 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-slate-400">
+        {/* Apka na Androida (nativna, robi ją ziomek — połączona z tą samą bazą) —
+            plik podmieniamy w public/downloads/volleymanager.apk, przycisk już czeka gotowy. */}
+        <a
+          href="/downloads/volleymanager.apk"
+          download
+          className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs hover:shadow-sm hover:border-[#2C4BFF]/30 transition-all cursor-pointer active:scale-[0.99] group"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#00C48C]/10 text-[#00875F] border border-[#00C48C]/20">
+            <Smartphone className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-black text-slate-900">Pobierz aplikację na Androida</p>
+            <p className="text-[11px] text-slate-400 font-medium">Szybszy dostęp z ekranu głównego telefonu</p>
+          </div>
+          <Download className="h-4 w-4 text-slate-300 group-hover:text-[#2C4BFF] transition-colors shrink-0" />
+        </a>
+
+        <div className="mt-5 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-slate-400">
           <Shield className="h-3.5 w-3.5 text-slate-400" />
-          ESCO Volleyball System
+          Menadżer lokalnej siatkówki
         </div>
       </div>
     </div>

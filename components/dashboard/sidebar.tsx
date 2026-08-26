@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { Space_Grotesk, Oswald } from "next/font/google"
 import {
-  Volleyball,
   Calendar,
   Users,
   Wallet,
@@ -214,18 +213,16 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
 
         <div className="relative flex flex-col min-h-0">
           <div className="flex h-16 items-center justify-between px-6 border-b border-white/10 shrink-0">
-            <div className="flex items-center gap-3 group">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#2C4BFF] text-white shadow-md shadow-[#2C4BFF]/30">
-                <Volleyball className="h-5 w-5" />
-              </div>
-              <div>
-                <span className={cn(display.className, "font-bold tracking-tight text-white text-sm block")}>VolleyManager</span>
-                <span className="block text-[10px] text-slate-400 font-semibold">ESCO Volleyball</span>
+            <div className="flex items-center gap-3 group min-w-0">
+              <img src="/logo.png" alt="ESCO VolleyManager" className="h-9 w-9 shrink-0 rounded-xl shadow-md shadow-[#2C4BFF]/30" />
+              <div className="min-w-0">
+                <span className={cn(display.className, "font-bold tracking-tight text-white text-[13px] block truncate")}>ESCO VolleyManager</span>
+                <span className="block text-[10px] text-slate-400 font-semibold truncate">Menadżer lokalnej siatkówki</span>
               </div>
             </div>
             <button
               onClick={closeSidebar}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white lg:hidden cursor-pointer active:scale-90 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF]"
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white lg:hidden cursor-pointer active:scale-90 transition-transform shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF]"
             >
               <X className="h-5 w-5" />
             </button>

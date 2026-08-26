@@ -786,7 +786,15 @@ export default function PlayersPage() {
               )}
             </div>
 
-            <div className="relative flex items-center gap-1.5 overflow-x-auto bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80">
+            {/* Fade na prawej krawędzi — sygnalizuje że jest więcej zakładek do przewinięcia
+                (wcześniej ostatnia po prostu ucinała się na krawędzi bez żadnej wskazówki) */}
+            <div
+              className="relative flex items-center gap-1.5 overflow-x-auto bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80"
+              style={{
+                WebkitMaskImage: "linear-gradient(to right, black calc(100% - 28px), transparent 100%)",
+                maskImage: "linear-gradient(to right, black calc(100% - 28px), transparent 100%)"
+              }}
+            >
               <div
                 className="absolute rounded-xl bg-[#0B1120] shadow-md transition-all duration-300 ease-out"
                 style={{ left: pillStyle.left, width: pillStyle.width, top: pillStyle.top, height: pillStyle.height }}
@@ -898,57 +906,62 @@ export default function PlayersPage() {
                 </div>
 
                 {primaryCoreWithIdx.length === 0 ? (
-                  <div className="rounded-[28px] border border-dashed border-slate-300 bg-white p-8 text-center text-xs text-slate-400 font-medium">
-                    {searchQuery ? "Brak wyników dla podanej frazy." : "Brak zawodników w składzie głównym. Wybierz graczy z listy poniżej."}
+                  <div className="flex flex-col items-center gap-3 rounded-[28px] border border-dashed border-slate-300 bg-white p-8 text-center">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                      <Users className="h-5 w-5" />
+                    </div>
+                    <p className="text-xs font-semibold text-slate-500">
+                      {searchQuery ? "Brak wyników dla podanej frazy." : "Brak zawodników w składzie głównym. Wybierz graczy z listy poniżej."}
+                    </p>
                   </div>
                 ) : (
-                  <div className="flex flex-col space-y-2.5">
+                  <div className="flex flex-col space-y-1.5">
                     {primaryCoreWithIdx.map(({ player, idx }) => (
                       <div
                         key={player.id}
                         onClick={() => openPlayerHistory(player)}
                         style={{ animationDelay: `${Math.min(idx, 10) * 35}ms` }}
-                        className="group flex items-center justify-between p-3.5 sm:p-4 rounded-[20px] bg-white border border-l-4 border-slate-200/90 border-l-[#2C4BFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both"
+                        className="group flex items-center justify-between p-2 sm:p-2.5 rounded-2xl bg-white border border-l-4 border-slate-200/90 border-l-[#2C4BFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both"
                       >
-                        <div className="flex items-center gap-3.5 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0">
                           <span
-                            className={cn(score.className, "flex h-9 w-9 items-center justify-center rounded-2xl text-white font-semibold text-xs shrink-0 shadow-md group-hover:scale-105 transition-transform")}
+                            className={cn(score.className, "flex h-7 w-7 items-center justify-center rounded-lg text-white font-semibold text-[11px] shrink-0 shadow-md group-hover:scale-105 transition-transform")}
                             style={{ background: COBALT, boxShadow: `0 4px 10px -3px ${COBALT}99` }}
                           >
                             {idx + 1}
                           </span>
-                          <div className="min-w-0">
-                            <p className="font-bold text-sm text-slate-900 group-hover:text-[#2C4BFF] transition-colors truncate">
+                          <div className="min-w-0 flex items-baseline gap-2">
+                            <p className="font-bold text-xs text-slate-900 group-hover:text-[#2C4BFF] transition-colors truncate">
                               {player.full_name}
                             </p>
-                            <p className="text-xs text-slate-400 truncate">{player.email}</p>
+                            <p className="hidden sm:block text-[11px] text-slate-400 truncate">{player.email}</p>
                           </div>
                         </div>
 
                         {isAdmin && (
-                          <div className="flex items-center gap-2 shrink-0 ml-3">
-                            <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
+                          <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                            <div className="flex items-center gap-0.5 bg-slate-50 p-0.5 rounded-lg border border-slate-200">
                               <button
                                 disabled={idx === 0}
                                 onClick={(e) => moveCoreOrder(idx, "up", e)}
-                                className="p-1.5 rounded-lg text-[#2C4BFF] hover:bg-[#2C4BFF] hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-[#2C4BFF] cursor-pointer active:scale-90"
+                                className="p-1 rounded-md text-[#2C4BFF] hover:bg-[#2C4BFF] hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-[#2C4BFF] cursor-pointer active:scale-90"
                                 title="Przesuń wyżej"
                               >
-                                <ArrowUp className="h-4 w-4 stroke-[2.5]" />
+                                <ArrowUp className="h-3.5 w-3.5 stroke-[2.5]" />
                               </button>
                               <button
                                 disabled={idx === allCorePlayersSorted.length - 1}
                                 onClick={(e) => moveCoreOrder(idx, "down", e)}
-                                className="p-1.5 rounded-lg text-[#2C4BFF] hover:bg-[#2C4BFF] hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-[#2C4BFF] cursor-pointer active:scale-90"
+                                className="p-1 rounded-md text-[#2C4BFF] hover:bg-[#2C4BFF] hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-[#2C4BFF] cursor-pointer active:scale-90"
                                 title="Przesuń niżej"
                               >
-                                <ArrowDown className="h-4 w-4 stroke-[2.5]" />
+                                <ArrowDown className="h-3.5 w-3.5 stroke-[2.5]" />
                               </button>
                             </div>
 
                             <button
                               onClick={(e) => toggleCoreRoster(player, e)}
-                              className="text-xs font-bold text-[#FF5A5F] bg-[#FF5A5F]/10 hover:bg-[#FF5A5F] hover:text-white border border-[#FF5A5F]/20 px-3 py-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-xs"
+                              className="text-[11px] font-bold text-[#FF5A5F] bg-[#FF5A5F]/10 hover:bg-[#FF5A5F] hover:text-white border border-[#FF5A5F]/20 px-2 py-1 rounded-lg transition-all cursor-pointer active:scale-95 shadow-xs"
                               title="Usuń ze stałego składu"
                             >
                               Usuń
@@ -972,52 +985,52 @@ export default function PlayersPage() {
                     <span className="text-[11px] font-bold text-[#7A5CFF]">Wchodzą w tej kolejności w razie nieobecności</span>
                   </div>
 
-                  <div className="flex flex-col space-y-2.5">
+                  <div className="flex flex-col space-y-1.5">
                     {reserveCoreWithIdx.map(({ player, actualIdx }, rIdx) => (
                       <div
                         key={player.id}
                         onClick={() => openPlayerHistory(player)}
                         style={{ animationDelay: `${Math.min(rIdx, 10) * 35}ms` }}
-                        className="group flex items-center justify-between p-3.5 sm:p-4 rounded-[20px] bg-white border border-l-4 border-slate-200/90 border-l-[#7A5CFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both"
+                        className="group flex items-center justify-between p-2 sm:p-2.5 rounded-2xl bg-white border border-l-4 border-slate-200/90 border-l-[#7A5CFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both"
                       >
-                        <div className="flex items-center gap-3.5 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0">
                           <span
-                            className={cn(score.className, "flex h-9 w-9 items-center justify-center rounded-2xl text-white font-semibold text-xs shrink-0 shadow-md group-hover:scale-105 transition-transform")}
+                            className={cn(score.className, "flex h-7 w-7 items-center justify-center rounded-lg text-white font-semibold text-[11px] shrink-0 shadow-md group-hover:scale-105 transition-transform")}
                             style={{ background: VIOLET, boxShadow: `0 4px 10px -3px ${VIOLET}99` }}
                           >
                             R{actualIdx - 11}
                           </span>
-                          <div className="min-w-0">
-                            <p className="font-bold text-sm text-slate-900 group-hover:text-[#7A5CFF] transition-colors truncate">
+                          <div className="min-w-0 flex items-baseline gap-2">
+                            <p className="font-bold text-xs text-slate-900 group-hover:text-[#7A5CFF] transition-colors truncate">
                               {player.full_name}
                             </p>
-                            <p className="text-xs text-[#7A5CFF]/70 truncate">{player.email}</p>
+                            <p className="hidden sm:block text-[11px] text-[#7A5CFF]/70 truncate">{player.email}</p>
                           </div>
                         </div>
 
                         {isAdmin && (
-                          <div className="flex items-center gap-2 shrink-0 ml-3">
-                            <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
+                          <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                            <div className="flex items-center gap-0.5 bg-slate-50 p-0.5 rounded-lg border border-slate-200">
                               <button
                                 onClick={(e) => moveCoreOrder(actualIdx, "up", e)}
-                                className="p-1.5 rounded-lg text-[#7A5CFF] hover:bg-[#7A5CFF] hover:text-white transition-all cursor-pointer active:scale-90"
+                                className="p-1 rounded-md text-[#7A5CFF] hover:bg-[#7A5CFF] hover:text-white transition-all cursor-pointer active:scale-90"
                                 title="Przesuń wyżej"
                               >
-                                <ArrowUp className="h-4 w-4 stroke-[2.5]" />
+                                <ArrowUp className="h-3.5 w-3.5 stroke-[2.5]" />
                               </button>
                               <button
                                 disabled={actualIdx === allCorePlayersSorted.length - 1}
                                 onClick={(e) => moveCoreOrder(actualIdx, "down", e)}
-                                className="p-1.5 rounded-lg text-[#7A5CFF] hover:bg-[#7A5CFF] hover:text-white transition-all disabled:opacity-20 cursor-pointer active:scale-90"
+                                className="p-1 rounded-md text-[#7A5CFF] hover:bg-[#7A5CFF] hover:text-white transition-all disabled:opacity-20 cursor-pointer active:scale-90"
                                 title="Przesuń niżej"
                               >
-                                <ArrowDown className="h-4 w-4 stroke-[2.5]" />
+                                <ArrowDown className="h-3.5 w-3.5 stroke-[2.5]" />
                               </button>
                             </div>
 
                             <button
                               onClick={(e) => toggleCoreRoster(player, e)}
-                              className="text-xs font-bold text-[#FF5A5F] bg-[#FF5A5F]/10 hover:bg-[#FF5A5F] hover:text-white border border-[#FF5A5F]/20 px-3 py-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-xs"
+                              className="text-[11px] font-bold text-[#FF5A5F] bg-[#FF5A5F]/10 hover:bg-[#FF5A5F] hover:text-white border border-[#FF5A5F]/20 px-2 py-1 rounded-lg transition-all cursor-pointer active:scale-95 shadow-xs"
                               title="Usuń z rezerwy"
                             >
                               Usuń
@@ -1562,9 +1575,14 @@ export default function PlayersPage() {
               {isLoadingHistory ? (
                 <p className="text-xs text-slate-400 text-center py-8 animate-pulse">Ładowanie historii...</p>
               ) : playerHistory.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-8">
-                  Ten zawodnik nie brał jeszcze udziału w żadnym meczu.
-                </p>
+                <div className="flex flex-col items-center gap-2.5 py-8 text-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                    <Calendar className="h-5 w-5" />
+                  </div>
+                  <p className="text-xs font-semibold text-slate-400">
+                    Ten zawodnik nie brał jeszcze udziału w żadnym meczu.
+                  </p>
+                </div>
               ) : (
                 playerHistory.map((item, idx) => (
                   <div

@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   Ban,
   CalendarCheck,
+  Calendar,
   X,
   Coffee
 } from "lucide-react"
@@ -54,6 +55,10 @@ type Announcement = {
   author_id?: string
   players?: {
     full_name: string | null
+  } | null
+  matches?: {
+    date: string
+    location: string
   } | null
 }
 
@@ -103,6 +108,10 @@ export default function AnnouncementsPage() {
         *,
         players:author_id (
           full_name
+        ),
+        matches:match_id (
+          date,
+          location
         )
       `)
       .order('created_at', { ascending: false })
@@ -162,6 +171,10 @@ export default function AnnouncementsPage() {
         *,
         players:author_id (
           full_name
+        ),
+        matches:match_id (
+          date,
+          location
         )
       `)
       .single()
@@ -321,7 +334,15 @@ export default function AnnouncementsPage() {
               )}
             </div>
 
-            <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 border border-slate-200/80 w-full sm:w-auto overflow-x-auto">
+            {/* Fade na prawej krawędzi — sygnalizuje że jest więcej zakładek do przewinięcia
+                (wcześniej ostatnia po prostu ucinała się na krawędzi bez żadnej wskazówki) */}
+            <div
+              className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 border border-slate-200/80 w-full sm:w-auto overflow-x-auto"
+              style={{
+                WebkitMaskImage: "linear-gradient(to right, black calc(100% - 28px), transparent 100%)",
+                maskImage: "linear-gradient(to right, black calc(100% - 28px), transparent 100%)"
+              }}
+            >
               <button
                 onClick={() => setSelectedCategory("all")}
                 className={cn(
@@ -439,6 +460,11 @@ export default function AnnouncementsPage() {
                             </span>
                           </div>
                           <h3 className={cn(display.className, "text-lg font-bold text-white leading-snug")}>{item.title}</h3>
+                          {item.matches?.date && (
+                            <p className={cn(score.className, "flex items-center gap-1.5 text-[11px] font-semibold text-slate-400")}>
+                              <Calendar className="h-3 w-3 text-[#FFD23F]" /> Mecz: {formatDatePL(item.matches.date)}
+                            </p>
+                          )}
                         </div>
 
                         {isAdmin && (
@@ -494,6 +520,11 @@ export default function AnnouncementsPage() {
                           {badgeContent}
                         </span>
                         <h3 className="text-base font-bold leading-snug text-slate-900">{item.title}</h3>
+                        {item.matches?.date && (
+                          <p className={cn(score.className, "flex items-center gap-1.5 text-[11px] font-semibold text-slate-500")}>
+                            <Calendar className="h-3 w-3 text-[#2C4BFF]" /> Mecz: {formatDatePL(item.matches.date)}
+                          </p>
+                        )}
                       </div>
 
                       {isAdmin && (

@@ -40,12 +40,13 @@ const netPattern: React.CSSProperties = {
     "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
 }
 
-const sponsors = [
-  { code: "BSC", name: "Beskid Sport Center", color: MINT },
-  { code: "SKO", name: "Skoczów Park", color: YELLOW },
-  { code: "VOLLEY", name: "VolleyStore", color: VIOLET },
-  { code: "AZ", name: "AZ-Cloud Solutions", color: COBALT },
-  { code: "ESCO", name: "ESCO Jaworze", color: "#FF5A5F" },
+// Jedyny realny sponsor na dziś to ESCO — reszta to świadomie oznaczone wolne miejsca
+// (ten sam zestaw co w Finansach — patrz app/finances/page.tsx).
+const sponsors: { code: string; name: string; color: string; logo?: string }[] = [
+  { code: "ESCO", name: "ESCO Jaworze", color: "#FF5A5F", logo: "/logos/esco.png" },
+  { code: "+", name: "Zostań Sponsorem", color: COBALT },
+  { code: "+", name: "Zostań Sponsorem", color: MINT },
+  { code: "+", name: "Zostań Sponsorem", color: YELLOW },
 ]
 
 // Płynne podliczanie liczb — ten sam komponent co na pozostałych stronach
@@ -140,13 +141,18 @@ export default function StatsPage() {
     window.location.href = "/login"
   }
 
-  // Zliczanie statystyk z meczów rozegranych lub rozliczonych (status_id 3 = rozegrany,
-  // zgodnie z resztą aplikacji — patrz app/page.tsx i match-detail.tsx; status_id 2 nigdzie
-  // indziej nie jest traktowany jako "rozegrany" i zawyżał tu frekwencję o mecze, które
-  // się jeszcze nie odbyły)
+  // Zliczanie statystyk z meczów rozegranych — ta sama definicja "rozegrany" co na stronie
+  // głównej (app/page.tsx: isMatchPast). Samo `status_id === 3`/`is_settled` nie wystarczało:
+  // admin rzadko ręcznie oznacza mecz jako rozegrany/rozliczony, więc realnie o tym decyduje
+  // data. Bez tego Statystyki pokazywały "sezon się nie zaczął" mimo 11 realnie odbytych meczów
+  // widocznych na stronie głównej — dwie strony liczyły to samo pojęcie inaczej.
+  const todayStr = new Date().toISOString().split("T")[0]
   const completedMatches = useMemo(() => {
-    return matches.filter(m => m.status_id === 3 || m.is_settled === true || m.status === "past")
-  }, [matches])
+    return matches.filter(m => {
+      if (m.status_id === 4) return false // odwołany
+      return m.date < todayStr || m.status_id === 3 || m.is_settled === true
+    })
+  }, [matches, todayStr])
 
   const totalMatches = completedMatches.length
 
@@ -232,12 +238,16 @@ export default function StatsPage() {
             <div className="animate-marquee gap-8 flex items-center">
               {[...sponsors, ...sponsors].map((s, index) => (
                 <div key={index} className="flex items-center gap-2 shrink-0">
-                  <span
-                    className="flex h-6 w-6 items-center justify-center rounded-lg font-black text-[9px] text-white"
-                    style={{ background: s.color }}
-                  >
-                    {s.code}
-                  </span>
+                  {s.logo ? (
+                    <img src={s.logo} alt={s.name} className="h-6 w-6 rounded-lg object-contain" />
+                  ) : (
+                    <span
+                      className="flex h-6 w-6 items-center justify-center rounded-lg font-black text-[9px] text-white"
+                      style={{ background: s.color }}
+                    >
+                      {s.code}
+                    </span>
+                  )}
                   <span className="text-xs font-extrabold text-slate-500">{s.name}</span>
                 </div>
               ))}
@@ -272,58 +282,80 @@ export default function StatsPage() {
             </div>
           </div>
 
-          {/* HERO — lider frekwencji + podium TOP 3, w stylu głównego dashboardu */}
-          <div
-            className="relative overflow-hidden rounded-[28px] p-6 sm:p-8 text-white shadow-[0_24px_60px_-24px_rgba(11,17,32,0.55)] border border-white/10 animate-in fade-in slide-in-from-top-3 duration-500 fill-mode-both"
-            style={{ background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)` }}
-          >
-            <div className="absolute inset-0 pointer-events-none opacity-70" style={netPattern} />
-            <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-[#FFD23F]/15 blur-3xl pointer-events-none" />
-            <div className="absolute -left-20 -bottom-20 h-72 w-72 rounded-full bg-[#2C4BFF]/15 blur-3xl pointer-events-none" />
+          {/* HERO — lider frekwencji + podium TOP 3, w stylu głównego dashboardu.
+              Dopóki nie ma ani jednego rozegranego meczu, podium z samymi zerami wyglądało
+              jak zepsuta strona ("zwycięzca" z 0 meczami) — zamiast tego spokojny placeholder. */}
+          {totalMatches > 0 ? (
+            <div
+              className="relative overflow-hidden rounded-[28px] p-6 sm:p-8 text-white shadow-[0_24px_60px_-24px_rgba(11,17,32,0.55)] border border-white/10 animate-in fade-in slide-in-from-top-3 duration-500 fill-mode-both"
+              style={{ background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)` }}
+            >
+              <div className="absolute inset-0 pointer-events-none opacity-70" style={netPattern} />
+              <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-[#FFD23F]/15 blur-3xl pointer-events-none" />
+              <div className="absolute -left-20 -bottom-20 h-72 w-72 rounded-full bg-[#2C4BFF]/15 blur-3xl pointer-events-none" />
 
-            <div className="relative z-10 space-y-6">
-              <div className="flex items-center gap-2.5">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFD23F]/20 border border-[#FFD23F]/40 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-[#FFD23F]">
-                  <Crown className="h-3 w-3" />
-                  Lider Frekwencji Sezonu
-                </span>
+              <div className="relative z-10 space-y-6">
+                <div className="flex items-center gap-2.5">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFD23F]/20 border border-[#FFD23F]/40 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-[#FFD23F]">
+                    <Crown className="h-3 w-3" />
+                    Lider Frekwencji Sezonu
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#FFD23F]/15 border border-[#FFD23F]/30 text-[#FFD23F] shrink-0">
+                    <Trophy className="h-8 w-8" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className={cn(display.className, "text-3xl font-bold text-white truncate")}>{topPlayer.name}</h2>
+                    <p className="text-sm text-slate-300 font-medium mt-0.5">{topPlayer.matches} rozegranych meczów w tym sezonie</p>
+                  </div>
+                </div>
+
+                {podium.length > 1 && (
+                  <div className="flex items-end gap-3 pt-2 border-t border-white/10">
+                    {[podium[1], podium[0], podium[2]].filter(Boolean).map((p, i) => {
+                      // środkowa pozycja (i===1) to zawsze #1 — klasyczny układ podium
+                      const place = i === 1 ? 1 : i === 0 ? 2 : 3
+                      const color = place === 1 ? YELLOW : place === 2 ? SILVER : BRONZE
+                      const height = place === 1 ? "h-20" : place === 2 ? "h-14" : "h-10"
+                      return (
+                        <div key={p.name} className="flex-1 flex flex-col items-center gap-1.5 pt-3">
+                          <span
+                            className={cn(score.className, "flex h-8 w-8 items-center justify-center rounded-xl text-xs font-semibold text-[#0B1120] shrink-0")}
+                            style={{ background: color }}
+                          >
+                            {place}
+                          </span>
+                          <p className="text-[11px] font-bold text-white truncate max-w-full px-1">{p.name}</p>
+                          <p className="text-[10px] text-slate-400">{p.matches} mecze</p>
+                          <div className={cn("w-full rounded-t-lg mt-1", height)} style={{ background: `${color}30`, borderTop: `2px solid ${color}` }} />
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
-
-              <div className="flex items-center gap-4">
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#FFD23F]/15 border border-[#FFD23F]/30 text-[#FFD23F] shrink-0">
-                  <Trophy className="h-8 w-8" />
-                </div>
-                <div className="min-w-0">
-                  <h2 className={cn(display.className, "text-3xl font-bold text-white truncate")}>{topPlayer.name}</h2>
-                  <p className="text-sm text-slate-300 font-medium mt-0.5">{topPlayer.matches} rozegranych meczów w tym sezonie</p>
-                </div>
-              </div>
-
-              {podium.length > 1 && (
-                <div className="flex items-end gap-3 pt-2 border-t border-white/10">
-                  {[podium[1], podium[0], podium[2]].filter(Boolean).map((p, i) => {
-                    // środkowa pozycja (i===1) to zawsze #1 — klasyczny układ podium
-                    const place = i === 1 ? 1 : i === 0 ? 2 : 3
-                    const color = place === 1 ? YELLOW : place === 2 ? SILVER : BRONZE
-                    const height = place === 1 ? "h-20" : place === 2 ? "h-14" : "h-10"
-                    return (
-                      <div key={p.name} className="flex-1 flex flex-col items-center gap-1.5 pt-3">
-                        <span
-                          className={cn(score.className, "flex h-8 w-8 items-center justify-center rounded-xl text-xs font-semibold text-[#0B1120] shrink-0")}
-                          style={{ background: color }}
-                        >
-                          {place}
-                        </span>
-                        <p className="text-[11px] font-bold text-white truncate max-w-full px-1">{p.name}</p>
-                        <p className="text-[10px] text-slate-400">{p.matches} mecze</p>
-                        <div className={cn("w-full rounded-t-lg mt-1", height)} style={{ background: `${color}30`, borderTop: `2px solid ${color}` }} />
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
             </div>
-          </div>
+          ) : (
+            <div
+              className="relative overflow-hidden rounded-[28px] p-6 sm:p-8 text-white shadow-[0_24px_60px_-24px_rgba(11,17,32,0.55)] border border-white/10 animate-in fade-in slide-in-from-top-3 duration-500 fill-mode-both"
+              style={{ background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)` }}
+            >
+              <div className="absolute inset-0 pointer-events-none opacity-70" style={netPattern} />
+              <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-[#2C4BFF]/15 blur-3xl pointer-events-none" />
+
+              <div className="relative z-10 flex flex-col items-center gap-3 py-6 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 border border-white/15 text-slate-300">
+                  <Trophy className="h-7 w-7" />
+                </div>
+                <h2 className={cn(display.className, "text-xl font-bold text-white")}>Sezon jeszcze się nie zaczął</h2>
+                <p className="text-sm text-slate-400 font-medium max-w-sm">
+                  Statystyki, lider frekwencji i podium pojawią się tutaj automatycznie po pierwszym rozegranym meczu.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Kafelki Podsumowania */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

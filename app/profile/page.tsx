@@ -213,7 +213,7 @@ export default function ProfilePage() {
               </div>
 
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                <span className="text-slate-400 font-bold block mb-0.5">Rola w systemie VolleyManager</span>
+                <span className="text-slate-400 font-bold block mb-0.5">Rola w systemie ESCO VolleyManager</span>
                 <span className="font-bold text-slate-900 block">{isAdmin ? "Pełne uprawnienia (Administrator)" : "Standardowe (Zawodnik)"}</span>
               </div>
             </div>

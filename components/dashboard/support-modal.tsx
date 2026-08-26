@@ -4,7 +4,6 @@ import { useEffect, useState } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
 import { Coffee, X } from "lucide-react"
 import QRCode from "qrcode"
-import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/ui/modal"
 import { cn } from "@/lib/utils"
 
@@ -84,15 +83,6 @@ export function SupportModal({ open, onClose }: { open: boolean; onClose: () => 
         <div className="p-4 rounded-2xl bg-[#FFD23F]/10 border border-[#FFD23F]/25 text-left text-xs font-semibold text-[#7A5C00]">
           Dziękujemy za każdą cegiełkę — to dzięki Wam ta grupa gra w siatkówkę co tydzień!
         </div>
-      </div>
-
-      <div className="pt-2">
-        <Button
-          onClick={onClose}
-          className="w-full rounded-2xl bg-[#0B1120] hover:bg-[#1A2340] text-white font-bold text-xs py-3 cursor-pointer"
-        >
-          Zamknij okno
-        </Button>
       </div>
     </Modal>
   )
