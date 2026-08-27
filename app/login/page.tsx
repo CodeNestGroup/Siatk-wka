@@ -380,11 +380,11 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Apka na Androida (nativna, robi ją ziomek — połączona z tą samą bazą) —
-            plik podmieniamy w public/downloads/volleymanager.apk, przycisk już czeka gotowy. */}
+        {/* Apka na Androida (nativna, robi ją ziomek — połączona z tą samą bazą). Plik jest
+            za duży dla gita (>100MB, GitHub odrzuca), więc leci z publicznego GitHub Release
+            zamiast z public/ — patrz public/downloads/README.md. */}
         <a
-          href="/downloads/volleymanager.apk"
-          download
+          href="https://github.com/CodeNestGroup/Siatk-wka/releases/download/v1.0.0-app/app-release.apk"
           className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs hover:shadow-sm hover:border-[#2C4BFF]/30 transition-all cursor-pointer active:scale-[0.99] group"
         >
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#00C48C]/10 text-[#00875F] border border-[#00C48C]/20">
