@@ -110,7 +110,7 @@ export default function ProfilePage() {
           </div>
         </header>
 
-        <main className="relative z-10 mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-8 lg:px-8">
+        <main className="relative z-10 mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-8 pb-24 lg:px-8 lg:pb-8">
 
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-[#2C4BFF] border border-slate-200 shadow-xs">

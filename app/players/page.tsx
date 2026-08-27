@@ -749,7 +749,7 @@ export default function PlayersPage() {
           </div>
         </header>
 
-        <main className="relative z-10 mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-8 lg:px-8">
+        <main className="relative z-10 mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-8 pb-24 lg:px-8 lg:pb-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-[#2C4BFF] border border-slate-200 shadow-xs">
@@ -1476,7 +1476,7 @@ export default function PlayersPage() {
 
       {/* PŁYWAJĄCY PASEK MASOWYCH AKCJI */}
       {isSelectionMode && selectedBulkIds.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-3xl bg-[#0B1120]/95 backdrop-blur-md px-5 py-3 text-white shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-5 flex-wrap justify-center">
+        <div className="fixed bottom-24 lg:bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-3xl bg-[#0B1120]/95 backdrop-blur-md px-5 py-3 text-white shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-5 flex-wrap justify-center">
           <div className="flex items-center gap-2">
             <span className={cn(score.className, "flex h-7 w-7 items-center justify-center rounded-xl bg-[#FFD23F] text-[#0B1120] text-xs font-bold tabular-nums")}>
               {selectedBulkIds.length}
@@ -1668,7 +1668,7 @@ export default function PlayersPage() {
       <ConfirmDialog state={confirmDialog} onCancel={() => setConfirmDialog(null)} />
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120]/95 backdrop-blur-md px-4 py-2.5 text-xs font-bold text-white shadow-xl animate-in fade-in slide-in-from-bottom-4">
+        <div className="fixed bottom-24 lg:bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120]/95 backdrop-blur-md px-4 py-2.5 text-xs font-bold text-white shadow-xl animate-in fade-in slide-in-from-bottom-4">
           <CheckCircle2 className="h-4 w-4 text-[#00E0A2]" />
           {toast}
         </div>

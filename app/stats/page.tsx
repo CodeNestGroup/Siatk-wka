@@ -280,7 +280,7 @@ export default function StatsPage() {
           </div>
         </header>
 
-        <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8">
+        <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8 pb-24 lg:pb-8">
 
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="flex items-center gap-3">

@@ -23,6 +23,10 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#0B1120",
+  // Bez tego env(safe-area-inset-bottom) zawsze zwraca 0 — a to jedyny sposób, żeby nowy
+  // pasek nawigacji na dole (components/dashboard/sidebar.tsx) nie chował się pod paskiem
+  // gestów/Home Indicator na iPhone'ach z wcięciem.
+  viewportFit: "cover",
 }
 
 export default function RootLayout({

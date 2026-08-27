@@ -1512,7 +1512,7 @@ export default function DashboardPage() {
 
       {/* PŁYWAJĄCY PASEK AKCJI DLA ZAZNACZONYCH MECZÓW */}
       {isSelectionMode && selectedBatchMatchIds.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-4 rounded-3xl bg-[#0B1120]/95 backdrop-blur-md px-6 py-3.5 text-white shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-5">
+        <div className="fixed bottom-24 lg:bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-4 rounded-3xl bg-[#0B1120]/95 backdrop-blur-md px-6 py-3.5 text-white shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-5">
           <div className="flex items-center gap-2">
             <span className={cn(score.className, "flex h-7 w-7 items-center justify-center rounded-xl bg-[#FFD23F] text-[#0B1120] text-xs font-bold tabular-nums")}>
               {selectedBatchMatchIds.length}
@@ -2103,7 +2103,7 @@ export default function DashboardPage() {
       <ConfirmDialog state={confirmDialog} onCancel={() => setConfirmDialog(null)} />
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120]/95 backdrop-blur-md px-4 py-2.5 text-xs font-bold text-white shadow-xl animate-in fade-in slide-in-from-bottom-4">
+        <div className="fixed bottom-24 lg:bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120]/95 backdrop-blur-md px-4 py-2.5 text-xs font-bold text-white shadow-xl animate-in fade-in slide-in-from-bottom-4">
           <CheckCircle2 className="h-4 w-4 text-[#00E0A2]" />
           {toast}
         </div>

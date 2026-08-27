@@ -373,7 +373,7 @@ export default function FinancesPage() {
           </div>
         </header>
 
-        <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8">
+        <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8 pb-24 lg:pb-8">
 
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -819,7 +819,7 @@ export default function FinancesPage() {
       <ConfirmDialog state={confirmDialog} onCancel={() => setConfirmDialog(null)} />
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120]/95 backdrop-blur-md px-4 py-2.5 text-xs font-bold text-white shadow-xl animate-in fade-in slide-in-from-bottom-4">
+        <div className="fixed bottom-24 lg:bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120]/95 backdrop-blur-md px-4 py-2.5 text-xs font-bold text-white shadow-xl animate-in fade-in slide-in-from-bottom-4">
           <CheckCircle2 className="h-4 w-4 text-[#00E0A2]" />
           {toast}
         </div>

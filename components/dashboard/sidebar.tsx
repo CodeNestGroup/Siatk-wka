@@ -13,7 +13,8 @@ import {
   LogOut,
   X,
   ChevronDown,
-  Menu
+  Menu,
+  User
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
@@ -170,13 +171,22 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
 
   // Każda sekcja ma swój kolor akcentu — ożywia listę i przyspiesza rozpoznawanie zakładek
   const navItems = [
-    { href: "/", label: "Mecze", icon: Calendar, hasDot: unreadMatches, color: COBALT },
-    { href: "/players", label: "Zawodnicy / Skład", icon: Users, hasDot: unreadPlayers, color: "#7A5CFF" },
-    { href: "/finances", label: "Finanse", icon: Wallet, hasDot: unreadFinances, color: "#00C48C" },
-    { href: "/stats", label: "Statystyki", icon: BarChart3, hasDot: false, color: YELLOW },
-    { href: "/announcements", label: "Ogłoszenia", icon: Megaphone, hasDot: false, color: "#FF5A5F" },
-    { href: "/settings", label: "Ustawienia", icon: Settings, hasDot: false, color: "#94A3B8" },
+    { href: "/", label: "Mecze", shortLabel: "Mecze", icon: Calendar, hasDot: unreadMatches, color: COBALT },
+    { href: "/players", label: "Zawodnicy / Skład", shortLabel: "Skład", icon: Users, hasDot: unreadPlayers, color: "#7A5CFF" },
+    { href: "/finances", label: "Finanse", shortLabel: "Finanse", icon: Wallet, hasDot: unreadFinances, color: "#00C48C" },
+    { href: "/stats", label: "Statystyki", shortLabel: "Statystyki", icon: BarChart3, hasDot: false, color: YELLOW },
+    { href: "/announcements", label: "Ogłoszenia", shortLabel: "Ogłoszenia", icon: Megaphone, hasDot: false, color: "#FF5A5F" },
+    { href: "/settings", label: "Ustawienia", shortLabel: "Ustawienia", icon: Settings, hasDot: false, color: "#94A3B8" },
+    { href: "/profile", label: "Mój profil", shortLabel: "Profil", icon: User, hasDot: false, color: "#94A3B8" },
   ]
+
+  // Te 4 lądują na stałym pasku na dole (mobile) — reszta pod "Więcej", żeby nie stłoczyć
+  // 7 ikon w jednym rzędzie. Ten sam navItems zasila oba miejsca, więc kolejność/kolory/
+  // odznaki-powiadomień są zawsze spójne między paskiem na dole a szufladą "Więcej".
+  const BOTTOM_BAR_HREFS = ["/", "/players", "/finances", "/stats"]
+  const bottomBarItems = navItems.filter((item) => BOTTOM_BAR_HREFS.includes(item.href))
+  const moreDrawerItems = navItems.filter((item) => !BOTTOM_BAR_HREFS.includes(item.href))
+  const isMoreSectionActive = moreDrawerItems.some((item) => item.href === pathname)
 
   const userName = user?.full_name || user?.name || (user?.email === "admin@admin.pl" ? "Mateusz Podzorski" : user?.email?.split("@")[0]) || "Użytkownik"
   const userRoleText = user?.role === "admin" || user?.email === "admin@admin.pl" || user?.name === "Mateusz Podzorski" ? "Administrator" : "Zawodnik"
@@ -184,16 +194,6 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
 
   return (
     <>
-      {/* Pływający przycisk menu — jedyny sposób na otwarcie sidebara na mobile (wcześniej nie istniał) */}
-      {!isOpen && (
-        <button
-          onClick={() => setMobileOpen(true)}
-          className="fixed top-3.5 left-3.5 z-50 flex h-10 w-10 items-center justify-center rounded-xl bg-[#0B1120] text-white shadow-lg shadow-black/25 cursor-pointer active:scale-90 transition-transform lg:hidden"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
-      )}
-
       {isOpen && (
         <div
           className="fixed inset-0 z-40 bg-[#0B1120]/70 backdrop-blur-sm lg:hidden animate-in fade-in duration-200"
@@ -232,6 +232,10 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
             {navItems.map((item, idx) => {
               const isActive = pathname === item.href
               const Icon = item.icon
+              // Mecze/Skład/Finanse/Statystyki mają już swój przycisk na stałym pasku na dole
+              // (mobile) — pokazywanie ich też w tej szufladzie byłoby czystym duplikatem.
+              // Na desktopie (lg:) paska na dole nie ma, więc tam wraca kompletna lista.
+              const isBottomBarDuplicate = BOTTOM_BAR_HREFS.includes(item.href)
               return (
                 <button
                   key={item.href}
@@ -242,7 +246,8 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
                     ...(isActive ? { background: item.color, boxShadow: `0 4px 14px -4px ${item.color}99` } : {})
                   }}
                   className={cn(
-                    "w-full relative flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all duration-200 cursor-pointer active:scale-[0.98] animate-in fade-in slide-in-from-left-2 fill-mode-both focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFD23F]",
+                    "w-full relative items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all duration-200 cursor-pointer active:scale-[0.98] animate-in fade-in slide-in-from-left-2 fill-mode-both focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFD23F]",
+                    isBottomBarDuplicate ? "hidden lg:flex" : "flex",
                     isActive
                       ? "text-white font-bold"
                       : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
@@ -292,6 +297,41 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
           </button>
         </div>
       </aside>
+
+      {/* PASEK NAWIGACJI NA DOLE — mobile only. Zastępuje pływający hamburger + szufladę jako
+          główny sposób poruszania się po appce, bo tak wygląda i działa nawigacja w prawdziwych
+          appkach (Instagram, bankowe itd.), a nie jak w przeglądanej stronie www. "Więcej" otwiera
+          tę samą szufladę co wcześniej — teraz z resztą pozycji (Ogłoszenia/Ustawienia/Profil). */}
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 flex items-stretch border-t border-white/10 lg:hidden"
+        style={{ background: `linear-gradient(180deg, ${INK_SOFT} 0%, ${INK} 100%)`, paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        {bottomBarItems.map((item) => {
+          const isActive = pathname === item.href
+          const Icon = item.icon
+          return (
+            <button
+              key={item.href}
+              aria-current={isActive ? "page" : undefined}
+              onClick={() => handleNavClick(item.href)}
+              className="relative flex flex-1 flex-col items-center justify-center gap-1 py-2.5 cursor-pointer active:scale-95 transition-transform focus-visible:outline-none"
+            >
+              {item.hasDot && (
+                <span className="absolute top-1.5 right-[calc(50%-16px)] h-2 w-2 rounded-full bg-[#FF5A5F] ring-2 ring-[#0B1120]" />
+              )}
+              <Icon className="h-5 w-5" style={{ color: isActive ? item.color : "#64748B" }} />
+              <span className={cn("text-[9px] font-bold", isActive ? "text-white" : "text-slate-500")}>{item.shortLabel}</span>
+            </button>
+          )
+        })}
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="relative flex flex-1 flex-col items-center justify-center gap-1 py-2.5 cursor-pointer active:scale-95 transition-transform focus-visible:outline-none"
+        >
+          <Menu className="h-5 w-5" style={{ color: isMoreSectionActive ? YELLOW : "#64748B" }} />
+          <span className={cn("text-[9px] font-bold", isMoreSectionActive ? "text-white" : "text-slate-500")}>Więcej</span>
+        </button>
+      </nav>
 
       <ConfirmDialog state={confirmDialog} onCancel={() => setConfirmDialog(null)} />
     </>
