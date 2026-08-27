@@ -17,3 +17,5 @@ node_modules
 # Duże pliki binarne — GitHub odrzuca cokolwiek >100MB (APK trzymamy w GitHub Releases,
 # nie w repo, patrz public/downloads/README — link zamiast pliku w kodzie strony)
 public/downloads/*.apk
+.vercel
+.env*

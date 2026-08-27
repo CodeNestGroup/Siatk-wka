@@ -81,6 +81,15 @@ function CountUp({ value, decimals = 2 }: { value: number; decimals?: number }) 
     const to = value
     if (from === to) return
 
+    // Karta otwarta w tle (np. inna zakładka aktywna) nigdy nie odpala requestAnimationFrame —
+    // bez tego licznik zamrażałby się na starej wartości w nieskończoność zamiast pokazać prawdziwą,
+    // już załadowaną liczbę.
+    if (document.hidden) {
+      setDisplayValue(to)
+      prevValue.current = to
+      return
+    }
+
     const duration = 700
     const start = performance.now()
     let raf: number

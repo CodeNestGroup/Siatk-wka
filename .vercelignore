@@ -1,0 +1,4 @@
+# Ta sama zasada co w .gitignore — APK (107MB) mieszka w GitHub Releases, nie w tej
+# appce. Bez tego Vercel próbuje go uploadować przy każdym deployu i odrzuca cały deploy
+# (limit 100MB na plik/upload).
+public/downloads/*.apk

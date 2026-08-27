@@ -65,6 +65,15 @@ function CountUp({ value, decimals = 0 }: { value: number; decimals?: number }) 
     const to = value
     if (from === to) return
 
+    // Karta otwarta w tle (np. inna zakładka aktywna) nigdy nie odpala requestAnimationFrame —
+    // bez tego licznik zamrażałby się na starej wartości w nieskończoność zamiast pokazać prawdziwą,
+    // już załadowaną liczbę.
+    if (document.hidden) {
+      setDisplayValue(to)
+      prevValue.current = to
+      return
+    }
+
     const duration = 600
     const start = performance.now()
     let raf: number
@@ -192,9 +201,11 @@ export default function PlayersPage() {
   async function fetchPlayers() {
     setIsLoading(true)
 
+    // Jawna lista kolumn zamiast "*" — celowo pomija `password` (nawet zahashowane, nie ma
+    // potrzeby żeby to kiedykolwiek trafiało do przeglądarki). Patrz supabase/harden-anon-access.sql.
     const { data: dbPlayers, error: dbError } = await supabase
       .from("players")
-      .select("*")
+      .select("id, full_name, email, phone, created_at, notif_announcements, notif_match_reminders, role_id, player_status_id, is_core_roster, core_order, core_added_at")
       .order("full_name", { ascending: true })
 
     if (dbError) {

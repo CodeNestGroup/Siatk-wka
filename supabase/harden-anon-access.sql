@@ -1,0 +1,37 @@
+-- ============================================================================
+-- DOMKNIĘCIE Z password-hashing-migration.sql — blokada kolumny `password`
+-- ============================================================================
+-- Jak uruchomić: Supabase Dashboard -> SQL Editor -> wklej całość -> Run.
+-- Bezpieczne do uruchomienia więcej niż raz (idempotentne).
+--
+-- WYMAGANIE WSTĘPNE (już spełnione w kodzie appki): żadne zapytanie do tabeli
+-- `players` nie może już robić `select("*")` — musi wymieniać kolumny wprost,
+-- bez `password`. Inaczej ta migracja wywali te zapytania w całości (Postgres
+-- odmawia całego `SELECT *`, jeśli choć jednej kolumny brakuje uprawnień —
+-- nie pomija jej po cichu). Zamieniliśmy już 3 takie miejsca w kodzie
+-- (app/page.tsx, app/players/page.tsx, app/stats/page.tsx) na jawną listę
+-- kolumn — to musi zostać wdrożone RAZEM z tą migracją, nie osobno.
+--
+-- Co robi:
+--   1. Blokuje ODCZYT kolumny `password` (nawet zahashowanej) kluczem anon/
+--      authenticated — do tej pory każde `select("*")` z konsoli przeglądarki
+--      technicznie zwracało bcrypt-hash każdego zawodnika.
+--   2. Blokuje bezpośredni ZAPIS (UPDATE) tej kolumny tym samym kluczem — do
+--      tej pory dało się z konsoli przeglądarki nadpisać hasło DOWOLNEGO
+--      zawodnika przez zwykłe zapytanie do tabeli, z pominięciem RPC
+--      `set_player_password` (i tym samym np. przejąć czyjeś konto).
+--   3. NIE blokuje INSERT — rejestracja nowego konta (app/login/page.tsx)
+--      nadal wprost wstawia hasło przy tworzeniu wiersza; trigger z
+--      password-hashing-migration.sql i tak je hashuje.
+--   4. Funkcje RPC (`verify_login`, `set_player_password`) działają bez zmian
+--      — są `security definer`, więc czytają/piszą tę kolumnę z uprawnieniami
+--      właściciela funkcji, nie wołającego, i tego revoke ich nie dotyczy.
+--
+-- Czego NIE robi: nie ogranicza kto może czytać/zmieniać RESZTĘ tabeli
+-- `players`, ani żadnej innej tabeli (matches, transactions, announcements).
+-- To świadomie odłożone — wymaga realnych sesji/ról po stronie bazy, nie
+-- tylko blokady jednej kolumny. Patrz rozmowa z 2026-08-27.
+-- ============================================================================
+
+revoke select (password) on public.players from anon, authenticated;
+revoke update (password) on public.players from anon, authenticated;
