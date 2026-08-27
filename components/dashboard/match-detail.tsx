@@ -268,7 +268,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
 
       {/* NAGŁÓWEK — ciemny pasek w stylu hero, spina modal z resztą identyfikacji "pod światłami hali" */}
       <div
-        className="relative overflow-hidden p-6 sm:p-7 pb-7 text-white"
+        className="relative overflow-hidden p-4 sm:p-7 pb-7 text-white"
         style={{ background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)` }}
       >
         <div className="absolute inset-0 pointer-events-none opacity-70" style={netPattern} />
@@ -322,7 +322,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
       </div>
 
       {/* TREŚĆ */}
-      <div className="p-6 sm:p-7 space-y-5">
+      <div className="p-4 sm:p-7 space-y-5">
 
         {/* Pasek zapełnienia składu — ten sam język wizualny co w hero na dashboardzie */}
         <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-1.5">

@@ -16,7 +16,8 @@ import {
   Download,
   X,
   Coffee,
-  Heart
+  Heart,
+  ChevronDown
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
@@ -124,6 +125,10 @@ export default function FinancesPage() {
   const [user, setUser] = useState<any>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense">("all")
+  const [showAllTx, setShowAllTx] = useState(false)
+  useEffect(() => {
+    setShowAllTx(false)
+  }, [typeFilter, searchTerm])
   const [showAddModal, setShowAddModal] = useState(false)
   const [showSupportModal, setShowSupportModal] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -301,6 +306,12 @@ export default function FinancesPage() {
     return true
   })
 
+  // Skrócony widok kart na mobile — rejestr transakcji tylko rośnie przez sezon, więc bez
+  // limitu byłby to najdłuższy scroll w całej appce. Pełna lista zawsze przy wyszukiwaniu.
+  const TX_PREVIEW_LIMIT = 5
+  const isTxListTruncated = !searchTerm && filteredTransactions.length > TX_PREVIEW_LIMIT
+  const visibleTransactions = isTxListTruncated && !showAllTx ? filteredTransactions.slice(0, TX_PREVIEW_LIMIT) : filteredTransactions
+
   if (!user) return null
 
   return (
@@ -426,7 +437,7 @@ export default function FinancesPage() {
             <button
               onClick={() => setTypeFilter(typeFilter === "income" ? "all" : "income")}
               className={cn(
-                "rounded-[24px] border p-5 shadow-xs flex items-center justify-between text-left transition-all cursor-pointer active:scale-[0.98] hover:-translate-y-0.5 hover:shadow-md",
+                "rounded-[24px] border p-4 sm:p-5 shadow-xs flex items-center justify-between text-left transition-all cursor-pointer active:scale-[0.98] hover:-translate-y-0.5 hover:shadow-md",
                 typeFilter === "income" ? "border-[#2C4BFF] ring-2 ring-[#2C4BFF]/20 bg-[#2C4BFF]/[0.04]" : "border-slate-200/90 bg-white"
               )}
             >
@@ -443,7 +454,7 @@ export default function FinancesPage() {
             <button
               onClick={() => setTypeFilter(typeFilter === "expense" ? "all" : "expense")}
               className={cn(
-                "rounded-[24px] border p-5 shadow-xs flex items-center justify-between text-left transition-all cursor-pointer active:scale-[0.98] hover:-translate-y-0.5 hover:shadow-md",
+                "rounded-[24px] border p-4 sm:p-5 shadow-xs flex items-center justify-between text-left transition-all cursor-pointer active:scale-[0.98] hover:-translate-y-0.5 hover:shadow-md",
                 typeFilter === "expense" ? "border-[#FF5A5F] ring-2 ring-[#FF5A5F]/20 bg-[#FF5A5F]/[0.04]" : "border-slate-200/90 bg-white"
               )}
             >
@@ -457,7 +468,7 @@ export default function FinancesPage() {
               </div>
             </button>
 
-            <div className="rounded-[24px] border border-slate-200/90 bg-white p-5 shadow-xs flex items-center justify-between">
+            <div className="rounded-[24px] border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#7A5CFF]">Nadpłaty Graczy</p>
                 <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}><CountUp value={totalOverpayments} /> PLN</h3>
@@ -469,7 +480,7 @@ export default function FinancesPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-8">
 
             <div className="lg:col-span-2 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -595,7 +606,7 @@ export default function FinancesPage() {
 
                     {/* Karty — poniżej md, żeby uniknąć poziomego scrolla tabeli */}
                     <div className="md:hidden divide-y divide-slate-100">
-                      {filteredTransactions.map((tx, idx) => (
+                      {visibleTransactions.map((tx, idx) => (
                         <div key={tx.id || idx} className="p-4 space-y-2">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -626,6 +637,16 @@ export default function FinancesPage() {
                           </div>
                         </div>
                       ))}
+
+                      {isTxListTruncated && !showAllTx && (
+                        <button
+                          onClick={() => setShowAllTx(true)}
+                          className="flex w-full items-center justify-center gap-2 py-3.5 text-xs font-bold text-slate-500 transition-all hover:text-[#1D3AE8] cursor-pointer active:scale-[0.99]"
+                        >
+                          Pokaż wszystkie ({filteredTransactions.length})
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </>
                 )}

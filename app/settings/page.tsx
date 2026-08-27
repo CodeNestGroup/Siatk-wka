@@ -279,7 +279,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Sekcja 1: Dane Profilowe */}
-          <div className="rounded-[28px] border border-slate-200/90 bg-white p-6 shadow-xs space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400 fill-mode-both">
+          <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400 fill-mode-both">
             <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#2C4BFF]/10 text-[#2C4BFF] border border-[#2C4BFF]/20">
                 <User className="h-5 w-5" />
@@ -329,7 +329,7 @@ export default function SettingsPage() {
 
           {/* Sekcja 2: Dane do Szybkich Wpłat (dla Admina) */}
           {isAdmin && (
-            <div className="rounded-[28px] border border-slate-200/90 bg-white p-6 shadow-xs space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-75 fill-mode-both">
+            <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-75 fill-mode-both">
               <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
                 <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#00C48C]/10 text-[#00875F] border border-[#00C48C]/20">
                   <CreditCard className="h-5 w-5" />
@@ -379,7 +379,7 @@ export default function SettingsPage() {
           )}
 
           {/* Sekcja 3: Bezpieczeństwo i Hasło */}
-          <div className="rounded-[28px] border border-slate-200/90 bg-white p-6 shadow-xs space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-150 fill-mode-both">
+          <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-150 fill-mode-both">
             <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#FF5A5F]/10 text-[#E0454A] border border-[#FF5A5F]/20">
                 <Lock className="h-5 w-5" />
@@ -433,7 +433,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Sekcja 4: Powiadomienia */}
-          <div className="rounded-[28px] border border-slate-200/90 bg-white p-6 shadow-xs space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-200 fill-mode-both">
+          <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-200 fill-mode-both">
             <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#7A5CFF]/10 text-[#7A5CFF] border border-[#7A5CFF]/20">
                 <Bell className="h-5 w-5" />
@@ -464,7 +464,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Sekcja 5: Eksport Własnych Danych */}
-          <div className="rounded-[28px] border border-slate-200/90 bg-white p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-300 fill-mode-both">
+          <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-300 fill-mode-both">
             <div>
               <h3 className="text-xs font-black text-slate-900 flex items-center gap-2">
                 <Download className="h-4 w-4 text-[#2C4BFF]" />

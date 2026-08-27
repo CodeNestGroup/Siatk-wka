@@ -168,7 +168,7 @@ export default function ProfilePage() {
 
           {/* KAFELKI SZYBKICH STATYSTYK */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xs flex items-center gap-3.5">
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#2C4BFF]/10 text-[#2C4BFF] border border-[#2C4BFF]/20">
                 <Trophy className="h-5 w-5" />
               </div>
@@ -178,7 +178,7 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xs flex items-center gap-3.5">
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#00C48C]/10 text-[#00875F] border border-[#00C48C]/20">
                 <Wallet className="h-5 w-5" />
               </div>
@@ -188,7 +188,7 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xs flex items-center gap-3.5">
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#7A5CFF]/10 text-[#7A5CFF] border border-[#7A5CFF]/20">
                 <Calendar className="h-5 w-5" />
               </div>
@@ -200,14 +200,16 @@ export default function ProfilePage() {
           </div>
 
           {/* INFORMACJE SYSTEMOWE */}
-          <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-xs space-y-4">
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-6 shadow-xs space-y-4">
             <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-3">
               <Shield className="h-3.5 w-3.5 text-slate-300" />
               Informacje systemowe
             </h3>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+              {/* Surowy UUID to czysty szum na telefonie — nikt go tam nie odczytuje ani nie
+                  kopiuje z małego ekranu. Zostaje widoczny od sm: wzwyż, gdzie i tak jest miejsce. */}
+              <div className="hidden sm:block p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
                 <span className="text-slate-400 font-bold block mb-0.5">Identyfikator użytkownika</span>
                 <span className="font-mono text-slate-900 font-bold block truncate">{user?.id || "local-user-id"}</span>
               </div>

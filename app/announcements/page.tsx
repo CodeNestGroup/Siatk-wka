@@ -16,7 +16,8 @@ import {
   CalendarCheck,
   Calendar,
   X,
-  Coffee
+  Coffee,
+  ChevronDown
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sidebar } from "@/components/dashboard/sidebar"
@@ -75,6 +76,10 @@ export default function AnnouncementsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
+  const [showAllAnnouncements, setShowAllAnnouncements] = useState(false)
+  useEffect(() => {
+    setShowAllAnnouncements(false)
+  }, [selectedCategory, search])
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [showSupportModal, setShowSupportModal] = useState(false)
@@ -248,6 +253,13 @@ export default function AnnouncementsPage() {
 
   const sorted = [...filtered].sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned))
 
+  // Skrócona tablica ogłoszeń — przypięte zawsze widoczne (są na górze dzięki sortowaniu
+  // wyżej), reszta ucięta do kilku najnowszych + przycisk rozwinięcia. Bez limitu tablica
+  // rośnie w nieskończoność i nigdy się nie kończy przy przewijaniu na telefonie.
+  const ANNOUNCEMENT_PREVIEW_LIMIT = 5
+  const isAnnouncementListTruncated = !search && sorted.length > ANNOUNCEMENT_PREVIEW_LIMIT
+  const visibleAnnouncements = isAnnouncementListTruncated && !showAllAnnouncements ? sorted.slice(0, ANNOUNCEMENT_PREVIEW_LIMIT) : sorted
+
   // Kolor akcentu w zależności od kategorii — te same tokeny marki co reszta appki
   function getCategoryAccent(catName: string): { color: string; bg: string; border: string; text: string } {
     const name = catName.toLowerCase()
@@ -398,7 +410,7 @@ export default function AnnouncementsPage() {
                 </p>
               </div>
             ) : (
-              sorted.map((item, idx) => {
+              visibleAnnouncements.map((item, idx) => {
                 const currentCategory = categories.find((c) => c.id === item.category_id)
                 const catName = currentCategory?.name?.toLowerCase() || ""
 
@@ -440,7 +452,7 @@ export default function AnnouncementsPage() {
                         animationDelay: `${Math.min(idx, 6) * 40}ms`
                       }}
                       className={cn(
-                        "relative overflow-hidden rounded-[24px] p-5 sm:p-6 space-y-3 text-white shadow-lg border border-white/10 animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
+                        "relative overflow-hidden rounded-[24px] p-4 sm:p-6 space-y-3 text-white shadow-lg border border-white/10 animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
                         isMatchCancelled && "cursor-pointer"
                       )}
                     >
@@ -508,7 +520,7 @@ export default function AnnouncementsPage() {
                       animationDelay: `${Math.min(idx, 6) * 40}ms`
                     }}
                     className={cn(
-                      "rounded-[24px] border border-l-4 p-5 sm:p-6 space-y-3 transition-all shadow-xs bg-white hover:shadow-md hover:-translate-y-0.5 animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
+                      "rounded-[24px] border border-l-4 p-4 sm:p-6 space-y-3 transition-all shadow-xs bg-white hover:shadow-md hover:-translate-y-0.5 animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
                       isMatchCancelled ? "cursor-pointer" : ""
                     )}
                   >
@@ -558,6 +570,16 @@ export default function AnnouncementsPage() {
                   </div>
                 )
               })
+            )}
+
+            {isAnnouncementListTruncated && !showAllAnnouncements && (
+              <button
+                onClick={() => setShowAllAnnouncements(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white py-3.5 text-xs font-bold text-slate-500 transition-all hover:border-[#2C4BFF]/40 hover:text-[#1D3AE8] hover:bg-[#2C4BFF]/[0.03] cursor-pointer active:scale-[0.99]"
+              >
+                Pokaż wszystkie ({sorted.length})
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
             )}
           </div>
         </main>

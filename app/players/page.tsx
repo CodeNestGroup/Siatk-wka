@@ -24,7 +24,8 @@ import {
   Heart,
   Download,
   CheckSquare,
-  Square
+  Square,
+  ChevronDown
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
@@ -119,6 +120,15 @@ export default function PlayersPage() {
   const [statusFilter, setStatusFilter] = useState<"core" | "active" | "inactive" | "all">("core")
   const [toast, setToast] = useState<string | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
+
+  // Skrócone listy graczy na mobile (patrz LIST_PREVIEW_LIMIT niżej) — wracają do skrótu
+  // przy każdej zmianie zakładki/wyszukiwania, żeby nie zostać przypadkiem "rozwinięte" po cichu.
+  const [showAllPlayers, setShowAllPlayers] = useState(false)
+  const [showAllNonCore, setShowAllNonCore] = useState(false)
+  useEffect(() => {
+    setShowAllPlayers(false)
+    setShowAllNonCore(false)
+  }, [statusFilter, searchQuery])
 
   // Suwak pod aktywną zakładką filtra — ten sam mechanizm co na stronie głównej
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, top: 0, height: 0 })
@@ -678,6 +688,16 @@ export default function PlayersPage() {
 
   const visibleBulkIds = filteredPlayers.map((p) => p.id)
 
+  // Skrócone widoki list na mobile (karty) — sama tabela desktopowa i tak mieści się bez
+  // przewijania grozy, ale karty na telefonie potrafią ciągnąć się przez 20-30 zawodników.
+  // Pełna lista zawsze widoczna przy wyszukiwaniu i w trybie zaznaczania — inaczej licznik
+  // "zaznaczono N" mógłby pokazywać więcej niż faktycznie widać na ekranie.
+  const LIST_PREVIEW_LIMIT = 4
+  const isPlayerListTruncated = !isSelectionMode && !searchQuery && filteredPlayers.length > LIST_PREVIEW_LIMIT
+  const visiblePlayers = isPlayerListTruncated && !showAllPlayers ? filteredPlayers.slice(0, LIST_PREVIEW_LIMIT) : filteredPlayers
+  const isNonCoreListTruncated = !isSelectionMode && !searchQuery && filteredNonCoreActive.length > LIST_PREVIEW_LIMIT
+  const visibleNonCoreActive = isNonCoreListTruncated && !showAllNonCore ? filteredNonCoreActive.slice(0, LIST_PREVIEW_LIMIT) : filteredNonCoreActive
+
   return (
     <div className="flex min-h-screen bg-[#F5F6FA] text-[#14181F]">
       <Sidebar
@@ -822,7 +842,7 @@ export default function PlayersPage() {
 
           {/* KAFEL ZGŁOSZEŃ OCZEKUJĄCYCH */}
           {isAdmin && pendingPlayers.length > 0 && (
-            <div className="rounded-[28px] border border-[#FFD23F]/40 bg-[#FFD23F]/[0.08] p-5 space-y-3 shadow-xs animate-in fade-in slide-in-from-top-2 duration-400">
+            <div className="rounded-[28px] border border-[#FFD23F]/40 bg-[#FFD23F]/[0.08] p-4 sm:p-5 space-y-3 shadow-xs animate-in fade-in slide-in-from-top-2 duration-400">
               <div className="flex items-center justify-between">
                 <h2 className="text-xs font-black uppercase tracking-wider text-[#7A5C00] flex items-center gap-2">
                   <Clock className="h-4 w-4" />
@@ -867,7 +887,7 @@ export default function PlayersPage() {
             <div className="space-y-7">
               {/* Podsumowanie — ciemna karta w stylu hero */}
               <div
-                className="relative overflow-hidden rounded-[28px] p-5 sm:p-6 text-white shadow-[0_24px_60px_-24px_rgba(11,17,32,0.55)] border border-white/10 animate-in fade-in slide-in-from-top-3 duration-500 fill-mode-both"
+                className="relative overflow-hidden rounded-[28px] p-4 sm:p-6 text-white shadow-[0_24px_60px_-24px_rgba(11,17,32,0.55)] border border-white/10 animate-in fade-in slide-in-from-top-3 duration-500 fill-mode-both"
                 style={{ background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)` }}
               >
                 <div className="absolute inset-0 pointer-events-none opacity-70" style={netPattern} />
@@ -1055,7 +1075,7 @@ export default function PlayersPage() {
                   </div>
 
                   <div className="flex flex-col space-y-2">
-                    {filteredNonCoreActive.map((player) => (
+                    {visibleNonCoreActive.map((player) => (
                       <div
                         key={player.id}
                         className="flex items-center justify-between p-3 sm:p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition-all"
@@ -1079,6 +1099,16 @@ export default function PlayersPage() {
                         </button>
                       </div>
                     ))}
+
+                    {isNonCoreListTruncated && !showAllNonCore && (
+                      <button
+                        onClick={() => setShowAllNonCore(true)}
+                        className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white py-3 text-xs font-bold text-slate-500 transition-all hover:border-[#2C4BFF]/40 hover:text-[#1D3AE8] hover:bg-[#2C4BFF]/[0.03] cursor-pointer active:scale-[0.99]"
+                      >
+                        Pokaż wszystkich ({filteredNonCoreActive.length})
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -1316,7 +1346,7 @@ export default function PlayersPage() {
                 {/* Wersja kartowa na mobile — tabela z 6 kolumnami nie mieści się na wąskim ekranie
                     bez ukrywania większości danych za poziomym scrollem */}
                 <div className="md:hidden space-y-2.5">
-                  {filteredPlayers.map((player) => {
+                  {visiblePlayers.map((player) => {
                     const isCurrentUser =
                       user?.id === player.id ||
                       user?.email?.toLowerCase() === player.email?.toLowerCase() ||
@@ -1426,6 +1456,16 @@ export default function PlayersPage() {
                       </div>
                     )
                   })}
+
+                  {isPlayerListTruncated && !showAllPlayers && (
+                    <button
+                      onClick={() => setShowAllPlayers(true)}
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white py-3.5 text-xs font-bold text-slate-500 transition-all hover:border-[#2C4BFF]/40 hover:text-[#1D3AE8] hover:bg-[#2C4BFF]/[0.03] cursor-pointer active:scale-[0.99]"
+                    >
+                      Pokaż wszystkich ({filteredPlayers.length})
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
                 </>
               )}

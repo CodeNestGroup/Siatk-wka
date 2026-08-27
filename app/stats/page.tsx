@@ -12,7 +12,8 @@ import {
   Search,
   X,
   Coffee,
-  Medal
+  Medal,
+  ChevronDown
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
@@ -82,6 +83,10 @@ export default function StatsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [searchTerm, setSearchTerm] = useState("")
+  const [showAllStats, setShowAllStats] = useState(false)
+  useEffect(() => {
+    setShowAllStats(false)
+  }, [searchTerm])
   const [isLoading, setIsLoading] = useState(true)
   const [showSupportModal, setShowSupportModal] = useState(false)
 
@@ -206,6 +211,13 @@ export default function StatsPage() {
   const filteredPlayerStats = playerStats.filter((p) =>
     fuzzySearchMatch(normalizeSearchText(p.name).split(/[^a-z0-9]+/).filter(Boolean), searchTerm)
   )
+
+  // Skrócony ranking na mobile — miejsca 15-30 to niska wartość informacyjna przy
+  // pierwszym wejściu, a lista jest już posortowana malejąco, więc obcięcie to nadal
+  // realna czołówka, nie przypadkowy fragment.
+  const STATS_PREVIEW_LIMIT = 8
+  const isStatsListTruncated = !searchTerm && filteredPlayerStats.length > STATS_PREVIEW_LIMIT
+  const visiblePlayerStats = isStatsListTruncated && !showAllStats ? filteredPlayerStats.slice(0, STATS_PREVIEW_LIMIT) : filteredPlayerStats
 
   if (!user) return null
 
@@ -359,7 +371,7 @@ export default function StatsPage() {
 
           {/* Kafelki Podsumowania */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="rounded-[24px] border border-slate-200/90 bg-white p-5 shadow-xs flex items-center justify-between">
+            <div className="rounded-[24px] border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#2C4BFF]">Rozegrane Sesje</p>
                 <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}><CountUp value={totalMatches} /> Meczów</h3>
@@ -370,7 +382,7 @@ export default function StatsPage() {
               </div>
             </div>
 
-            <div className="rounded-[24px] border border-slate-200/90 bg-white p-5 shadow-xs flex items-center justify-between">
+            <div className="rounded-[24px] border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#7A5CFF]">Średnia Frekwencja</p>
                 <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}><CountUp value={avgAttendance} decimals={1} /> / 12</h3>
@@ -381,7 +393,7 @@ export default function StatsPage() {
               </div>
             </div>
 
-            <div className="rounded-[24px] border border-slate-200/90 bg-white p-5 shadow-xs flex items-center justify-between">
+            <div className="rounded-[24px] border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#00875F]">Wpłacalność Składek</p>
                 <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}><CountUp value={paymentRate} />%</h3>
@@ -524,7 +536,7 @@ export default function StatsPage() {
 
                   {/* Karty — poniżej md, żeby uniknąć poziomego scrolla tabeli */}
                   <div className="md:hidden divide-y divide-slate-100">
-                    {filteredPlayerStats.map((p, idx) => {
+                    {visiblePlayerStats.map((p, idx) => {
                       const participationRate = totalMatches > 0 ? Math.round((p.matches / totalMatches) * 100) : 0
                       const isTop3 = idx < 3
                       const medalColor = idx === 0 ? YELLOW : idx === 1 ? SILVER : BRONZE
@@ -568,6 +580,16 @@ export default function StatsPage() {
                         </div>
                       )
                     })}
+
+                    {isStatsListTruncated && !showAllStats && (
+                      <button
+                        onClick={() => setShowAllStats(true)}
+                        className="flex w-full items-center justify-center gap-2 py-3.5 text-xs font-bold text-slate-500 transition-all hover:text-[#1D3AE8] cursor-pointer active:scale-[0.99]"
+                      >
+                        Pokaż cały ranking ({filteredPlayerStats.length})
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </>
               )}
