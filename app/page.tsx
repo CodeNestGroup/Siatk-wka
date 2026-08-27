@@ -30,7 +30,8 @@ import {
   Square,
   Megaphone,
   Pin,
-  CalendarPlus
+  CalendarPlus,
+  ChevronDown
 } from "lucide-react"
 import Link from "next/link"
 import { Sidebar } from "@/components/dashboard/sidebar"
@@ -182,6 +183,13 @@ export default function DashboardPage() {
   // Domyślnie "upcoming", nie "all" — po wejściu na stronę gracz od razu widzi tylko to,
   // co go interesuje (nadchodzące mecze), a nie całą historię łącznie z rozliczonymi/odwołanymi.
   const [statusFilter, setStatusFilter] = useState<"all" | "upcoming" | "past" | "cancelled">("upcoming")
+  // Lista meczów domyślnie skrócona do kilku pozycji — nawet 11 nadchodzących to i tak
+  // długie przewijanie na telefonie. Wraca do "false" przy każdej zmianie zakładki/wyszukiwania,
+  // żeby np. przełączenie na "Zakończone" znów pokazywało skróconą listę, a nie od razu całość.
+  const [showAllMatches, setShowAllMatches] = useState(false)
+  useEffect(() => {
+    setShowAllMatches(false)
+  }, [statusFilter, searchTerm])
 
   // Animacje: pasek zapełnienia składu w hero wjeżdża od 0% dopiero po załadowaniu danych; suwak pod aktywną zakładką filtra
   const [heroBarReady, setHeroBarReady] = useState(false)
@@ -773,6 +781,13 @@ export default function DashboardPage() {
     return matchGroupOrder(a) === 2 ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)
   })
 
+  // Domyślnie pokazujemy tylko kilka pierwszych meczów — nawet po zawężeniu do "Nadchodzące"
+  // 11 kart to sporo przewijania na telefonie. Pełną listę zostawiamy bez ograniczeń podczas
+  // wyszukiwania i zaznaczania wsadowego (admin musi widzieć wszystko, żeby zaznaczyć/znaleźć).
+  const MATCH_PREVIEW_LIMIT = 4
+  const isMatchListTruncated = !isSelectionMode && !searchTerm && !showAllMatches && sortedMatches.length > MATCH_PREVIEW_LIMIT
+  const visibleMatches = isMatchListTruncated ? sortedMatches.slice(0, MATCH_PREVIEW_LIMIT) : sortedMatches
+
   // Statystyki sezonu — "Rozegrane mecze", lider frekwencji i średnia frekwencja mówią o tym,
   // co się FAKTYCZNIE odbyło, więc liczymy je z `playedMatches` (naprawdę przeszłych), a nie z
   // `activeMatches` (wszystkie niezanulowane, łącznie z przyszłymi). Wcześniej te kafelki
@@ -1051,7 +1066,7 @@ export default function DashboardPage() {
                 <button
                   onClick={() => setStatusFilter("past")}
                   title="Pokaż zakończone mecze"
-                  className="p-5 sm:p-6 flex items-start justify-between gap-3 text-left cursor-pointer transition-all hover:bg-white/[0.04] active:scale-[0.99] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+                  className="p-4 sm:p-6 flex items-start justify-between gap-3 text-left cursor-pointer transition-all hover:bg-white/[0.04] active:scale-[0.99] focus-visible:outline-none focus-visible:bg-white/[0.04]"
                 >
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Rozegrane mecze</p>
@@ -1061,7 +1076,7 @@ export default function DashboardPage() {
                   <Trophy className="h-5 w-5 text-[#2C4BFF] shrink-0 mt-0.5" />
                 </button>
 
-                <div className="p-5 sm:p-6 flex items-start justify-between gap-3">
+                <div className="p-4 sm:p-6 flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Król frekwencji</p>
                     <h3 className={cn(display.className, "text-lg font-bold text-white mt-1.5 truncate")}>{attendanceKing.name}</h3>
@@ -1070,7 +1085,7 @@ export default function DashboardPage() {
                   <Crown className="h-5 w-5 text-[#FFD23F] shrink-0 mt-0.5" />
                 </div>
 
-                <div className="p-5 sm:p-6 flex items-start justify-between gap-3">
+                <div className="p-4 sm:p-6 flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Śr. frekwencja</p>
                     <h3 className={cn(score.className, "text-3xl font-semibold text-white mt-1.5 tabular-nums")}><CountUp value={Number(avgAttendance)} decimals={1} /> <span className="text-sm text-slate-500">/ 12</span></h3>
@@ -1079,7 +1094,7 @@ export default function DashboardPage() {
                   <Users className="h-5 w-5 text-[#B79CFF] shrink-0 mt-0.5" />
                 </div>
 
-                <div className="p-5 sm:p-6 flex items-start justify-between gap-3">
+                <div className="p-4 sm:p-6 flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Budżet sezonu</p>
                     <h3 className={cn(score.className, "text-3xl font-semibold text-white mt-1.5 tabular-nums")}><CountUp value={totalSeasonCollected} /> <span className="text-sm text-slate-500">PLN</span></h3>
@@ -1316,7 +1331,7 @@ export default function DashboardPage() {
                 )}
               </div>
             ) : (
-              sortedMatches.map((match: any, idx) => {
+              visibleMatches.map((match: any, idx) => {
                 const roster = mainRoster(match)
                 const price = Number(match.price_per_player || 25)
                 const isSettled = match.is_settled
@@ -1480,6 +1495,16 @@ export default function DashboardPage() {
                   </div>
                 )
               })
+            )}
+
+            {isMatchListTruncated && (
+              <button
+                onClick={() => setShowAllMatches(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white py-3.5 text-xs font-bold text-slate-500 transition-all hover:border-[#2C4BFF]/40 hover:text-[#1D3AE8] hover:bg-[#2C4BFF]/[0.03] cursor-pointer active:scale-[0.99]"
+              >
+                Pokaż wszystkie ({sortedMatches.length})
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
             )}
           </div>
         </main>
