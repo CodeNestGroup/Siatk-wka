@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { supabase } from "@/lib/supabase"
 import { cn } from "@/lib/utils"
 import { Turnstile } from "@marsidev/react-turnstile"
+import { InstallAppPrompt } from "@/components/pwa/install-app-prompt"
 
 // ────────────────────────────────────────────────────────────────
 // Te same tokeny co reszta dashboardu ("Under the Lights")
@@ -396,6 +397,9 @@ export default function LoginPage() {
           </div>
           <Download className="h-4 w-4 text-slate-300 group-hover:text-[#2C4BFF] transition-colors shrink-0" />
         </a>
+
+        {/* iOS nie ma odpowiednika .apk — jedyna droga to PWA, patrz components/pwa */}
+        <InstallAppPrompt />
 
         <div className="mt-5 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-slate-400">
           <Shield className="h-3.5 w-3.5 text-slate-400" />
