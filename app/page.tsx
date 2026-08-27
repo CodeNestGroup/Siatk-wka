@@ -179,7 +179,9 @@ export default function DashboardPage() {
   const [isSavingAbsence, setIsSavingAbsence] = useState(false)
 
   const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState<"all" | "upcoming" | "past" | "cancelled">("all")
+  // Domyślnie "upcoming", nie "all" — po wejściu na stronę gracz od razu widzi tylko to,
+  // co go interesuje (nadchodzące mecze), a nie całą historię łącznie z rozliczonymi/odwołanymi.
+  const [statusFilter, setStatusFilter] = useState<"all" | "upcoming" | "past" | "cancelled">("upcoming")
 
   // Animacje: pasek zapełnienia składu w hero wjeżdża od 0% dopiero po załadowaniu danych; suwak pod aktywną zakładką filtra
   const [heroBarReady, setHeroBarReady] = useState(false)
