@@ -1145,6 +1145,41 @@ export default function DashboardPage() {
             </Link>
           )}
 
+          {/* 2.5 SPONSOR GŁÓWNY — jedyne miejsce w appce, gdzie ESCO ma realną, dużą ekspozycję
+              (reszta stron ma tylko mały pasek-marquee w nagłówku). Obok od razu pokazujemy zasadę
+              kolejnych miejsc sponsorskich — to ten sam zestaw kolorów co w Finansach/Statystykach. */}
+          <div className="rounded-2xl border border-slate-200/80 bg-white px-4 sm:px-5 py-3.5 shadow-xs animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <img
+                  src="/logos/esco.png"
+                  alt="ESCO Jaworze"
+                  className="h-11 w-11 shrink-0 rounded-2xl border border-slate-200 bg-white object-contain p-1.5 shadow-xs"
+                />
+                <div className="min-w-0">
+                  <span className="inline-flex items-center gap-1 rounded-md bg-[#FF5A5F]/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-[#E0454A]">
+                    Sponsor Główny
+                  </span>
+                  <p className="text-sm font-black text-slate-900 truncate mt-0.5">ESCO Jaworze</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {[COBALT, MINT, YELLOW].map((color, i) => (
+                  <div
+                    key={i}
+                    title="Wolne miejsce dla sponsora"
+                    className="flex h-8 w-8 items-center justify-center rounded-xl border border-dashed"
+                    style={{ borderColor: `${color}55`, color, background: `${color}0D` }}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </div>
+                ))}
+                <span className="ml-1 hidden text-[11px] font-bold text-slate-400 sm:inline">Zostań sponsorem</span>
+              </div>
+            </div>
+          </div>
+
           {/* 3. HARMONOGRAM MECZÓW I PRZYCISKI AKCJI */}
           <div className="pt-2 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

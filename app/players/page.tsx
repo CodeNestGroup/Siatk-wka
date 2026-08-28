@@ -25,7 +25,8 @@ import {
   Download,
   CheckSquare,
   Square,
-  ChevronDown
+  ChevronDown,
+  GripVertical
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
@@ -129,6 +130,12 @@ export default function PlayersPage() {
   const [statusFilter, setStatusFilter] = useState<"core" | "active" | "inactive" | "all">("core")
   const [toast, setToast] = useState<string | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
+
+  // Przeciąganie kolejności powołań myszką — uzupełnienie strzałek ↑/↓, nie ich zastąpienie.
+  // `draggedIndex`/`dragOverIndex` to zawsze realna pozycja w PEŁNEJ liście (allCorePlayersSorted),
+  // dokładnie ta sama konwencja co `idx`/`actualIdx` używane już przy strzałkach.
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
   // Skrócone listy graczy na mobile (patrz LIST_PREVIEW_LIMIT niżej) — wracają do skrótu
   // przy każdej zmianie zakładki/wyszukiwania, żeby nie zostać przypadkiem "rozwinięte" po cichu.
@@ -343,6 +350,64 @@ export default function PlayersPage() {
         return p
       })
     )
+  }
+
+  // Przeciągnięcie na dowolną pozycję (nie tylko sąsiednią jak strzałki) — wyjmujemy gracza
+  // z listy i wstawiamy w nowym miejscu, potem renumerujemy WSZYSTKICH 1..N. To jedyny prosty
+  // sposób, żeby przesunięcie np. z #2 na #10 poprawnie przesunęło też wszystkich pomiędzy,
+  // a nie tylko zamieniło miejscami dwie osoby.
+  async function moveCoreOrderTo(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return
+    if (fromIndex < 0 || fromIndex >= allCorePlayersSorted.length) return
+    if (toIndex < 0 || toIndex >= allCorePlayersSorted.length) return
+
+    const reordered = [...allCorePlayersSorted]
+    const [moved] = reordered.splice(fromIndex, 1)
+    reordered.splice(toIndex, 0, moved)
+
+    const updates = reordered.map((p, i) => ({ id: p.id, core_order: i + 1 }))
+
+    await Promise.all(
+      updates.map((u) => supabase.from("players").update({ core_order: u.core_order }).eq("id", u.id))
+    )
+
+    setPlayers((prev) =>
+      prev.map((p) => {
+        const match = updates.find((u) => u.id === p.id)
+        return match ? { ...p, core_order: match.core_order } : p
+      })
+    )
+  }
+
+  function handleDragStart(e: React.DragEvent, index: number) {
+    setDraggedIndex(index)
+    e.dataTransfer.effectAllowed = "move"
+    // Realne źródło prawdy dla drop-a to dataTransfer, nie state `draggedIndex` — state jest
+    // tylko do podświetlenia (opacity/ring). Gdyby drop czytał wprost z `draggedIndex`, mógłby
+    // trafić na jeszcze nieodświeżoną wartość z poprzedniego renderu (stale closure).
+    e.dataTransfer.setData("text/plain", String(index))
+  }
+
+  function handleDragOverRow(e: React.DragEvent, index: number) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = "move"
+    if (index !== dragOverIndex) setDragOverIndex(index)
+  }
+
+  function handleDragEnd() {
+    setDraggedIndex(null)
+    setDragOverIndex(null)
+  }
+
+  async function handleDropOnRow(e: React.DragEvent, index: number) {
+    e.preventDefault()
+    const raw = e.dataTransfer.getData("text/plain")
+    const from = raw === "" ? null : Number(raw)
+    setDraggedIndex(null)
+    setDragOverIndex(null)
+    if (from !== null && !Number.isNaN(from) && from !== index) {
+      await moveCoreOrderTo(from, index)
+    }
   }
 
   function togglePlayerStatus(player: GlobalPlayer, e: React.MouseEvent) {
@@ -951,10 +1016,28 @@ export default function PlayersPage() {
                       <div
                         key={player.id}
                         onClick={() => openPlayerHistory(player)}
+                        draggable={isAdmin && !searchQuery}
+                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragOver={(e) => handleDragOverRow(e, idx)}
+                        onDrop={(e) => handleDropOnRow(e, idx)}
+                        onDragEnd={handleDragEnd}
                         style={{ animationDelay: `${Math.min(idx, 10) * 35}ms` }}
-                        className="group flex items-center justify-between p-2 sm:p-2.5 rounded-2xl bg-white border border-l-4 border-slate-200/90 border-l-[#2C4BFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both"
+                        className={cn(
+                          "group flex items-center justify-between p-2 sm:p-2.5 rounded-2xl bg-white border border-l-4 border-slate-200/90 border-l-[#2C4BFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
+                          draggedIndex === idx && "opacity-40",
+                          dragOverIndex === idx && draggedIndex !== idx && "ring-2 ring-[#2C4BFF]/50"
+                        )}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
+                          {isAdmin && !searchQuery && (
+                            <span
+                              onClick={(e) => e.stopPropagation()}
+                              title="Przeciągnij, aby zmienić kolejność"
+                              className="hidden sm:flex h-5 w-4 shrink-0 items-center justify-center text-slate-300 group-hover:text-slate-400 cursor-grab active:cursor-grabbing"
+                            >
+                              <GripVertical className="h-4 w-4" />
+                            </span>
+                          )}
                           <span
                             className={cn(score.className, "flex h-7 w-7 items-center justify-center rounded-lg text-white font-semibold text-[11px] shrink-0 shadow-md group-hover:scale-105 transition-transform")}
                             style={{ background: COBALT, boxShadow: `0 4px 10px -3px ${COBALT}99` }}
@@ -1021,10 +1104,28 @@ export default function PlayersPage() {
                       <div
                         key={player.id}
                         onClick={() => openPlayerHistory(player)}
+                        draggable={isAdmin && !searchQuery}
+                        onDragStart={(e) => handleDragStart(e, actualIdx)}
+                        onDragOver={(e) => handleDragOverRow(e, actualIdx)}
+                        onDrop={(e) => handleDropOnRow(e, actualIdx)}
+                        onDragEnd={handleDragEnd}
                         style={{ animationDelay: `${Math.min(rIdx, 10) * 35}ms` }}
-                        className="group flex items-center justify-between p-2 sm:p-2.5 rounded-2xl bg-white border border-l-4 border-slate-200/90 border-l-[#7A5CFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both"
+                        className={cn(
+                          "group flex items-center justify-between p-2 sm:p-2.5 rounded-2xl bg-white border border-l-4 border-slate-200/90 border-l-[#7A5CFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
+                          draggedIndex === actualIdx && "opacity-40",
+                          dragOverIndex === actualIdx && draggedIndex !== actualIdx && "ring-2 ring-[#7A5CFF]/50"
+                        )}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
+                          {isAdmin && !searchQuery && (
+                            <span
+                              onClick={(e) => e.stopPropagation()}
+                              title="Przeciągnij, aby zmienić kolejność"
+                              className="hidden sm:flex h-5 w-4 shrink-0 items-center justify-center text-[#7A5CFF]/40 group-hover:text-[#7A5CFF]/70 cursor-grab active:cursor-grabbing"
+                            >
+                              <GripVertical className="h-4 w-4" />
+                            </span>
+                          )}
                           <span
                             className={cn(score.className, "flex h-7 w-7 items-center justify-center rounded-lg text-white font-semibold text-[11px] shrink-0 shadow-md group-hover:scale-105 transition-transform")}
                             style={{ background: VIOLET, boxShadow: `0 4px 10px -3px ${VIOLET}99` }}
