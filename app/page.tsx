@@ -77,10 +77,20 @@ function perforationHorizontal(color: string): React.CSSProperties {
 
 const MONTHS_PL = ["STY", "LUT", "MAR", "KWI", "MAJ", "CZE", "LIP", "SIE", "WRZ", "PAŹ", "LIS", "GRU"]
 const DAYS_PL = ["Niedziela", "Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota"]
+// Dopełniacz ("31 sierpnia", nie "31 Sierpień") — tylko do czytelnego zdania w hero, reszta
+// appki (karty meczów, wyszukiwarka) zostaje przy zwięzłym formacie DD.MM.RRRR bez zmian.
+const MONTHS_GENITIVE_PL = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"]
 
 function dateStub(dateStr: string) {
   const [y, m, d] = dateStr.split("-").map(Number)
   return { day: d, month: MONTHS_PL[(m || 1) - 1] || "", year: y }
+}
+
+// "Poniedziałek, 31 sierpnia" zamiast surowego "31.08.2026" — hero to jedyne miejsce, gdzie
+// data ma się czytać jak zdanie, a nie jak numer, bo to pierwsza rzecz jaką widać na stronie.
+function formatDateReadablePL(dateStr: string): string {
+  const [, m, d] = dateStr.split("-").map(Number)
+  return `${weekdayPL(dateStr)}, ${d} ${MONTHS_GENITIVE_PL[(m || 1) - 1] || ""}`
 }
 
 function weekdayPL(dateStr: string) {
@@ -992,12 +1002,15 @@ export default function DashboardPage() {
                   </div>
 
                   <div>
-                    <p className={cn(score.className, "text-[11px] uppercase tracking-[0.25em] text-slate-400")}>
-                      {weekdayPL(nearestMatch.date)}
-                    </p>
-                    <h2 className={cn(display.className, "text-3xl sm:text-4xl font-bold tracking-tight text-white mt-0.5")}>
-                      {formatDatePL(nearestMatch.date)}
+                    {/* Zdanie zamiast surowej daty ("Poniedziałek, 31 sierpnia" czyta się od razu,
+                        "31.08.2026" wymaga chwili na rozszyfrowanie) — to pierwsza rzecz, jaką widać
+                        po wejściu na stronę, więc ma się czytać z jednego rzutu oka. */}
+                    <h2 className={cn(display.className, "text-2xl sm:text-3xl lg:text-[2.15rem] font-bold tracking-tight text-white leading-tight")}>
+                      {formatDateReadablePL(nearestMatch.date)}
                     </h2>
+                    <p className={cn(score.className, "text-xs text-slate-400 tracking-wide mt-1")}>
+                      {formatDatePL(nearestMatch.date)}
+                    </p>
                     <div className="flex items-center gap-4 text-xs font-semibold text-slate-300 mt-3 flex-wrap">
                       <span className="flex items-center gap-1.5 text-white">
                         <Timer className="h-4 w-4 text-[#FFD23F]" />
@@ -1145,37 +1158,35 @@ export default function DashboardPage() {
             </Link>
           )}
 
-          {/* 2.5 SPONSOR GŁÓWNY — jedyne miejsce w appce, gdzie ESCO ma realną, dużą ekspozycję
-              (reszta stron ma tylko mały pasek-marquee w nagłówku). Obok od razu pokazujemy zasadę
-              kolejnych miejsc sponsorskich — to ten sam zestaw kolorów co w Finansach/Statystykach. */}
-          <div className="rounded-2xl border border-slate-200/80 bg-white px-4 sm:px-5 py-3.5 shadow-xs animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-3.5 min-w-0">
-                <img
-                  src="/logos/esco.png"
-                  alt="ESCO Jaworze"
-                  className="h-11 w-11 shrink-0 rounded-2xl border border-slate-200 bg-white object-contain p-1.5 shadow-xs"
-                />
-                <div className="min-w-0">
-                  <span className="inline-flex items-center gap-1 rounded-md bg-[#FF5A5F]/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-[#E0454A]">
-                    Sponsor Główny
-                  </span>
-                  <p className="text-sm font-black text-slate-900 truncate mt-0.5">ESCO Jaworze</p>
-                </div>
-              </div>
+          {/* 2.5 SPONSOR GŁÓWNY — duży, dedykowany baner (nie mały pasek jak wcześniej), żeby
+              faktycznie dało się tu kiedyś wkleić prawdziwą grafikę reklamową od ESCO zamiast
+              samego logo na tle w barwach marki. Gdy taka grafika powstanie: podmień <img> niżej
+              na pełnowymiarowe zdjęcie z `object-cover` wypełniające cały kontener (`absolute
+              inset-0 h-full w-full`) i usuń resztę zawartości — kontener ma już właściwy kształt
+              i wysokość. "Wolne miejsca dla sponsora" (marquee z "+") zostają na Statystykach/
+              Finansach — tu jest wyłącznie ekspozycja PRAWDZIWEGO, płacącego sponsora. */}
+          <div
+            className="relative overflow-hidden rounded-[28px] border border-white/10 shadow-[0_20px_50px_-20px_rgba(224,69,74,0.45)] animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both"
+            style={{ background: "linear-gradient(120deg, #C93338 0%, #FF5A5F 55%, #FF8B8E 100%)" }}
+          >
+            <div className="absolute inset-0 pointer-events-none opacity-30" style={netPattern} />
+            <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-3xl pointer-events-none" />
+            <div className="absolute -left-10 -bottom-16 h-56 w-56 rounded-full bg-black/10 blur-3xl pointer-events-none" />
 
-              <div className="flex items-center gap-2 shrink-0">
-                {[COBALT, MINT, YELLOW].map((color, i) => (
-                  <div
-                    key={i}
-                    title="Wolne miejsce dla sponsora"
-                    className="flex h-8 w-8 items-center justify-center rounded-xl border border-dashed"
-                    style={{ borderColor: `${color}55`, color, background: `${color}0D` }}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </div>
-                ))}
-                <span className="ml-1 hidden text-[11px] font-bold text-slate-400 sm:inline">Zostań sponsorem</span>
+            <div className="relative z-10 flex flex-col sm:flex-row items-center gap-5 sm:gap-7 px-6 sm:px-10 py-8 sm:py-10 text-center sm:text-left">
+              <img
+                src="/logos/esco.png"
+                alt="ESCO Jaworze"
+                className="h-20 w-20 sm:h-24 sm:w-24 shrink-0 rounded-3xl border-4 border-white/30 bg-white object-contain p-2.5 shadow-xl"
+              />
+              <div className="min-w-0">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-white">
+                  Sponsor Główny Sezonu
+                </span>
+                <h2 className={cn(display.className, "text-2xl sm:text-3xl font-bold text-white mt-2")}>ESCO Jaworze</h2>
+                <p className="text-xs sm:text-sm text-white/85 font-medium mt-1.5 max-w-md">
+                  Dzięki wsparciu ESCO drużyna ma opłaconą halę i sprzęt na cały sezon.
+                </p>
               </div>
             </div>
           </div>
