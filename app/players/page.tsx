@@ -26,7 +26,11 @@ import {
   CheckSquare,
   Square,
   ChevronDown,
-  GripVertical
+  GripVertical,
+  KeyRound,
+  RefreshCw,
+  Copy,
+  Check
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
@@ -166,6 +170,32 @@ export default function PlayersPage() {
   const [newFullName, setNewFullName] = useState("")
   const [newEmail, setNewEmail] = useState("")
   const [newIsCore, setNewIsCore] = useState(false)
+  // Formularz dodawania gracza wcześniej w ogóle nie zbierał hasła — zapisywał wiersz z
+  // `password: null`, więc nowo dodany zawodnik nie mógł się NIGDY zalogować (trigger hashujący
+  // pomija puste hasło, a appka nie ma żadnego "zapomniałem hasła"). `newPassword` startuje od
+  // razu z wylosowanym, sensownym hasłem — admin może je zostawić albo nadpisać swoim.
+  const [newPassword, setNewPassword] = useState("")
+  // Po udanym dodaniu gracza modal NIE znika od razu — pokazuje hasło startowe do przekazania
+  // (np. na WhatsAppie), bo to jedyny moment kiedy ktokolwiek jeszcze je zobaczy w czystej postaci.
+  const [addedPlayerInfo, setAddedPlayerInfo] = useState<{ name: string; password: string } | null>(null)
+  const [passwordCopied, setPasswordCopied] = useState(false)
+
+  // Prosty generator: spełnia od razu tę samą politykę haseł co Ustawienia (min. 6 znaków,
+  // wielka litera, znak specjalny) — słowo z siatkówką + 3 cyfry + wykrzyknik, łatwe do
+  // przeczytania i przekazania głosowo/SMS-em, nie losowy bełkot.
+  function generateTempPassword(): string {
+    const words = ["Siatka", "Volley", "Serwis", "Blok", "Smecz", "Set"]
+    const word = words[Math.floor(Math.random() * words.length)]
+    const digits = Math.floor(100 + Math.random() * 900)
+    return `${word}${digits}!`
+  }
+
+  function closeAddPlayerModal() {
+    setIsAdding(false)
+    setAddedPlayerInfo(null)
+    setPasswordCopied(false)
+  }
+
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const [selectedPlayer, setSelectedPlayer] = useState<GlobalPlayer | null>(null)
@@ -251,7 +281,7 @@ export default function PlayersPage() {
       const pendingList: GlobalPlayer[] = []
 
       dbPlayers.forEach((p) => {
-        const fullName = p.full_name || p.name || ""
+        const fullName = p.full_name || ""
         const idKey = String(p.id).toLowerCase().trim()
         const nameKey = String(fullName).toLowerCase().trim()
 
@@ -276,7 +306,7 @@ export default function PlayersPage() {
           core_added_at: p.core_added_at ?? p.created_at
         }
 
-        if (p.player_status_id === 3 || p.role_id === 3 || p.role === "pending") {
+        if (p.player_status_id === 3 || p.role_id === 3) {
           pendingList.push(playerObj)
         } else {
           allPlayerList.push(playerObj)
@@ -613,10 +643,13 @@ export default function PlayersPage() {
       coreOrderVal = currentMax + 1
     }
 
+    const passwordToUse = newPassword.trim() || generateTempPassword()
+
     const { error } = await supabase.from("players").insert([
       {
         full_name: newFullName.trim(),
         email: emailToUse,
+        password: passwordToUse,
         player_status_id: activeId,
         role_id: 2,
         is_core_roster: newIsCore,
@@ -628,11 +661,14 @@ export default function PlayersPage() {
     if (error) {
       notify(`Błąd zapisu w bazie danych: ${error.message}`)
     } else {
-      notify(`Dodano "${newFullName.trim()}" do bazy.`)
+      // Zamiast od razu zamykać modal — pokazujemy hasło startowe do przekazania graczowi.
+      // To jedyny moment kiedy ktokolwiek (łącznie z adminem) jeszcze je zobaczy w czystej
+      // postaci — trigger w bazie hashuje je bezpowrotnie zaraz po zapisie.
+      setAddedPlayerInfo({ name: newFullName.trim(), password: passwordToUse })
       setNewFullName("")
       setNewEmail("")
       setNewIsCore(false)
-      setIsAdding(false)
+      setNewPassword("")
       await fetchPlayers()
     }
 
@@ -870,7 +906,10 @@ export default function PlayersPage() {
                   Eksport CSV
                 </button>
                 <button
-                  onClick={() => setIsAdding(true)}
+                  onClick={() => {
+                    setNewPassword(generateTempPassword())
+                    setIsAdding(true)
+                  }}
                   className="h-10 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 text-white cursor-pointer active:scale-[0.97] shadow-md transition-all"
                   style={{ background: COBALT, boxShadow: `0 4px 14px -4px ${COBALT}80` }}
                 >
@@ -1653,16 +1692,68 @@ export default function PlayersPage() {
       {/* MODAL DODAWANIA GRACZA */}
       <Modal
         open={isAdding}
-        onClose={() => setIsAdding(false)}
+        onClose={closeAddPlayerModal}
         overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
         cardClassName="relative w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl border border-slate-200 space-y-4"
       >
+        {addedPlayerInfo ? (
+          // Sukces — hasło startowe pokazane JEDEN RAZ do skopiowania i przekazania graczowi.
+          // Baza od razu trzyma tylko jego bcrypt-hash, więc to ostatni moment kiedy ktokolwiek
+          // (łącznie z adminem) widzi je w czystej postaci.
+          <div className="space-y-4">
+            <div className="flex flex-col items-center gap-3 pt-2 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#00C48C]/10 text-[#00875F]">
+                <CheckCircle2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h2 className={cn(display.className, "text-base font-bold text-slate-900")}>
+                  Dodano "{addedPlayerInfo.name}"
+                </h2>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  Przekaż mu to hasło startowe — po zamknięciu tego okna nie da się go już podejrzeć.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#FFD23F]/40 bg-[#FFD23F]/[0.08] px-4 py-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <KeyRound className="h-4 w-4 text-[#8A6D00] shrink-0" />
+                <span className={cn(score.className, "text-sm font-semibold text-[#5C4700] tracking-wide truncate")}>
+                  {addedPlayerInfo.password}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(addedPlayerInfo.password)
+                  setPasswordCopied(true)
+                  setTimeout(() => setPasswordCopied(false), 2000)
+                }}
+                className="flex items-center gap-1.5 rounded-xl bg-white border border-[#FFD23F]/50 px-3 py-1.5 text-xs font-bold text-[#8A6D00] hover:bg-[#FFD23F]/10 transition-all cursor-pointer active:scale-95 shrink-0"
+              >
+                {passwordCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                {passwordCopied ? "Skopiowano" : "Kopiuj"}
+              </button>
+            </div>
+
+            <div className="pt-2 flex justify-end border-t border-slate-100">
+              <Button
+                type="button"
+                size="sm"
+                onClick={closeAddPlayerModal}
+                className="rounded-xl font-bold bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white cursor-pointer shadow-md shadow-[#2C4BFF]/20"
+              >
+                Gotowe
+              </Button>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={handleAddPlayer} className="space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h2 className={cn(display.className, "text-base font-bold text-slate-900")}>Dodaj nowego zawodnika do bazy</h2>
             <button
               type="button"
-              onClick={() => setIsAdding(false)}
+              onClick={closeAddPlayerModal}
               className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer active:scale-90 transition-transform"
             >
               <X className="h-5 w-5" />
@@ -1691,6 +1782,28 @@ export default function PlayersPage() {
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 outline-none focus:border-[#2C4BFF] focus:bg-white"
               />
             </div>
+            <div>
+              <label className="mb-1 flex items-center justify-between font-semibold text-slate-700">
+                <span className="flex items-center gap-1.5"><KeyRound className="h-3.5 w-3.5 text-slate-400" /> Hasło startowe</span>
+                <button
+                  type="button"
+                  onClick={() => setNewPassword(generateTempPassword())}
+                  className="flex items-center gap-1 text-[11px] font-bold text-[#2C4BFF] hover:text-[#1D3AE8] cursor-pointer"
+                  title="Wylosuj inne"
+                >
+                  <RefreshCw className="h-3 w-3" /> Wylosuj
+                </button>
+              </label>
+              <input
+                type="text"
+                required
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Hasło, którym gracz zaloguje się pierwszy raz"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 outline-none focus:border-[#2C4BFF] focus:bg-white font-mono"
+              />
+              <p className="mt-1 text-[10px] text-slate-400">Zobaczysz je jeszcze raz po zapisaniu — przekaż je graczowi, np. na WhatsAppie. Będzie mógł je potem zmienić w Ustawieniach.</p>
+            </div>
 
             <div
               className="flex items-center gap-2 p-3 rounded-xl bg-[#2C4BFF]/[0.05] border border-[#2C4BFF]/20 cursor-pointer"
@@ -1709,7 +1822,7 @@ export default function PlayersPage() {
           </div>
 
           <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
-            <Button type="button" variant="outline" size="sm" onClick={() => setIsAdding(false)} className="rounded-xl cursor-pointer">
+            <Button type="button" variant="outline" size="sm" onClick={closeAddPlayerModal} className="rounded-xl cursor-pointer">
               Anuluj
             </Button>
             <Button
@@ -1722,6 +1835,7 @@ export default function PlayersPage() {
             </Button>
           </div>
         </form>
+        )}
       </Modal>
 
       {/* MODAL HISTORII GRACZA */}

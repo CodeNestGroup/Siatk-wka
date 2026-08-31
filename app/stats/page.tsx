@@ -131,8 +131,8 @@ export default function StatsPage() {
         const foundPlayer = (playersData || []).find((p: any) => p.id === reg.player_id)
         return {
           id: reg.player_id,
-          name: foundPlayer?.full_name || foundPlayer?.name || "Zawodnik",
-          full_name: foundPlayer?.full_name || foundPlayer?.name || "Zawodnik",
+          name: foundPlayer?.full_name || "Zawodnik",
+          full_name: foundPlayer?.full_name || "Zawodnik",
           paid: reg.is_paid || reg.paid
         }
       })

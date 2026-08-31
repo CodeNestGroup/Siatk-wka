@@ -422,8 +422,8 @@ export default function DashboardPage() {
         const playerInfo = rawPlayers?.find((p: any) => p.id === reg.player_id)
         return {
           id: reg.player_id,
-          name: playerInfo?.full_name || playerInfo?.name || "Zawodnik",
-          full_name: playerInfo?.full_name || playerInfo?.name || "Zawodnik",
+          name: playerInfo?.full_name || "Zawodnik",
+          full_name: playerInfo?.full_name || "Zawodnik",
           email: playerInfo?.email || "",
           paid: reg.is_paid,
           is_paid: reg.is_paid,
