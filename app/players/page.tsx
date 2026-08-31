@@ -136,6 +136,10 @@ export default function PlayersPage() {
   // dokładnie ta sama konwencja co `idx`/`actualIdx` używane już przy strzałkach.
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  // Czy wskaźnik ma się pojawić NAD czy POD wierszem, nad którym jest teraz kursor — liczone
+  // z pozycji kursora względem połowy wysokości wiersza. Bez tego samo podświetlenie całego
+  // wiersza (poprzednia wersja) nie mówiło, czy gracz wyląduje przed nim czy za nim.
+  const [dragOverPosition, setDragOverPosition] = useState<"before" | "after" | null>(null)
 
   // Skrócone listy graczy na mobile (patrz LIST_PREVIEW_LIMIT niżej) — wracają do skrótu
   // przy każdej zmianie zakładki/wyszukiwania, żeby nie zostać przypadkiem "rozwinięte" po cichu.
@@ -356,14 +360,18 @@ export default function PlayersPage() {
   // z listy i wstawiamy w nowym miejscu, potem renumerujemy WSZYSTKICH 1..N. To jedyny prosty
   // sposób, żeby przesunięcie np. z #2 na #10 poprawnie przesunęło też wszystkich pomiędzy,
   // a nie tylko zamieniło miejscami dwie osoby.
-  async function moveCoreOrderTo(fromIndex: number, toIndex: number) {
-    if (fromIndex === toIndex) return
+  async function moveCoreOrderTo(fromIndex: number, rawTargetIndex: number) {
     if (fromIndex < 0 || fromIndex >= allCorePlayersSorted.length) return
-    if (toIndex < 0 || toIndex >= allCorePlayersSorted.length) return
+    if (rawTargetIndex < 0 || rawTargetIndex > allCorePlayersSorted.length) return
 
     const reordered = [...allCorePlayersSorted]
     const [moved] = reordered.splice(fromIndex, 1)
-    reordered.splice(toIndex, 0, moved)
+    // `rawTargetIndex` liczony jest z listy SPRZED wyjęcia gracza (tak wygodniej liczy się
+    // "przed/za wierszem X" po stronie handlera przeciągania) — po `splice` usuwającym gracza
+    // wszystko za nim przesuwa się o jeden w lewo, więc trzeba to skorygować przed wstawieniem.
+    const insertIndex = rawTargetIndex > fromIndex ? rawTargetIndex - 1 : rawTargetIndex
+    if (insertIndex === fromIndex) return
+    reordered.splice(insertIndex, 0, moved)
 
     const updates = reordered.map((p, i) => ({ id: p.id, core_order: i + 1 }))
 
@@ -391,22 +399,35 @@ export default function PlayersPage() {
   function handleDragOverRow(e: React.DragEvent, index: number) {
     e.preventDefault()
     e.dataTransfer.dropEffect = "move"
+    // Górna połowa wiersza = wyląduje NAD nim, dolna połowa = POD nim — to samo, co widać
+    // na żywo w podświetleniu, więc drop trafia dokładnie tam, gdzie sugerowała linia.
+    const rect = e.currentTarget.getBoundingClientRect()
+    const position: "before" | "after" = e.clientY - rect.top > rect.height / 2 ? "after" : "before"
     if (index !== dragOverIndex) setDragOverIndex(index)
+    if (position !== dragOverPosition) setDragOverPosition(position)
   }
 
   function handleDragEnd() {
     setDraggedIndex(null)
     setDragOverIndex(null)
+    setDragOverPosition(null)
   }
 
   async function handleDropOnRow(e: React.DragEvent, index: number) {
     e.preventDefault()
     const raw = e.dataTransfer.getData("text/plain")
     const from = raw === "" ? null : Number(raw)
+    // Pozycja liczona od nowa z tego samego zdarzenia (nie z osobnego state'u) — ten sam powód
+    // co przy `from`: React mógłby jeszcze nie zdążyć przeliczyć `dragOverPosition` z ostatniego
+    // dragover, zanim odpali się drop.
+    const rect = e.currentTarget.getBoundingClientRect()
+    const position: "before" | "after" = e.clientY - rect.top > rect.height / 2 ? "after" : "before"
     setDraggedIndex(null)
     setDragOverIndex(null)
-    if (from !== null && !Number.isNaN(from) && from !== index) {
-      await moveCoreOrderTo(from, index)
+    setDragOverPosition(null)
+    if (from !== null && !Number.isNaN(from)) {
+      const rawTargetIndex = position === "after" ? index + 1 : index
+      await moveCoreOrderTo(from, rawTargetIndex)
     }
   }
 
@@ -1023,9 +1044,13 @@ export default function PlayersPage() {
                         onDragEnd={handleDragEnd}
                         style={{ animationDelay: `${Math.min(idx, 10) * 35}ms` }}
                         className={cn(
-                          "group flex items-center justify-between p-2 sm:p-2.5 rounded-2xl bg-white border border-l-4 border-slate-200/90 border-l-[#2C4BFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
+                          "group relative flex items-center justify-between p-2 sm:p-2.5 rounded-2xl bg-white border border-l-4 border-slate-200/90 border-l-[#2C4BFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
                           draggedIndex === idx && "opacity-40",
-                          dragOverIndex === idx && draggedIndex !== idx && "ring-2 ring-[#2C4BFF]/50"
+                          // Zamiast obwódki wokół całego wiersza (nie było wiadomo, przed czy za
+                          // nim wyląduje gracz) — gruba, jaskrawa linia dokładnie na górnej albo
+                          // dolnej krawędzi, zależnie od tego, w której połowie wiersza jest kursor.
+                          dragOverIndex === idx && draggedIndex !== idx && dragOverPosition === "before" && "border-t-4 border-t-[#FFD23F]",
+                          dragOverIndex === idx && draggedIndex !== idx && dragOverPosition === "after" && "border-b-4 border-b-[#FFD23F]"
                         )}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
@@ -1111,9 +1136,10 @@ export default function PlayersPage() {
                         onDragEnd={handleDragEnd}
                         style={{ animationDelay: `${Math.min(rIdx, 10) * 35}ms` }}
                         className={cn(
-                          "group flex items-center justify-between p-2 sm:p-2.5 rounded-2xl bg-white border border-l-4 border-slate-200/90 border-l-[#7A5CFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
+                          "group relative flex items-center justify-between p-2 sm:p-2.5 rounded-2xl bg-white border border-l-4 border-slate-200/90 border-l-[#7A5CFF] shadow-xs hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
                           draggedIndex === actualIdx && "opacity-40",
-                          dragOverIndex === actualIdx && draggedIndex !== actualIdx && "ring-2 ring-[#7A5CFF]/50"
+                          dragOverIndex === actualIdx && draggedIndex !== actualIdx && dragOverPosition === "before" && "border-t-4 border-t-[#FFD23F]",
+                          dragOverIndex === actualIdx && draggedIndex !== actualIdx && dragOverPosition === "after" && "border-b-4 border-b-[#FFD23F]"
                         )}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
