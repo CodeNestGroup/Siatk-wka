@@ -1174,41 +1174,18 @@ export default function DashboardPage() {
             </Link>
           )}
 
-          {/* 2.5 SPONSOR GŁÓWNY — duży, dedykowany baner (nie mały pasek jak wcześniej), żeby
-              faktycznie dało się tu kiedyś wkleić prawdziwą grafikę reklamową od ESCO zamiast
-              samego logo na tle w barwach marki. Gdy taka grafika powstanie: podmień <img> niżej
-              na pełnowymiarowe zdjęcie z `object-cover` wypełniające cały kontener (`absolute
-              inset-0 h-full w-full`) i usuń resztę zawartości — kontener ma już właściwy kształt
-              i wysokość. "Wolne miejsca dla sponsora" (marquee z "+") zostają na Statystykach/
-              Finansach — tu jest wyłącznie ekspozycja PRAWDZIWEGO, płacącego sponsora. */}
-          <div
-            className="relative overflow-hidden rounded-[28px] border border-white/10 shadow-[0_20px_50px_-20px_rgba(224,69,74,0.45)] animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both"
-            style={{ background: "linear-gradient(120deg, #C93338 0%, #FF5A5F 55%, #FF8B8E 100%)" }}
-          >
-            <div className="absolute inset-0 pointer-events-none opacity-30" style={netPattern} />
-            <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-3xl pointer-events-none" />
-            <div className="absolute -left-10 -bottom-16 h-56 w-56 rounded-full bg-black/10 blur-3xl pointer-events-none" />
-
-            <div className="relative z-10 flex flex-col sm:flex-row items-center gap-6 sm:gap-8 px-6 sm:px-10 py-8 sm:py-10 text-center sm:text-left">
-              {/* Prawdziwe logo/wordmark od sponsora (dostarczone przez klub) — białe podłoże,
-                  bo logo ma przezroczyste tło i ciemnogranatowy tekst, nieczytelny wprost na czerwieni. */}
-              <div className="shrink-0 rounded-3xl bg-white p-4 sm:p-5 shadow-xl">
-                <img
-                  src="/logos/esco-wordmark.png"
-                  alt="ESCO Jaworze"
-                  className="h-12 sm:h-16 w-auto object-contain"
-                />
-              </div>
-              <div className="min-w-0">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-white">
-                  Sponsor Główny Sezonu
-                </span>
-                <h2 className={cn(display.className, "text-xl sm:text-2xl font-bold text-white mt-2")}>ESCO Jaworze</h2>
-                <p className="text-xs sm:text-sm text-white/85 font-medium mt-1.5 max-w-md">
-                  Dzięki wsparciu ESCO drużyna ma opłaconą halę i sprzęt na cały sezon.
-                </p>
-              </div>
-            </div>
+          {/* 2.5 SPONSOR GŁÓWNY — czysta, biała karta z samym logo, bez żadnych podpisów/badge'y/
+              koloru marki w tle. Logo dostarczone przez klub (public/logos/esco-wordmark.png) samo
+              niesie identyfikację — nie potrzeba dopowiadać "kto/co/gdzie" obok. Gdy sponsor da
+              docelową grafikę reklamową zamiast samego logo: podmień <img> na pełnowymiarowe
+              zdjęcie z `object-cover` wypełniające cały kontener (`absolute inset-0 h-full w-full`),
+              kontener ma już właściwy kształt. */}
+          <div className="rounded-[28px] border border-slate-200/80 bg-white shadow-xs flex items-center justify-center px-8 py-10 sm:py-14 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+            <img
+              src="/logos/esco-wordmark.png"
+              alt="ESCO Jaworze — Sponsor Główny"
+              className="h-16 sm:h-24 w-auto max-w-full object-contain"
+            />
           </div>
 
           {/* 3. HARMONOGRAM MECZÓW I PRZYCISKI AKCJI */}
