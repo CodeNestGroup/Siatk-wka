@@ -93,6 +93,17 @@ function formatDateReadablePL(dateStr: string): string {
   return `${weekdayPL(dateStr)}, ${d} ${MONTHS_GENITIVE_PL[(m || 1) - 1] || ""}`
 }
 
+// Gdy najbliższy mecz jest dziś albo jutro, sama data ("Poniedziałek, 31 sierpnia") nie oddaje
+// tego, że to już "zaraz" — "Mecz dzisiaj!"/"Mecz jutro!" widać i rozumie się bez czytania
+// kalendarza w głowie. Pełna data zostaje niżej jako mniejsze odniesienie, nie znika.
+function matchUrgencyLabel(dateStr: string): string | null {
+  const todayStr = new Date().toISOString().split("T")[0]
+  const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split("T")[0]
+  if (dateStr === todayStr) return "Mecz dzisiaj!"
+  if (dateStr === tomorrowStr) return "Mecz jutro!"
+  return null
+}
+
 function weekdayPL(dateStr: string) {
   const d = new Date(`${dateStr}T00:00:00`)
   return DAYS_PL[d.getDay()] || ""
@@ -990,8 +1001,12 @@ export default function DashboardPage() {
                 {/* Lewa część biletu — informacje o meczu */}
                 <div className="space-y-3.5">
                   <div className="flex items-center gap-2.5 flex-wrap">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#2C4BFF]/20 border border-[#2C4BFF]/40 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-[#8FA1FF]">
-                      <Sparkles className="h-3 w-3 text-[#FFD23F]" />
+                    {/* Pełny, jaskrawy żółty zamiast przezroczystego niebieskiego na niebieskim tle —
+                        poprzednia wersja ginęła na granatowym tle hero, trudno było od razu rozpoznać,
+                        że to WŁAŚNIE ten badge oznacza najbliższy mecz. Żółty to jedyny w appce kolor
+                        zarezerwowany wyłącznie pod uwypuklenia, więc to naturalne miejsce na niego. */}
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFD23F] px-3 py-1 text-[10px] font-black uppercase tracking-wider text-[#0B1120] shadow-lg shadow-[#FFD23F]/40">
+                      <Sparkles className="h-3 w-3" />
                       Najbliższe spotkanie
                     </span>
                     {nearestMatch.title && nearestMatch.title !== nearestMatch.date && (
@@ -1004,12 +1019,13 @@ export default function DashboardPage() {
                   <div>
                     {/* Zdanie zamiast surowej daty ("Poniedziałek, 31 sierpnia" czyta się od razu,
                         "31.08.2026" wymaga chwili na rozszyfrowanie) — to pierwsza rzecz, jaką widać
-                        po wejściu na stronę, więc ma się czytać z jednego rzutu oka. */}
-                    <h2 className={cn(display.className, "text-2xl sm:text-3xl lg:text-[2.15rem] font-bold tracking-tight text-white leading-tight")}>
-                      {formatDateReadablePL(nearestMatch.date)}
+                        po wejściu na stronę, więc ma się czytać z jednego rzutu oka. Gdy mecz jest
+                        dziś/jutro, ta sama linijka pokazuje to wprost zamiast samej daty. */}
+                    <h2 className={cn(display.className, "text-2xl sm:text-3xl lg:text-[2.15rem] font-bold tracking-tight leading-tight", matchUrgencyLabel(nearestMatch.date) ? "text-[#FFD23F]" : "text-white")}>
+                      {matchUrgencyLabel(nearestMatch.date) || formatDateReadablePL(nearestMatch.date)}
                     </h2>
                     <p className={cn(score.className, "text-xs text-slate-400 tracking-wide mt-1")}>
-                      {formatDatePL(nearestMatch.date)}
+                      {matchUrgencyLabel(nearestMatch.date) ? `${formatDateReadablePL(nearestMatch.date)} • ` : ""}{formatDatePL(nearestMatch.date)}
                     </p>
                     <div className="flex items-center gap-4 text-xs font-semibold text-slate-300 mt-3 flex-wrap">
                       <span className="flex items-center gap-1.5 text-white">
@@ -1173,17 +1189,21 @@ export default function DashboardPage() {
             <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-3xl pointer-events-none" />
             <div className="absolute -left-10 -bottom-16 h-56 w-56 rounded-full bg-black/10 blur-3xl pointer-events-none" />
 
-            <div className="relative z-10 flex flex-col sm:flex-row items-center gap-5 sm:gap-7 px-6 sm:px-10 py-8 sm:py-10 text-center sm:text-left">
-              <img
-                src="/logos/esco.png"
-                alt="ESCO Jaworze"
-                className="h-20 w-20 sm:h-24 sm:w-24 shrink-0 rounded-3xl border-4 border-white/30 bg-white object-contain p-2.5 shadow-xl"
-              />
+            <div className="relative z-10 flex flex-col sm:flex-row items-center gap-6 sm:gap-8 px-6 sm:px-10 py-8 sm:py-10 text-center sm:text-left">
+              {/* Prawdziwe logo/wordmark od sponsora (dostarczone przez klub) — białe podłoże,
+                  bo logo ma przezroczyste tło i ciemnogranatowy tekst, nieczytelny wprost na czerwieni. */}
+              <div className="shrink-0 rounded-3xl bg-white p-4 sm:p-5 shadow-xl">
+                <img
+                  src="/logos/esco-wordmark.png"
+                  alt="ESCO Jaworze"
+                  className="h-12 sm:h-16 w-auto object-contain"
+                />
+              </div>
               <div className="min-w-0">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-white">
                   Sponsor Główny Sezonu
                 </span>
-                <h2 className={cn(display.className, "text-2xl sm:text-3xl font-bold text-white mt-2")}>ESCO Jaworze</h2>
+                <h2 className={cn(display.className, "text-xl sm:text-2xl font-bold text-white mt-2")}>ESCO Jaworze</h2>
                 <p className="text-xs sm:text-sm text-white/85 font-medium mt-1.5 max-w-md">
                   Dzięki wsparciu ESCO drużyna ma opłaconą halę i sprzęt na cały sezon.
                 </p>
