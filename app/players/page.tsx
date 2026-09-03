@@ -202,6 +202,13 @@ export default function PlayersPage() {
   const [playerHistory, setPlayerHistory] = useState<PlayerHistory[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
 
+  // Reset hasła przez admina — jedyna droga "odzyskania dostępu" bez wysyłki maili (appka nie
+  // ma do tego backendu). Ta sama mechanika co przy dodawaniu zawodnika: nowe hasło pokazuje
+  // się raz, do przekazania graczowi, i od razu jest hashowane w bazie przez istniejący trigger.
+  const [resetPasswordValue, setResetPasswordValue] = useState<string | null>(null)
+  const [resetPasswordCopied, setResetPasswordCopied] = useState(false)
+  const [isResettingPassword, setIsResettingPassword] = useState(false)
+
   const isAdmin =
     user?.role === "admin" ||
     user?.is_admin ||
@@ -698,6 +705,27 @@ export default function PlayersPage() {
     }
   }
 
+  // Jedyna droga "odzyskania hasła" bez wysyłki maili — admin generuje nowe hasło startowe
+  // i przekazuje je graczowi sam (WhatsApp, SMS, na hali). Ta sama funkcja hashująca w bazie
+  // co przy dodawaniu zawodnika i zmianie hasła w Ustawieniach.
+  async function handleResetPassword(playerId: string) {
+    setIsResettingPassword(true)
+    const newPass = generateTempPassword()
+
+    const { error } = await supabase.rpc("set_player_password", {
+      p_player_id: playerId,
+      p_new_password: newPass
+    })
+
+    if (error) {
+      notify(`Błąd resetu hasła: ${error.message}`)
+    } else {
+      setResetPasswordValue(newPass)
+      setResetPasswordCopied(false)
+    }
+    setIsResettingPassword(false)
+  }
+
   async function openPlayerHistory(player: GlobalPlayer) {
     if (isSelectionMode) {
       toggleBulkSelect(player.id)
@@ -705,6 +733,8 @@ export default function PlayersPage() {
     }
 
     setSelectedPlayer(player)
+    setResetPasswordValue(null)
+    setResetPasswordCopied(false)
     setIsLoadingHistory(true)
 
     // Historia rejestracji żyje w `match_registrations`, nie w polu `players` na `matches`
@@ -1859,6 +1889,42 @@ export default function PlayersPage() {
                 <X className="h-5 w-5" />
               </button>
             </div>
+
+            {isAdmin && (
+              resetPasswordValue ? (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-[#FFD23F]/40 bg-[#FFD23F]/[0.08] px-4 py-3 shrink-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <KeyRound className="h-4 w-4 text-[#8A6D00] shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-[#8A6D00]">Nowe hasło startowe</p>
+                      <span className={cn(score.className, "text-sm font-semibold text-[#5C4700] tracking-wide")}>{resetPasswordValue}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(resetPasswordValue)
+                      setResetPasswordCopied(true)
+                      setTimeout(() => setResetPasswordCopied(false), 2000)
+                    }}
+                    className="flex items-center gap-1.5 rounded-xl bg-white border border-[#FFD23F]/50 px-3 py-1.5 text-xs font-bold text-[#8A6D00] hover:bg-[#FFD23F]/10 transition-all cursor-pointer active:scale-95 shrink-0"
+                  >
+                    {resetPasswordCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    {resetPasswordCopied ? "Skopiowano" : "Kopiuj"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isResettingPassword}
+                  onClick={() => handleResetPassword(selectedPlayer.id)}
+                  className="mb-4 flex items-center gap-1.5 self-start text-xs font-bold text-[#2C4BFF] hover:text-[#1D3AE8] cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  {isResettingPassword ? "Resetowanie..." : "Resetuj hasło (dla gracza, który je zapomniał)"}
+                </button>
+              )
+            )}
 
             <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
               <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">

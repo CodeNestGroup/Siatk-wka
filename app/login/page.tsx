@@ -42,6 +42,12 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  // Appka nie wysyła żadnych maili (nie ma do tego backendu), więc nie da się zrobić
+  // klasycznego "wyślij link resetujący na e-mail" bez budowania nowej infrastruktury.
+  // Zamiast udawać, że to istnieje — jasno mówimy, że reset robi administrator (patrz
+  // przycisk "Resetuj hasło" przy graczu w /players, dokładnie ta sama mechanika co przy
+  // dodawaniu nowego zawodnika: nowe hasło startowe pokazywane raz do przekazania graczowi).
+  const [showForgotHelp, setShowForgotHelp] = useState(false)
 
   const passwordRegex = /^(?=.*[A-Z])(?=.*[!@#$&*]).{6,}$/
 
@@ -263,9 +269,18 @@ export default function LoginPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Lock className="h-3.5 w-3.5 text-[#2C4BFF]" /> Hasło
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Lock className="h-3.5 w-3.5 text-[#2C4BFF]" /> Hasło
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotHelp(!showForgotHelp)}
+                      className="text-[11px] font-bold text-[#2C4BFF] hover:text-[#1D3AE8] cursor-pointer"
+                    >
+                      Zapomniałeś hasła?
+                    </button>
+                  </div>
                   <input
                     type="password"
                     required
@@ -274,6 +289,11 @@ export default function LoginPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-xs font-bold text-slate-900 outline-none focus:border-[#2C4BFF] focus:ring-2 focus:ring-[#2C4BFF]/20 focus:bg-white transition-all"
                   />
+                  {showForgotHelp && (
+                    <p className="rounded-xl bg-[#2C4BFF]/[0.06] border border-[#2C4BFF]/15 px-3 py-2.5 text-[11px] font-medium text-slate-600 animate-in fade-in slide-in-from-top-1">
+                      Skontaktuj się z administratorem klubu — ustawi Ci nowe hasło startowe, którym się zalogujesz.
+                    </p>
+                  )}
                 </div>
 
                 <Button

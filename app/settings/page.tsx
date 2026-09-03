@@ -6,7 +6,6 @@ import {
   Settings,
   User,
   Lock,
-  Bell,
   CheckCircle2,
   Save,
   KeyRound,
@@ -31,29 +30,6 @@ const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "600", "700"
 
 const COBALT = "#2C4BFF"
 
-// Prosty, samodzielny przełącznik — zastępuje gołe checkboxy przeglądarki
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors cursor-pointer active:scale-95",
-        checked ? "bg-[#2C4BFF]" : "bg-slate-200"
-      )}
-    >
-      <span
-        className={cn(
-          "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200",
-          checked ? "translate-x-[22px]" : "translate-x-0.5"
-        )}
-      />
-    </button>
-  )
-}
-
 export default function SettingsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
@@ -72,10 +48,6 @@ export default function SettingsPage() {
   // Stany płatności (dla admina)
   const [blikNumber, setBlikNumber] = useState("+48 600 000 000")
   const [bankAccount, setBankAccount] = useState("12 3456 7890 0000 1111 2222 3333")
-
-  // Powiadomienia
-  const [notifyEmail, setNotifyEmail] = useState(true)
-  const [notifyPush, setNotifyPush] = useState(true)
 
   const passwordRegex = /^(?=.*[A-Z])(?=.*[!@#$&*]).{6,}$/
 
@@ -97,19 +69,6 @@ export default function SettingsPage() {
         setUser(activeUser)
         setFullName(activeUser.full_name || activeUser.name || (activeUser.email === "admin@admin.pl" ? "Mateusz Podzorski" : ""))
         setEmail(activeUser.email || "")
-
-        if (activeUser.id) {
-          const { data: playerRow } = await supabase
-            .from("players")
-            .select("notif_announcements, notif_match_reminders")
-            .eq("id", activeUser.id)
-            .maybeSingle()
-
-          if (playerRow) {
-            setNotifyEmail(playerRow.notif_announcements ?? true)
-            setNotifyPush(playerRow.notif_match_reminders ?? true)
-          }
-        }
       }
     }
 
@@ -124,18 +83,6 @@ export default function SettingsPage() {
     if (savedBlik) setBlikNumber(savedBlik)
     if (savedBank) setBankAccount(savedBank)
   }, [])
-
-  async function handleToggleNotifyEmail(next: boolean) {
-    setNotifyEmail(next)
-    if (!user) return
-    await supabase.from("players").update({ notif_announcements: next }).eq("id", user.id)
-  }
-
-  async function handleToggleNotifyPush(next: boolean) {
-    setNotifyPush(next)
-    if (!user) return
-    await supabase.from("players").update({ notif_match_reminders: next }).eq("id", user.id)
-  }
 
   function showNotify(msg: string) {
     setToast(msg)
@@ -357,13 +304,19 @@ export default function SettingsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Numer konta bankowego (IBAN)</label>
+                    <label className="mb-1 flex items-center gap-1.5 text-xs font-bold text-slate-400">
+                      Numer konta bankowego (IBAN)
+                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-400">Wkrótce</span>
+                    </label>
+                    {/* Nigdzie w appce nieodczytywane (w przeciwieństwie do BLIK-u, który realnie
+                        zasila okno "Postaw kawę") — wyłączone, żeby nie sugerować działającej
+                        funkcji rozliczeń przelewem, zanim taka realnie powstanie. */}
                     <input
                       type="text"
                       value={bankAccount}
-                      onChange={(e) => setBankAccount(e.target.value)}
+                      disabled
                       placeholder="00 0000 0000 0000 0000 0000 0000"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2.5 text-xs font-mono text-slate-900 outline-none focus:border-[#00C48C] focus:ring-2 focus:ring-[#00C48C]/20 focus:bg-white transition-all"
+                      className="w-full cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-100 px-3.5 py-2.5 text-xs font-mono text-slate-400 outline-none"
                     />
                   </div>
                 </div>
@@ -371,7 +324,7 @@ export default function SettingsPage() {
                 <div className="flex justify-end pt-2">
                   <Button type="submit" variant="outline" className="gap-2 rounded-xl text-xs font-bold border-slate-200 cursor-pointer active:scale-[0.97]">
                     <Save className="h-4 w-4 text-[#00875F]" />
-                    Zapisz dane do wpłat
+                    Zapisz numer BLIK
                   </Button>
                 </div>
               </form>
@@ -432,36 +385,6 @@ export default function SettingsPage() {
             </form>
           </div>
 
-          {/* Sekcja 4: Powiadomienia */}
-          <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-200 fill-mode-both">
-            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#7A5CFF]/10 text-[#7A5CFF] border border-[#7A5CFF]/20">
-                <Bell className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className={cn(display.className, "text-sm font-bold text-slate-900")}>Kanały Powiadomień</h2>
-                <p className="text-xs text-slate-400 font-medium">Wybierz, w jaki sposób chcesz otrzymywać powiadomienia meczowe</p>
-              </div>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-slate-900">Powiadomienia e-mail o meczach</p>
-                  <p className="text-[11px] text-slate-400">Otrzymuj zaproszenie natychmiast po utworzeniu nowego meczu</p>
-                </div>
-                <Toggle checked={notifyEmail} onChange={handleToggleNotifyEmail} />
-              </div>
-
-              <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-                <div>
-                  <p className="font-bold text-slate-900">Powiadomienia Push w przeglądarce</p>
-                  <p className="text-[11px] text-slate-400">Szybki alert w aplikacji w przypadku odwołania spotkania</p>
-                </div>
-                <Toggle checked={notifyPush} onChange={handleToggleNotifyPush} />
-              </div>
-            </div>
-          </div>
 
           {/* Sekcja 5: Eksport Własnych Danych */}
           <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-300 fill-mode-both">
