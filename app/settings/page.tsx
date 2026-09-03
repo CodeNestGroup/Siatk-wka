@@ -39,6 +39,7 @@ export default function SettingsPage() {
   // Stany profilowe
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
+  const [phone, setPhone] = useState("")
 
   // Stany bezpieczeństwa
   const [newPassword, setNewPassword] = useState("")
@@ -69,6 +70,19 @@ export default function SettingsPage() {
         setUser(activeUser)
         setFullName(activeUser.full_name || activeUser.name || (activeUser.email === "admin@admin.pl" ? "Mateusz Podzorski" : ""))
         setEmail(activeUser.email || "")
+
+        // localStorage trzyma to, co było w chwili logowania — jeśli admin zmienił numer
+        // od tego czasu wprost w bazie, pobieramy świeższą wartość zamiast bazować na cache'u.
+        if (activeUser.id) {
+          const { data: playerRow } = await supabase
+            .from("players")
+            .select("phone")
+            .eq("id", activeUser.id)
+            .maybeSingle()
+          setPhone(playerRow?.phone ?? activeUser.phone ?? "")
+        } else {
+          setPhone(activeUser.phone || "")
+        }
       }
     }
 
@@ -101,7 +115,7 @@ export default function SettingsPage() {
     e.preventDefault()
     if (!user) return
 
-    const { error } = await supabase.from("players").update({ full_name: fullName, email }).eq("id", user.id)
+    const { error } = await supabase.from("players").update({ full_name: fullName, email, phone: phone.trim() || null }).eq("id", user.id)
 
     if (error) {
       const isDuplicate = error.code === "23505"
@@ -109,7 +123,7 @@ export default function SettingsPage() {
       return
     }
 
-    const updatedUser = { ...user, full_name: fullName, name: fullName, email }
+    const updatedUser = { ...user, full_name: fullName, name: fullName, email, phone: phone.trim() || null }
     localStorage.setItem("volley_user", JSON.stringify(updatedUser))
     setUser(updatedUser)
     showNotify("Zapisano dane zawodnika!")
@@ -229,18 +243,18 @@ export default function SettingsPage() {
             </div>
 
             <form onSubmit={handleSaveProfile} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Imię i nazwisko</label>
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="np. Mateusz Podzorski"
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-[#2C4BFF] focus:ring-2 focus:ring-[#2C4BFF]/20 focus:bg-white transition-all"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Imię i nazwisko</label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="np. Mateusz Podzorski"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-[#2C4BFF] focus:ring-2 focus:ring-[#2C4BFF]/20 focus:bg-white transition-all"
+                />
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Adres e-mail</label>
                   <div className="relative">
@@ -250,6 +264,20 @@ export default function SettingsPage() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="email@example.com"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 pl-10 pr-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-[#2C4BFF] focus:ring-2 focus:ring-[#2C4BFF]/20 focus:bg-white transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Numer telefonu</label>
+                  <div className="relative">
+                    <Smartphone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="np. 500 100 001"
                       className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 pl-10 pr-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-[#2C4BFF] focus:ring-2 focus:ring-[#2C4BFF]/20 focus:bg-white transition-all"
                     />
                   </div>

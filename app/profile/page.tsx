@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
-import { User, Mail, Shield, Calendar, Trophy, Wallet, Coffee, Heart, ArrowRight, IdCard } from "lucide-react"
+import { User, Mail, Shield, Calendar, Trophy, Coffee, Heart, ArrowRight, IdCard } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell } from "@/components/dashboard/notifications-bell"
 import { SupportModal } from "@/components/dashboard/support-modal"
@@ -31,23 +31,67 @@ function perforation(color: string): React.CSSProperties {
   return { backgroundImage: `repeating-linear-gradient(to bottom, ${color} 0 5px, transparent 5px 12px)` }
 }
 
+// Nominatiw, nie dopełniacz ("Sierpień 2026", nie "Sierpnia 2026") — miesiąc tu stoi sam,
+// bez dnia przed sobą, więc gramatycznie to inny przypadek niż w hero na stronie głównej.
+const MONTHS_NOMINATIVE_PL = ["Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"]
+
 export default function ProfilePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [showSupportModal, setShowSupportModal] = useState(false)
 
+  // Karta profilowa wcześniej pokazywała trzy kafelki na sztywno wpisane w kod ("Aktywny
+  // Gracz", "0.00 PLN (Czysto)", "Sezon 2026") — żaden nie odzwierciedlał realnych danych.
+  // Rozliczenia finansowe są teraz wstrzymane (patrz Ustawienia: "Rozliczenia i Wpisowe —
+  // Wkrótce"), więc zamiast udawanego salda pokazujemy coś realnego: faktyczną liczbę
+  // rozegranych meczów tego gracza.
+  const [joinedAt, setJoinedAt] = useState<string | null>(null)
+  const [playerStatusId, setPlayerStatusId] = useState<number | null>(null)
+  const [playedMatchesCount, setPlayedMatchesCount] = useState<number | null>(null)
+
   useEffect(() => {
     async function loadUserData() {
+      let activeUser: any = null
       const localUser = localStorage.getItem("volley_user")
       if (localUser) {
-        setUser(JSON.parse(localUser))
-        return
+        activeUser = JSON.parse(localUser)
+        setUser(activeUser)
+      } else {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.user) {
+          activeUser = session.user
+          setUser(activeUser)
+        }
       }
 
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session?.user) {
-        setUser(session.user)
+      if (!activeUser?.id) return
+
+      const [{ data: playerRow }, { data: regs }, { data: matches }] = await Promise.all([
+        supabase.from("players").select("created_at, player_status_id").eq("id", activeUser.id).maybeSingle(),
+        supabase.from("match_registrations").select("match_id").eq("player_id", activeUser.id),
+        supabase.from("matches").select("id, date, status_id, is_settled")
+      ])
+
+      if (playerRow) {
+        setJoinedAt(playerRow.created_at)
+        setPlayerStatusId(playerRow.player_status_id)
       }
+
+      // Ta sama definicja "faktycznie rozegrany" co na Statystykach (app/stats/page.tsx) —
+      // odwołany mecz nigdy się nie liczy, reszta liczy się jeśli minęła data albo admin
+      // ręcznie oznaczył go jako rozliczony/zakończony.
+      const todayStr = new Date().toISOString().split("T")[0]
+      const matchMap: Record<string, any> = {}
+      matches?.forEach((m: any) => { matchMap[m.id] = m })
+
+      const playedCount = (regs || []).filter((reg: any) => {
+        const m = matchMap[reg.match_id]
+        if (!m) return false
+        if (m.status_id === 4) return false
+        return m.date < todayStr || m.status_id === 3 || m.is_settled === true
+      }).length
+
+      setPlayedMatchesCount(playedCount)
     }
 
     loadUserData()
@@ -63,6 +107,16 @@ export default function ProfilePage() {
   const displayName = user?.full_name || user?.name || (user?.email === "admin@admin.pl" ? "Mateusz Podzorski" : user?.email) || "Użytkownik"
   const isAdmin = user?.email === "admin@admin.pl" || user?.role === "admin" || user?.role_id === 1
   const initials = displayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) || "MP"
+
+  // player_status_id bywa puste dla starszych/importowanych kont — tak samo jak w bazie
+  // zawodników (app/players/page.tsx), brak wartości traktujemy jako "aktywny", nie "nieaktywny".
+  const isActivePlayer = playerStatusId === 1 || playerStatusId === null
+  const joinedLabel = (() => {
+    if (!joinedAt) return "—"
+    const d = new Date(joinedAt)
+    if (Number.isNaN(d.getTime())) return "—"
+    return `${MONTHS_NOMINATIVE_PL[d.getMonth()]} ${d.getFullYear()}`
+  })()
 
   return (
     <div className="flex min-h-screen bg-[#F5F6FA] text-[#14181F]">
@@ -166,25 +220,30 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* KAFELKI SZYBKICH STATYSTYK */}
+          {/* KAFELKI SZYBKICH STATYSTYK — wszystkie trzy wcześniej były wpisane w kod na
+              sztywno (nigdy się nie zmieniały bez względu na realny stan konta); teraz liczone
+              z bazy. "Bilans rozliczeń" zniknął całkiem — rozliczenia finansowe są wstrzymane
+              (patrz Ustawienia), więc pokazywanie kwoty tutaj byłoby mylące. */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
+              <div className={cn("flex h-11 w-11 items-center justify-center rounded-2xl border", isActivePlayer ? "bg-[#00C48C]/10 text-[#00875F] border-[#00C48C]/20" : "bg-slate-100 text-slate-400 border-slate-200")}>
+                <Trophy className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Status w zespole</p>
+                <p className="text-sm font-bold text-slate-900 mt-0.5">{isActivePlayer ? "Aktywny Gracz" : "Nieaktywny"}</p>
+              </div>
+            </div>
+
             <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#2C4BFF]/10 text-[#2C4BFF] border border-[#2C4BFF]/20">
                 <Trophy className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Status w zespole</p>
-                <p className="text-sm font-bold text-slate-900 mt-0.5">Aktywny Gracz</p>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#00C48C]/10 text-[#00875F] border border-[#00C48C]/20">
-                <Wallet className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Bilans rozliczeń</p>
-                <p className={cn(score.className, "text-sm font-semibold text-[#00875F] mt-0.5")}>0.00 PLN (Czysto)</p>
+                <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Rozegrane mecze</p>
+                <p className={cn(score.className, "text-sm font-semibold text-slate-900 mt-0.5")}>
+                  {playedMatchesCount === null ? "…" : playedMatchesCount} w tym sezonie
+                </p>
               </div>
             </div>
 
@@ -194,7 +253,7 @@ export default function ProfilePage() {
               </div>
               <div>
                 <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Dołączono</p>
-                <p className="text-sm font-bold text-slate-900 mt-0.5">Sezon 2026</p>
+                <p className="text-sm font-bold text-slate-900 mt-0.5">{joinedLabel}</p>
               </div>
             </div>
           </div>
