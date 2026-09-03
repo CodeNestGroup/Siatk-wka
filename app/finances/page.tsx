@@ -17,7 +17,6 @@ import {
   X,
   Coffee,
   Heart,
-  ChevronDown,
   Pencil,
   PieChart
 } from "lucide-react"
@@ -141,10 +140,11 @@ export default function FinancesPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense">("all")
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
-  const [showAllTx, setShowAllTx] = useState(false)
-  useEffect(() => {
-    setShowAllTx(false)
-  }, [typeFilter, categoryFilter, searchTerm])
+  // Rejestr transakcji rośnie przez cały sezon i nigdy się nie kończy — bez tego lista
+  // (zwłaszcza tabela na desktopie, gdzie wcześniej w ogóle nie było żadnego limitu) robi się
+  // nieczytelna po kilku miesiącach. Domyślnie widoczne jest tylko ostatnie 30 dni; wyszukiwanie
+  // zawsze przeszukuje całą historię — ten sam mechanizm co gdzie indziej w appce.
+  const [showFullHistory, setShowFullHistory] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showSupportModal, setShowSupportModal] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -365,7 +365,12 @@ export default function FinancesPage() {
       .sort((a, b) => b.total - a.total)
   }, [expenseItems])
 
-  const searchMatchedTx = transactions.filter((t) =>
+  const isDateRestricted = !searchTerm && !showFullHistory
+  const thirtyDaysAgoStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+
+  const dateMatchedTx = transactions.filter((t) => !isDateRestricted || t.date >= thirtyDaysAgoStr)
+
+  const searchMatchedTx = dateMatchedTx.filter((t) =>
     fuzzySearchMatch(buildTxSearchTokens(t), searchTerm) && (!categoryFilter || t.category === categoryFilter)
   )
 
@@ -380,12 +385,6 @@ export default function FinancesPage() {
     if (typeFilter === "expense") return t.type === "expense"
     return true
   })
-
-  // Skrócony widok kart na mobile — rejestr transakcji tylko rośnie przez sezon, więc bez
-  // limitu byłby to najdłuższy scroll w całej appce. Pełna lista zawsze przy wyszukiwaniu.
-  const TX_PREVIEW_LIMIT = 5
-  const isTxListTruncated = !searchTerm && filteredTransactions.length > TX_PREVIEW_LIMIT
-  const visibleTransactions = isTxListTruncated && !showAllTx ? filteredTransactions.slice(0, TX_PREVIEW_LIMIT) : filteredTransactions
 
   if (!user) return null
 
@@ -615,6 +614,20 @@ export default function FinancesPage() {
                 </div>
               </div>
 
+              {!searchTerm && (
+                <div className="flex items-center justify-between gap-2 px-1">
+                  <p className="text-[11px] font-semibold text-slate-400">
+                    {showFullHistory ? "Wyświetlono pełną historię operacji." : "Wyświetlono operacje z ostatnich 30 dni."}
+                  </p>
+                  <button
+                    onClick={() => setShowFullHistory((v) => !v)}
+                    className="shrink-0 text-[11px] font-bold text-[#2C4BFF] hover:text-[#1D3AE8] transition-colors cursor-pointer active:scale-95"
+                  >
+                    {showFullHistory ? "Pokaż tylko ostatnie 30 dni" : "Pokaż całą historię"}
+                  </button>
+                </div>
+              )}
+
               <div className="rounded-[28px] border border-slate-200/80 bg-white overflow-hidden shadow-xs">
                 {isLoading ? (
                   <div className="p-4 space-y-2">
@@ -635,7 +648,11 @@ export default function FinancesPage() {
                       <Search className="h-5 w-5" />
                     </div>
                     <p className="text-xs font-semibold text-slate-500">
-                      {searchTerm ? `Brak wyników dla „${searchTerm}”.` : "Brak opłat spełniających kryteria."}
+                      {searchTerm
+                        ? `Brak wyników dla „${searchTerm}”.`
+                        : isDateRestricted && transactions.length > 0
+                        ? "Brak operacji z ostatnich 30 dni."
+                        : "Brak opłat spełniających kryteria."}
                     </p>
                   </div>
                 ) : (
@@ -702,7 +719,7 @@ export default function FinancesPage() {
 
                     {/* Karty — poniżej md, żeby uniknąć poziomego scrolla tabeli */}
                     <div className="md:hidden divide-y divide-slate-100">
-                      {visibleTransactions.map((tx, idx) => (
+                      {filteredTransactions.map((tx, idx) => (
                         <div key={tx.id || idx} className="p-4 space-y-2">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -742,16 +759,6 @@ export default function FinancesPage() {
                           </div>
                         </div>
                       ))}
-
-                      {isTxListTruncated && !showAllTx && (
-                        <button
-                          onClick={() => setShowAllTx(true)}
-                          className="flex w-full items-center justify-center gap-2 py-3.5 text-xs font-bold text-slate-500 transition-all hover:text-[#1D3AE8] cursor-pointer active:scale-[0.99]"
-                        >
-                          Pokaż wszystkie ({filteredTransactions.length})
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        </button>
-                      )}
                     </div>
                   </>
                 )}
