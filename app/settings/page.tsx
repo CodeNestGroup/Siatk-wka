@@ -144,15 +144,6 @@ export default function SettingsPage() {
     }
   }
 
-  function handleSaveFinanceSettings(e: React.FormEvent) {
-    e.preventDefault()
-    localStorage.setItem("volley_blik_display", blikNumber)
-    localStorage.setItem("volley_blik_digits", blikNumber.replace(/\D/g, "").replace(/^48/, ""))
-    localStorage.setItem("volley_bank_account", bankAccount)
-    window.dispatchEvent(new Event("volley-blik-updated"))
-    showNotify("Zapisano — nowy numer BLIK pojawi się w oknie „Postaw kawę” na tym urządzeniu.")
-  }
-
   async function exportMyData() {
     if (!user) return
 
@@ -274,60 +265,50 @@ export default function SettingsPage() {
             </form>
           </div>
 
-          {/* Sekcja 2: Dane do Szybkich Wpłat (dla Admina) */}
+          {/* Sekcja 2: Rozliczenia i Wpisowe — cała sekcja "Wkrótce". Prawdziwy sposób rozliczania
+              wpłat (BLIK do doraźnych "Postaw kawę" czy realne rozliczenia meczowe) czeka na
+              decyzję po rozmowie z szefem — do tego czasu nic tu nie edytujemy, żeby nie sugerować
+              gotowej funkcji rozliczeń, zanim faktycznie taka powstanie. */}
           {isAdmin && (
-            <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-75 fill-mode-both">
+            <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs space-y-6 opacity-70 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-75 fill-mode-both">
               <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#00C48C]/10 text-[#00875F] border border-[#00C48C]/20">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 border border-slate-200">
                   <CreditCard className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className={cn(display.className, "text-sm font-bold text-slate-900")}>Dane do Rozliczeń i Wpisowego</h2>
-                  <p className="text-xs text-slate-400 font-medium">Numer BLIK wyświetlany graczom w oknie „Postaw kawę” na tym urządzeniu</p>
+                  <h2 className={cn(display.className, "text-sm font-bold text-slate-500 flex items-center gap-2")}>
+                    Rozliczenia i Wpisowe
+                    <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-400">Wkrótce</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 font-medium">Sposób rozliczania wpłat jest jeszcze w przygotowaniu</p>
                 </div>
               </div>
 
-              <form onSubmit={handleSaveFinanceSettings} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Telefon do przelewu BLIK</label>
-                    <div className="relative">
-                      <Smartphone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <input
-                        type="text"
-                        value={blikNumber}
-                        onChange={(e) => setBlikNumber(e.target.value)}
-                        placeholder="+48 600 000 000"
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 pl-10 pr-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-[#00C48C] focus:ring-2 focus:ring-[#00C48C]/20 focus:bg-white transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 flex items-center gap-1.5 text-xs font-bold text-slate-400">
-                      Numer konta bankowego (IBAN)
-                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-400">Wkrótce</span>
-                    </label>
-                    {/* Nigdzie w appce nieodczytywane (w przeciwieństwie do BLIK-u, który realnie
-                        zasila okno "Postaw kawę") — wyłączone, żeby nie sugerować działającej
-                        funkcji rozliczeń przelewem, zanim taka realnie powstanie. */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Telefon do przelewu BLIK</label>
+                  <div className="relative">
+                    <Smartphone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-300" />
                     <input
                       type="text"
-                      value={bankAccount}
+                      value={blikNumber}
                       disabled
-                      placeholder="00 0000 0000 0000 0000 0000 0000"
-                      className="w-full cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-100 px-3.5 py-2.5 text-xs font-mono text-slate-400 outline-none"
+                      className="w-full cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-100 pl-10 pr-3.5 py-2.5 text-xs font-medium text-slate-400 outline-none"
                     />
                   </div>
                 </div>
 
-                <div className="flex justify-end pt-2">
-                  <Button type="submit" variant="outline" className="gap-2 rounded-xl text-xs font-bold border-slate-200 cursor-pointer active:scale-[0.97]">
-                    <Save className="h-4 w-4 text-[#00875F]" />
-                    Zapisz numer BLIK
-                  </Button>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Numer konta bankowego (IBAN)</label>
+                  <input
+                    type="text"
+                    value={bankAccount}
+                    disabled
+                    placeholder="00 0000 0000 0000 0000 0000 0000"
+                    className="w-full cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-100 px-3.5 py-2.5 text-xs font-mono text-slate-400 outline-none"
+                  />
                 </div>
-              </form>
+              </div>
             </div>
           )}
 
