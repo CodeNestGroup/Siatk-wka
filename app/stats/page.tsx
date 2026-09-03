@@ -207,6 +207,23 @@ export default function StatsPage() {
   const topPlayer = playerStats[0] || { name: "Brak danych", matches: 0 }
   const podium = playerStats.slice(0, 3)
 
+  // Własna karta zawodnika nad tabelą — bez niej jedyny sposób sprawdzenia "jak sobie radzę"
+  // to szukanie siebie wzrokiem w rankingu. Ta sama reguła dopasowania co podświetlenie
+  // wiersza w tabeli niżej (po id, potem po pełnym imieniu, potem po nazwie z localStorage).
+  const myStats = useMemo(() => {
+    if (!user) return null
+    return (
+      playerStats.find(
+        (p) =>
+          user?.id === p.name ||
+          user?.full_name?.toLowerCase() === p.name.toLowerCase() ||
+          user?.name?.toLowerCase() === p.name.toLowerCase()
+      ) || null
+    )
+  }, [playerStats, user])
+  const myRank = myStats ? playerStats.findIndex((p) => p.name === myStats.name) + 1 : null
+  const myParticipationRate = myStats && totalMatches > 0 ? Math.round((myStats.matches / totalMatches) * 100) : 0
+
   const totalRosterEntries = completedMatches.reduce((acc, m) => acc + (Array.isArray(m.players) ? m.players.length : 0), 0)
   const avgAttendance = totalMatches > 0 ? (totalRosterEntries / totalMatches) : 0
 
@@ -374,6 +391,22 @@ export default function StatsPage() {
                 <h2 className={cn(display.className, "text-xl font-bold text-white")}>Sezon jeszcze się nie zaczął</h2>
                 <p className="text-sm text-slate-400 font-medium max-w-sm">
                   Statystyki, lider frekwencji i podium pojawią się tutaj automatycznie po pierwszym rozegranym meczu.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Twoja karta — jedyne miejsce na stronie mówiące wprost "jak Ty sobie radzisz",
+              zamiast zmuszania do szukania siebie w tabeli rankingu niżej. */}
+          {myStats && totalMatches > 0 && (
+            <div className="flex items-center gap-4 rounded-[24px] border border-[#2C4BFF]/25 bg-[#2C4BFF]/[0.05] p-4 sm:p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+              <div className={cn(score.className, "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#2C4BFF] text-sm font-semibold text-white shadow-md shadow-[#2C4BFF]/30")}>
+                #{myRank}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-slate-900">Twoja frekwencja w tym sezonie</p>
+                <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
+                  {myStats.matches} z {totalMatches} meczów ({myParticipationRate}%) • {myStats.paidCount}/{myStats.matches} opłaconych • #{myRank} w rankingu
                 </p>
               </div>
             </div>

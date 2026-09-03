@@ -92,6 +92,8 @@ export default function AnnouncementsPage() {
   const [newContent, setNewContent] = useState("")
   const [newCategoryId, setNewCategoryId] = useState<number>(2)
   const [newIsPinned, setNewIsPinned] = useState(false)
+  const [newMatchId, setNewMatchId] = useState<string>("")
+  const [matchOptions, setMatchOptions] = useState<{ id: string; date: string; location: string | null }[]>([])
 
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
@@ -103,7 +105,24 @@ export default function AnnouncementsPage() {
 
     fetchAnnouncements()
     fetchCategories()
+    fetchMatchOptions()
   }, [])
+
+  // Lista meczów do opcjonalnego powiązania — pole `match_id` istniało w typie i już
+  // wyświetlało datę meczu na odznace ogłoszenia, ale formularz nigdy go nie ustawiał,
+  // więc realnie dało się je wpisać tylko ręcznie w bazie danych.
+  async function fetchMatchOptions() {
+    const { data, error } = await supabase
+      .from('matches')
+      .select('id, date, location')
+      .order('date', { ascending: false })
+
+    if (error) {
+      console.error("Błąd pobierania meczów:", error.message)
+    } else if (data) {
+      setMatchOptions(data)
+    }
+  }
 
   async function fetchAnnouncements() {
     setIsLoading(true)
@@ -167,6 +186,7 @@ export default function AnnouncementsPage() {
       category_id: Number(newCategoryId),
       is_pinned: newIsPinned,
       author_id: authorId,
+      match_id: newMatchId || null,
     }
 
     const { data, error } = await supabase
@@ -200,6 +220,7 @@ export default function AnnouncementsPage() {
     setNewContent("")
     setNewCategoryId(categories.length > 0 ? categories[0].id : 2)
     setNewIsPinned(false)
+    setNewMatchId("")
   }
 
   function handleDelete(id: string, title: string) {
@@ -614,6 +635,17 @@ export default function AnnouncementsPage() {
           <div>
             <label className="block font-bold text-slate-700 mb-1">Treść</label>
             <textarea required rows={4} value={newContent} onChange={(e) => setNewContent(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 outline-none focus:border-[#2C4BFF] focus:bg-white font-medium" />
+          </div>
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">Powiąż z meczem (opcjonalnie)</label>
+            <select value={newMatchId} onChange={(e) => setNewMatchId(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 outline-none focus:border-[#2C4BFF] font-semibold">
+              <option value="">— Brak —</option>
+              {matchOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {formatDatePL(m.date)}{m.location ? ` — ${m.location}` : ""}
+                </option>
+              ))}
+            </select>
           </div>
           <div
             className="flex items-center gap-2 p-3 rounded-xl bg-[#FFD23F]/10 border border-[#FFD23F]/25 cursor-pointer"
