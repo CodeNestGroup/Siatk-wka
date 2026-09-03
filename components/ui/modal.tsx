@@ -80,7 +80,11 @@ export function Modal({ open, children, overlayClassName, cardClassName, onClose
             // dokładniej odpowiada temu, jak zachowują się modale w prawdziwych appkach na
             // dotykowym ekranie, zamiast wyśrodkowanego okienka rodem z desktopowej strony www.
             // Od `sm:` wzwyż (mysz, więcej miejsca) wraca klasyczne wyśrodkowane okno.
-            "relative w-full sm:w-auto",
+            // Szerokość celowo NIE jest tu ustawiana — każde wywołanie i tak podaje własne
+            // `w-full max-w-*` w `cardClassName`. Dodanie tu bazowego `sm:w-auto` psuło to:
+            // wewnątrz flex-boxa "auto" znaczy "dopasuj do treści", a nie "wypełnij do
+            // max-width", więc modale z szerszym max-w-* na desktopie i tak zostawały wąskie.
+            "relative",
             closing
               ? "animate-out fade-out slide-out-to-bottom-10 sm:zoom-out-95 sm:slide-out-to-bottom-0 duration-150 fill-mode-both"
               : "animate-in fade-in slide-in-from-bottom-10 sm:zoom-in-95 sm:slide-in-from-bottom-0 duration-300 sm:duration-200 fill-mode-both",

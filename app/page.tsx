@@ -1201,11 +1201,16 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              {/* Wszystkie trzy przyciski ujednolicone: ten sam wzorzec animacji (delikatne
+                  powiększenie na hover, przyciśnięcie na klik) i ta sama "waga" wizualna —
+                  "Zgłoś urlop" wcześniej wyróżniał się kolorowym gradientem i czarnym tekstem,
+                  co obok stonowanych, białych przycisków obok wyglądało jak coś tymczasowego/
+                  niedopracowanego. Teraz pełny, jednolity kolor + biały tekst + poświata cienia —
+                  ten sam język co "Szczegóły & Skład" w hero. */}
               <div className="flex items-center gap-2.5 flex-wrap">
                 <button
                   onClick={() => setShowAbsenceModal(true)}
-                  className="h-11 rounded-2xl font-black text-xs flex items-center gap-2 px-5 py-2.5 text-[#0B1120] shadow-md transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF] focus-visible:ring-offset-2"
-                  style={{ background: `linear-gradient(90deg, ${MINT}, #00E0A2)` }}
+                  className="h-11 rounded-2xl bg-[#00C48C] hover:bg-[#00B37E] text-white font-bold text-xs flex items-center gap-2 px-5 py-2.5 shadow-lg shadow-[#00C48C]/30 transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00C48C] focus-visible:ring-offset-2"
                 >
                   <Palmtree className="h-4 w-4 stroke-[2.5]" />
                   <span>Zgłoś urlop / nieobecność</span>
@@ -1219,7 +1224,7 @@ export default function DashboardPage() {
                         setSelectedBatchMatchIds([])
                       }}
                       className={cn(
-                        "h-11 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 py-2.5 cursor-pointer shadow-xs transition-all active:scale-[0.97] border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF] focus-visible:ring-offset-2",
+                        "h-11 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 py-2.5 cursor-pointer shadow-xs transition-all hover:scale-[1.02] active:scale-[0.98] border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF] focus-visible:ring-offset-2",
                         isSelectionMode
                           ? "bg-[#0B1120] text-white border-[#0B1120] shadow-md hover:bg-[#1A2340]"
                           : "border-slate-300 bg-white hover:bg-slate-50 text-slate-800"
@@ -1231,7 +1236,7 @@ export default function DashboardPage() {
 
                     <button
                       onClick={() => setShowCreateModal(true)}
-                      className="h-11 rounded-2xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs flex items-center gap-1.5 px-4 py-2.5 cursor-pointer shadow-xs transition-all active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF] focus-visible:ring-offset-2"
+                      className="h-11 rounded-2xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs flex items-center gap-1.5 px-4 py-2.5 cursor-pointer shadow-xs transition-all hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF] focus-visible:ring-offset-2"
                     >
                       <Plus className="h-4 w-4 stroke-[2.5]" />
                       <span>Nowy mecz</span>
@@ -1771,7 +1776,7 @@ export default function DashboardPage() {
         open={!!selectedMatchRosterPreview}
         onClose={() => setSelectedMatchRosterPreview(null)}
         overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
-        cardClassName="relative w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl border border-slate-200 space-y-4 text-slate-900"
+        cardClassName="relative w-full sm:max-w-lg lg:max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl border border-slate-200 space-y-4 text-slate-900"
       >
         {selectedMatchRosterPreview && (
           <>
@@ -2146,8 +2151,12 @@ export default function DashboardPage() {
       <Modal
         open={!!selectedMatch}
         onClose={() => setSelectedMatch(null)}
-        overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm p-4 overflow-y-auto"
-        cardClassName="w-full max-w-xl"
+        overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
+        // Na telefonie zostaje pełna szerokość (tak jak reszta arkuszy) — na komputerze okno
+        // było wąskie jak na telefonie (max-w-xl, 576px) mimo mnóstwa wolnego miejsca dookoła,
+        // co ściskało skład meczowy i listę zawodników bardziej niż trzeba. Od `lg:` szersze,
+        // żeby skład był czytelniejszy na większym ekranie.
+        cardClassName="w-full sm:max-w-2xl lg:max-w-3xl"
       >
         {selectedMatch && (
           <MatchDetail match={selectedMatch} currentUser={user} onClose={() => setSelectedMatch(null)} onChange={handleMatchChange} />
