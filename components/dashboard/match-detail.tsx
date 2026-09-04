@@ -68,19 +68,18 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     return 0
   })
 
-  const sortedReserves = [...rawReserves].sort((a: any, b: any) => {
-    const isUserA = a.id === currentUser?.id || a.email === currentUser?.email
-    const isUserB = b.id === currentUser?.id || b.email === currentUser?.email
-    if (isUserA) return -1
-    if (isUserB) return 1
-    return 0
-  })
+  // Rezerwy NIE dostają sortowania "Ty pierwszy" jak skład główny — tu kolejność DOSŁOWNIE
+  // znaczy "kto wchodzi następny, gdy zwolni się miejsce", więc podbijanie siebie na górę
+  // fałszowałoby realną pozycję w kolejce. "Ty" i tak jest widoczne dzięki odznace przy graczu
+  // niżej — nie trzeba do tego zmieniać kolejności.
 
   // Rozróżnienie "ile faktycznie wpłacone" (na podstawie realnych flag is_paid) od
-  // "ile powinno wpłynąć w sumie" — settle księguje to drugie, karta podsumowania pokazuje pierwsze
+  // "ile powinno wpłynąć w sumie, gdyby wszyscy zapłacili" — settle księguje TO PIERWSZE.
+  // Wcześniej księgowało drugie (pełną kwotę bez względu na realne wpłaty), przez co kasa
+  // klubu w Finansach "zarabiała" na papierze pieniądze, których nikt nigdy nie wpłacił.
   const paidRosterCount = rawRoster.filter((p: any) => p.paid || p.is_paid).length
+  const unpaidRosterCount = rawRoster.length - paidRosterCount
   const totalCollectedSoFar = paidRosterCount * price
-  const totalExpected = rawRoster.length * price
   const isSettled = !!match.is_settled
 
   const [toast, setToast] = useState<string | null>(null)
@@ -134,15 +133,11 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     if (isSettled || rawRoster.length === 0) return
     setIsSaving(true)
 
-    const updatedPlayers = (match.players || []).map((p: any) => ({
-      ...p,
-      paid: true,
-      is_paid: true
-    }))
-
+    // Zatwierdzenie TYLKO blokuje mecz do edycji — nie zmienia niczyjego realnego statusu
+    // wpłaty. Wcześniej wymuszało `is_paid: true` na wszystkich, więc osoba, która faktycznie
+    // nie zapłaciła, po zatwierdzeniu wyglądała jakby zapłaciła, a jej dług po prostu znikał.
     const updatedMatch: Match & { is_settled?: boolean } = {
       ...match,
-      players: updatedPlayers,
       is_settled: true,
     }
 
@@ -157,11 +152,6 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
       return
     }
 
-    await supabase
-      .from("match_registrations")
-      .update({ is_paid: true })
-      .eq("match_id", match.id)
-
     const collectorName = currentUser?.full_name || currentUser?.name || "Organizator"
     // Mecze utworzone bez własnego tytułu mają `title` ustawiony na surową datę ISO
     // (patrz handleCreateMatch w app/page.tsx) — `match.title || ...` nigdy by tego nie
@@ -173,7 +163,10 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
       date: new Date().toISOString().split("T")[0],
       title: `Zbiórka z meczu: ${matchTitle}`,
       type: "income",
-      amount: totalExpected,
+      // Tylko realnie zebrana kwota (na podstawie faktycznych flag is_paid w momencie
+      // zatwierdzania) — nie liczba miejsc w składzie razy cena. Kasa klubu w Finansach ma
+      // pokazywać co naprawdę wpłynęło, a nie co powinno wpłynąć przy 100% frekwencji wpłat.
+      amount: totalCollectedSoFar,
       collected_by: collectorName,
       category: "mecz",
     }
@@ -183,7 +176,11 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     if (txErr) {
       notify("Mecz zablokowany, ale wpis do księgi zgłosił błąd.")
     } else {
-      notify(`Pomyślnie rozliczono! +${totalExpected} PLN w Finansach.`)
+      notify(
+        unpaidRosterCount > 0
+          ? `Pomyślnie rozliczono! +${totalCollectedSoFar} PLN w Finansach (bez ${unpaidRosterCount} nieopłaconych).`
+          : `Pomyślnie rozliczono! +${totalCollectedSoFar} PLN w Finansach.`
+      )
     }
 
     onChange(updatedMatch)
@@ -364,7 +361,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
             className="w-full rounded-2xl py-3 font-bold gap-2 bg-[#00C48C] hover:bg-[#00A876] text-white shadow-md shadow-[#00C48C]/25 cursor-pointer text-xs"
           >
             <Receipt className="h-4 w-4" />
-            {isSaving ? "Księgowanie w finansach..." : `Zatwierdź i rozlicz w Finansach (+${totalExpected} PLN)`}
+            {isSaving ? "Księgowanie w finansach..." : `Zatwierdź i rozlicz w Finansach (+${totalCollectedSoFar} PLN)`}
           </Button>
         )}
 
@@ -485,17 +482,17 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
           </div>
 
           {/* LISTA REZERWOWA */}
-          {sortedReserves.length > 0 && (
+          {rawReserves.length > 0 && (
             <div className="space-y-2 pt-2 border-t border-slate-100">
               <div className="flex items-center justify-between text-xs font-bold text-[#4B2FB0]">
                 <span className="flex items-center gap-1.5">
                   <Clock className="h-3.5 w-3.5" />
-                  Lista Rezerwowa ({sortedReserves.length}):
+                  Lista Rezerwowa ({rawReserves.length}):
                 </span>
               </div>
 
               <div className="space-y-1.5">
-                {sortedReserves.map((player: any, idx: number) => {
+                {rawReserves.map((player: any, idx: number) => {
                   const isCurrent = player.id === currentUser?.id || player.email === currentUser?.email
 
                   return (

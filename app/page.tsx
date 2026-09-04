@@ -987,7 +987,23 @@ export default function DashboardPage() {
         {/* GŁÓWNA ZAWARTOŚĆ */}
         <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8 pb-36">
 
-          {/* 1. HERO — BILET NA NAJBLIŻSZY MECZ + TABLICA WYNIKÓW SEZONU (jedna spójna karta, rozdzielona perforacją) */}
+          {/* 1. BANER SPONSORA / MIEJSCE REKLAMOWE — na samej górze strony, pierwsze co widać po
+              wejściu (przeniesione tu spod hero na prośbę klubu — to ma być realna przestrzeń
+              reklamowa, więc musi mieć maksymalną widoczność, nie chować się niżej). Czysta, biała
+              karta z samym logo, bez żadnych podpisów/badge'y/koloru marki w tle. Logo dostarczone
+              przez klub (public/logos/esco-wordmark.png) samo niesie identyfikację — nie potrzeba
+              dopowiadać "kto/co/gdzie" obok. Gdy sponsor da docelową grafikę reklamową zamiast
+              samego logo: podmień <img> na pełnowymiarowe zdjęcie z `object-cover` wypełniające
+              cały kontener (`absolute inset-0 h-full w-full`), kontener ma już właściwy kształt. */}
+          <div className="rounded-[28px] border border-slate-200/80 bg-white shadow-xs flex items-center justify-center px-8 py-10 sm:py-14 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+            <img
+              src="/logos/esco-wordmark.png"
+              alt="ESCO Jaworze — Sponsor Główny"
+              className="h-16 sm:h-24 w-auto max-w-full object-contain"
+            />
+          </div>
+
+          {/* 2. HERO — BILET NA NAJBLIŻSZY MECZ + TABLICA WYNIKÓW SEZONU (jedna spójna karta, rozdzielona perforacją) */}
           {nearestMatch && (
             <div
               className="relative overflow-hidden rounded-[28px] text-white shadow-[0_24px_60px_-24px_rgba(11,17,32,0.55)] border border-white/10 animate-in fade-in slide-in-from-top-3 duration-500 fill-mode-both"
@@ -1146,7 +1162,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* 2. NAJWAŻNIEJSZE OGŁOSZENIE — przypięte ma pierwszeństwo, inaczej najnowsze.
+          {/* 3. NAJWAŻNIEJSZE OGŁOSZENIE — przypięte ma pierwszeństwo, inaczej najnowsze.
               Jedyna informacja z hero, której tam brakowało (reszta: mecz/cena/skład już jest wyżej). */}
           {pinnedAnnouncement && (
             <Link
@@ -1174,21 +1190,7 @@ export default function DashboardPage() {
             </Link>
           )}
 
-          {/* 2.5 SPONSOR GŁÓWNY — czysta, biała karta z samym logo, bez żadnych podpisów/badge'y/
-              koloru marki w tle. Logo dostarczone przez klub (public/logos/esco-wordmark.png) samo
-              niesie identyfikację — nie potrzeba dopowiadać "kto/co/gdzie" obok. Gdy sponsor da
-              docelową grafikę reklamową zamiast samego logo: podmień <img> na pełnowymiarowe
-              zdjęcie z `object-cover` wypełniające cały kontener (`absolute inset-0 h-full w-full`),
-              kontener ma już właściwy kształt. */}
-          <div className="rounded-[28px] border border-slate-200/80 bg-white shadow-xs flex items-center justify-center px-8 py-10 sm:py-14 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
-            <img
-              src="/logos/esco-wordmark.png"
-              alt="ESCO Jaworze — Sponsor Główny"
-              className="h-16 sm:h-24 w-auto max-w-full object-contain"
-            />
-          </div>
-
-          {/* 3. HARMONOGRAM MECZÓW I PRZYCISKI AKCJI */}
+          {/* 4. HARMONOGRAM MECZÓW I PRZYCISKI AKCJI */}
           <div className="pt-2 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -1329,7 +1331,7 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {/* 4. LISTA MECZÓW — WIERSZE JAK BILETY */}
+          {/* 5. LISTA MECZÓW — WIERSZE JAK BILETY */}
           <div className="space-y-3">
             {isLoading ? (
               <>
@@ -1811,7 +1813,9 @@ export default function DashboardPage() {
                   />
                 </div>
                 <p className="text-[11px] font-bold text-[#00875F]">
-                  Rozliczono: {mainRoster(selectedMatchRosterPreview).length * Number(selectedMatchRosterPreview.price_per_player || 25)} PLN
+                  {/* Tylko realnie opłacone miejsca — wcześniej liczyło cały skład razy cena,
+                      więc pokazywało "zebrano" pieniądze, których część graczy nigdy nie wpłaciła. */}
+                  Zebrano: {mainRoster(selectedMatchRosterPreview).filter((p: any) => p.paid || p.is_paid).length * Number(selectedMatchRosterPreview.price_per_player || 25)} PLN
                 </p>
               </div>
 
