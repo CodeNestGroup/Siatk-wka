@@ -17,7 +17,9 @@ import {
   Calendar,
   X,
   Coffee,
-  ChevronDown
+  ChevronDown,
+  MessageCircle,
+  ShieldCheck
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sidebar } from "@/components/dashboard/sidebar"
@@ -45,6 +47,12 @@ const netPattern: React.CSSProperties = {
     "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
 }
 
+type AuthorInfo = {
+  full_name: string | null
+  role_id?: number | null
+  email?: string | null
+}
+
 type Announcement = {
   id: string
   title: string
@@ -54,9 +62,7 @@ type Announcement = {
   created_at: string
   match_id?: string
   author_id?: string
-  players?: {
-    full_name: string | null
-  } | null
+  players?: AuthorInfo | null
   matches?: {
     date: string
     location: string
@@ -66,6 +72,23 @@ type Announcement = {
 type Category = {
   id: number
   name: string
+}
+
+type AnnouncementComment = {
+  id: string
+  announcement_id: string
+  author_id: string
+  content: string
+  created_at: string
+  players?: AuthorInfo | null
+}
+
+// Ten sam zestaw warunkow co `isAdmin` dla zalogowanego uzytkownika, ale liczony
+// dla AUTORA konkretnego wpisu (ogloszenia albo komentarza) — zeby dalo sie
+// wizualnie odroznic tresc od administracji od tresci od zwyklego gracza.
+function isAuthorAdmin(author: AuthorInfo | null | undefined): boolean {
+  if (!author) return false
+  return author.role_id === 1 || author.email === "admin@admin.pl" || author.full_name === "Mateusz Podzorski"
 }
 
 export default function AnnouncementsPage() {
@@ -95,6 +118,11 @@ export default function AnnouncementsPage() {
   const [newMatchId, setNewMatchId] = useState<string>("")
   const [matchOptions, setMatchOptions] = useState<{ id: string; date: string; location: string | null }[]>([])
 
+  const [commentsByAnnouncement, setCommentsByAnnouncement] = useState<Record<string, AnnouncementComment[]>>({})
+  const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set())
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({})
+  const [postingCommentId, setPostingCommentId] = useState<string | null>(null)
+
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
     if (localUser) {
@@ -106,6 +134,7 @@ export default function AnnouncementsPage() {
     fetchAnnouncements()
     fetchCategories()
     fetchMatchOptions()
+    fetchComments()
   }, [])
 
   // Lista meczów do opcjonalnego powiązania — pole `match_id` istniało w typie i już
@@ -131,7 +160,9 @@ export default function AnnouncementsPage() {
       .select(`
         *,
         players:author_id (
-          full_name
+          full_name,
+          role_id,
+          email
         ),
         matches:match_id (
           date,
@@ -146,6 +177,35 @@ export default function AnnouncementsPage() {
       setAnnouncements(data)
     }
     setIsLoading(false)
+  }
+
+  // Wszystkie komentarze pod wszystkimi ogłoszeniami w jednym zapytaniu, pogrupowane
+  // lokalnie po `announcement_id` — tablica ogłoszeń jest mała (klub, nie portal),
+  // więc nie ma sensu dociągać komentarzy osobno dla każdego wpisu przy rozwinięciu.
+  async function fetchComments() {
+    const { data, error } = await supabase
+      .from('announcement_comments')
+      .select(`
+        *,
+        players:author_id (
+          full_name,
+          role_id,
+          email
+        )
+      `)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error("Błąd pobierania komentarzy:", error.message)
+      return
+    }
+
+    const grouped: Record<string, AnnouncementComment[]> = {}
+    ;(data || []).forEach((c: AnnouncementComment) => {
+      if (!grouped[c.announcement_id]) grouped[c.announcement_id] = []
+      grouped[c.announcement_id].push(c)
+    })
+    setCommentsByAnnouncement(grouped)
   }
 
   async function fetchCategories() {
@@ -195,7 +255,9 @@ export default function AnnouncementsPage() {
       .select(`
         *,
         players:author_id (
-          full_name
+          full_name,
+          role_id,
+          email
         ),
         matches:match_id (
           date,
@@ -257,6 +319,49 @@ export default function AnnouncementsPage() {
       .eq('id', id)
   }
 
+  function toggleComments(announcementId: string) {
+    setExpandedComments((prev) => {
+      const next = new Set(prev)
+      if (next.has(announcementId)) next.delete(announcementId)
+      else next.add(announcementId)
+      return next
+    })
+  }
+
+  async function handleAddComment(announcementId: string) {
+    const content = (commentDrafts[announcementId] || "").trim()
+    if (!content) return
+
+    const authorId = user?.id || "be8a8e80-0601-4ce9-a944-5cd750b842db"
+    setPostingCommentId(announcementId)
+
+    const { data, error } = await supabase
+      .from('announcement_comments')
+      .insert([{ announcement_id: announcementId, author_id: authorId, content }])
+      .select(`
+        *,
+        players:author_id (
+          full_name,
+          role_id,
+          email
+        )
+      `)
+      .single()
+
+    if (error) {
+      notify("Błąd: nie udało się dodać komentarza")
+      console.error(error)
+    } else if (data) {
+      setCommentsByAnnouncement((prev) => ({
+        ...prev,
+        [announcementId]: [...(prev[announcementId] || []), data]
+      }))
+      setCommentDrafts((prev) => ({ ...prev, [announcementId]: "" }))
+    }
+
+    setPostingCommentId(null)
+  }
+
   function buildAnnouncementTokens(a: Announcement): string[] {
     return normalizeSearchText(`${a.title || ""} ${a.content || ""}`).split(/[^a-z0-9]+/).filter(Boolean)
   }
@@ -280,6 +385,82 @@ export default function AnnouncementsPage() {
   const ANNOUNCEMENT_PREVIEW_LIMIT = 5
   const isAnnouncementListTruncated = !search && sorted.length > ANNOUNCEMENT_PREVIEW_LIMIT
   const visibleAnnouncements = isAnnouncementListTruncated && !showAllAnnouncements ? sorted.slice(0, ANNOUNCEMENT_PREVIEW_LIMIT) : sorted
+
+  // Wspólna sekcja komentarzy pod ogłoszeniem — jedna implementacja dla ciemnej karty
+  // (przypięte) i jasnej karty (reszta), żeby nie duplikować tej samej logiki dwa razy.
+  function renderCommentSection(item: Announcement, isDark: boolean) {
+    const items = commentsByAnnouncement[item.id] || []
+    const isExpanded = expandedComments.has(item.id)
+    const draft = commentDrafts[item.id] || ""
+
+    return (
+      <div className="relative z-10 space-y-2.5">
+        <button
+          onClick={(e) => { e.stopPropagation(); toggleComments(item.id) }}
+          className={cn(
+            "flex items-center gap-1.5 text-[11px] font-bold transition-colors cursor-pointer",
+            isDark ? "text-slate-300 hover:text-white" : "text-slate-500 hover:text-slate-800"
+          )}
+        >
+          <MessageCircle className="h-3.5 w-3.5" />
+          {items.length > 0 ? `Komentarze (${items.length})` : "Skomentuj"}
+          <ChevronDown className={cn("h-3 w-3 transition-transform", isExpanded && "rotate-180")} />
+        </button>
+
+        {isExpanded && (
+          <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+            {items.map((c) => {
+              const commentIsAdmin = isAuthorAdmin(c.players)
+              return (
+                <div key={c.id} className={cn("rounded-xl p-2.5 text-xs", isDark ? "bg-white/5" : "bg-slate-50")}>
+                  <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                    <span className={cn("font-bold", isDark ? "text-white" : "text-slate-800")}>
+                      {c.players?.full_name || "Zawodnik"}
+                    </span>
+                    {commentIsAdmin && (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-[#2C4BFF]/15 px-1.5 py-0.5 text-[9px] font-black uppercase text-[#2C4BFF]">
+                        <ShieldCheck className="h-2.5 w-2.5" /> Administracja
+                      </span>
+                    )}
+                    <span className={cn("text-[10px] ml-auto", isDark ? "text-slate-500" : "text-slate-400")}>
+                      {formatDatePL(c.created_at?.split("T")[0])}
+                    </span>
+                  </div>
+                  <p className={cn("leading-relaxed whitespace-pre-line", isDark ? "text-slate-300" : "text-slate-600")}>
+                    {c.content}
+                  </p>
+                </div>
+              )
+            })}
+
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={draft}
+                onChange={(e) => setCommentDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") handleAddComment(item.id) }}
+                placeholder="Napisz komentarz…"
+                className={cn(
+                  "flex-1 min-w-0 rounded-xl px-3 py-2 text-xs outline-none transition-all",
+                  isDark
+                    ? "bg-white/10 border border-white/15 text-white placeholder:text-slate-500 focus:border-white/30"
+                    : "bg-slate-50 border border-slate-200 focus:border-[#2C4BFF] focus:bg-white"
+                )}
+              />
+              <button
+                onClick={() => handleAddComment(item.id)}
+                disabled={postingCommentId === item.id || !draft.trim()}
+                className="shrink-0 flex h-8 w-8 items-center justify-center rounded-xl bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer active:scale-90 transition-all"
+                title="Wyślij komentarz"
+              >
+                <Send className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   // Kolor akcentu w zależności od kategorii — te same tokeny marki co reszta appki
   function getCategoryAccent(catName: string): { color: string; bg: string; border: string; text: string } {
@@ -334,7 +515,7 @@ export default function AnnouncementsPage() {
               </div>
             </div>
 
-            {isAdmin && (
+            {user && (
               <button
                 onClick={() => setIsModalOpen(true)}
                 className="h-10 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 text-white cursor-pointer active:scale-[0.97] shadow-md transition-all shrink-0"
@@ -451,6 +632,7 @@ export default function AnnouncementsPage() {
                   : { color: "#94A3B8", bg: "bg-slate-100", border: "border-slate-200", text: "text-slate-600" }
 
                 const authorName = item.players?.full_name
+                const authorIsAdmin = isAuthorAdmin(item.players)
 
                 const badgeContent = isMatchCancelled ? (
                   <><Ban className="h-3 w-3" /> Spotkanie odwołane</>
@@ -524,24 +706,40 @@ export default function AnnouncementsPage() {
                         {item.content}
                       </p>
 
-                      <div className="relative z-10 flex items-center justify-between border-t border-white/10 pt-3 text-[11px] text-slate-400 font-medium">
-                        <span>{authorName || "Organizator"}</span>
+                      <div className="relative z-10 flex items-center justify-between border-t border-white/10 pt-3 text-[11px] text-slate-400 font-medium flex-wrap gap-1.5">
+                        <span className="flex items-center gap-1.5">
+                          {authorIsAdmin && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-[#2C4BFF]/20 border border-[#2C4BFF]/40 px-1.5 py-0.5 text-[9px] font-black uppercase text-[#7FA0FF]">
+                              <ShieldCheck className="h-2.5 w-2.5" /> Administracja
+                            </span>
+                          )}
+                          {authorName || "Organizator"}
+                        </span>
                         <span>{formatDatePL(item.created_at?.split("T")[0]) || new Date(item.created_at).toLocaleDateString("pl-PL")}</span>
                       </div>
+
+                      {renderCommentSection(item, true)}
                     </div>
                   )
                 }
 
+                const canDelete = isAdmin || item.author_id === user?.id
+
+                // Ogłoszenie administracji dostaje kobaltowe obramowanie + lekki tint tła
+                // zamiast koloru kategorii — kolor kategorii i tak w pełni żyje w odznace
+                // wyżej, więc obramowanie mogło wziąć na siebie ZUPEŁNIE inny wymiar
+                // informacji (kto pisze), zamiast dublować to co już mówi odznaka.
                 return (
                   <div
                     key={item.id}
                     onClick={() => { if (isMatchCancelled) router.push("/") }}
                     style={{
-                      borderLeftColor: accent.color,
+                      borderLeftColor: authorIsAdmin ? COBALT : "#CBD5E1",
                       animationDelay: `${Math.min(idx, 6) * 40}ms`
                     }}
                     className={cn(
-                      "rounded-[24px] border border-l-4 p-4 sm:p-6 space-y-3 transition-all shadow-xs bg-white hover:shadow-md hover:-translate-y-0.5 animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
+                      "rounded-[24px] border border-l-4 p-4 sm:p-6 space-y-3 transition-all shadow-xs hover:shadow-md hover:-translate-y-0.5 animate-in fade-in slide-in-from-bottom-2 fill-mode-both",
+                      authorIsAdmin ? "bg-[#2C4BFF]/[0.025]" : "bg-white",
                       isMatchCancelled ? "cursor-pointer" : ""
                     )}
                   >
@@ -560,22 +758,26 @@ export default function AnnouncementsPage() {
                         )}
                       </div>
 
-                      {isAdmin && (
+                      {(isAdmin || canDelete) && (
                         <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); togglePin(item.id, item.is_pinned) }}
-                            className="p-2 rounded-xl text-slate-400 hover:bg-[#FFD23F]/15 hover:text-[#946E00] transition-colors cursor-pointer active:scale-90"
-                            title="Przypnij na górze"
-                          >
-                            <Pin className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDelete(item.id, item.title) }}
-                            className="p-2 rounded-xl text-slate-400 hover:text-[#FF5A5F] hover:bg-[#FF5A5F]/10 transition-colors cursor-pointer active:scale-90"
-                            title="Usuń ogłoszenie"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); togglePin(item.id, item.is_pinned) }}
+                              className="p-2 rounded-xl text-slate-400 hover:bg-[#FFD23F]/15 hover:text-[#946E00] transition-colors cursor-pointer active:scale-90"
+                              title="Przypnij na górze"
+                            >
+                              <Pin className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDelete(item.id, item.title) }}
+                              className="p-2 rounded-xl text-slate-400 hover:text-[#FF5A5F] hover:bg-[#FF5A5F]/10 transition-colors cursor-pointer active:scale-90"
+                              title="Usuń ogłoszenie"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -584,10 +786,19 @@ export default function AnnouncementsPage() {
                       {item.content}
                     </p>
 
-                    <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-[11px] text-slate-400 font-medium">
-                      <span>{authorName || "Organizator"}</span>
+                    <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-[11px] text-slate-400 font-medium flex-wrap gap-1.5">
+                      <span className="flex items-center gap-1.5">
+                        {authorIsAdmin && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-[#2C4BFF]/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-[#2C4BFF]">
+                            <ShieldCheck className="h-2.5 w-2.5" /> Administracja
+                          </span>
+                        )}
+                        {authorName || "Organizator"}
+                      </span>
                       <span>{formatDatePL(item.created_at?.split("T")[0]) || new Date(item.created_at).toLocaleDateString("pl-PL")}</span>
                     </div>
+
+                    {renderCommentSection(item, false)}
                   </div>
                 )
               })
@@ -610,7 +821,7 @@ export default function AnnouncementsPage() {
 
       {/* MODAL NOWEGO OGŁOSZENIA */}
       <Modal
-        open={isModalOpen && isAdmin}
+        open={isModalOpen && !!user}
         onClose={() => setIsModalOpen(false)}
         overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
         cardClassName="w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl space-y-4 text-slate-900"
@@ -647,13 +858,18 @@ export default function AnnouncementsPage() {
               ))}
             </select>
           </div>
-          <div
-            className="flex items-center gap-2 p-3 rounded-xl bg-[#FFD23F]/10 border border-[#FFD23F]/25 cursor-pointer"
-            onClick={() => setNewIsPinned(!newIsPinned)}
-          >
-            <input type="checkbox" checked={newIsPinned} onChange={() => {}} className="h-4 w-4 rounded border-[#FFD23F]/50 text-[#946E00] pointer-events-none" />
-            <label className="font-bold text-[#7A5C00] cursor-pointer">Przypnij ogłoszenie na samej górze</label>
-          </div>
+          {/* Przypinanie zostaje wyłącznie dla admina — to narzędzie moderacji (co jest
+              najważniejsze dla całego zespołu), nie coś co powinien móc zrobić sobie
+              każdy autor własnego wpisu. */}
+          {isAdmin && (
+            <div
+              className="flex items-center gap-2 p-3 rounded-xl bg-[#FFD23F]/10 border border-[#FFD23F]/25 cursor-pointer"
+              onClick={() => setNewIsPinned(!newIsPinned)}
+            >
+              <input type="checkbox" checked={newIsPinned} onChange={() => {}} className="h-4 w-4 rounded border-[#FFD23F]/50 text-[#946E00] pointer-events-none" />
+              <label className="font-bold text-[#7A5C00] cursor-pointer">Przypnij ogłoszenie na samej górze</label>
+            </div>
+          )}
           <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
             <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} className="rounded-xl cursor-pointer">Anuluj</Button>
             <Button type="submit" className="bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white rounded-xl gap-1.5 font-bold cursor-pointer shadow-md shadow-[#2C4BFF]/20"><Send className="h-3.5 w-3.5" /> Opublikuj</Button>
