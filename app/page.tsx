@@ -236,6 +236,8 @@ export default function DashboardPage() {
 
   // Tworzenie meczu
   const [newDate, setNewDate] = useState("")
+  const [newTimeStart, setNewTimeStart] = useState("19:00")
+  const [newTimeEnd, setNewTimeEnd] = useState("21:00")
   const [newLocation, setNewLocation] = useState("Hala Sportowa ESCO Jaworze")
   const [newPrice, setNewPrice] = useState("25")
   const [newCapacity, setNewCapacity] = useState("12")
@@ -714,8 +716,8 @@ export default function DashboardPage() {
       return {
         title: matchTitle,
         date: matchDateStr,
-        time_start: "19:00:00",
-        time_end: "21:00:00",
+        time_start: `${newTimeStart || "19:00"}:00`,
+        time_end: `${newTimeEnd || "21:00"}:00`,
         location: newLocation,
         price_per_player: Number(newPrice) || 25,
         capacity: Number(newCapacity) || 12,
@@ -750,6 +752,8 @@ export default function DashboardPage() {
       notify(datesToCreate.length > 1 ? `Utworzono ${datesToCreate.length} meczów!` : "Pomyślnie utworzono nowy mecz!")
       setShowCreateModal(false)
       setNewDate("")
+      setNewTimeStart("19:00")
+      setNewTimeEnd("21:00")
       setNewTitle("")
       setSelectedPlayerIds([])
       setRepeatFrequency("none")
@@ -1936,6 +1940,29 @@ export default function DashboardPage() {
                     className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 font-medium outline-none focus:border-[#2C4BFF]"
                   />
                 </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Godzina rozpoczęcia</label>
+                    <input
+                      type="time"
+                      required
+                      value={newTimeStart}
+                      onChange={(e) => setNewTimeStart(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 font-medium outline-none focus:border-[#2C4BFF]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Godzina zakończenia</label>
+                    <input
+                      type="time"
+                      required
+                      value={newTimeEnd}
+                      onChange={(e) => setNewTimeEnd(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 font-medium outline-none focus:border-[#2C4BFF]"
+                    />
+                  </div>
+                </div>
               </div>
 
               <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 pt-1">2. Częstotliwość</p>
@@ -2168,6 +2195,7 @@ export default function DashboardPage() {
               <div className="sticky bottom-0 -mx-6 -mb-6 bg-white px-6 pb-6 pt-3 border-t border-slate-100 space-y-2.5">
                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 flex-wrap gap-x-3 gap-y-1">
                   <span className="flex items-center gap-1"><Calendar className="h-3 w-3 text-[#2C4BFF]" /> {newDate ? formatDatePL(newDate) : "—"}</span>
+                  <span className="flex items-center gap-1"><Timer className="h-3 w-3 text-[#2C4BFF]" /> {newTimeStart} - {newTimeEnd}</span>
                   <span className="flex items-center gap-1"><MapPin className="h-3 w-3 text-[#2C4BFF]" /> {newLocation || "—"}</span>
                   <span className="flex items-center gap-1"><Wallet className="h-3 w-3 text-[#2C4BFF]" /> {modalPriceNum} PLN</span>
                   <span className="flex items-center gap-1"><UserCheck className="h-3 w-3 text-[#2C4BFF]" /> {selectedPlayerIds.length} powołanych</span>
