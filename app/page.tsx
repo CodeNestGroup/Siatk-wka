@@ -1085,26 +1085,26 @@ export default function DashboardPage() {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    {/* Dodaj do kalendarza — sam wybiera Google Calendar albo .ics (Apple/Outlook)
-                        zależnie od urządzenia, jeden klik, żadnego wyboru. Samo "Kalendarz" obok
-                        ikonki było niejednoznaczne (rzeczownik, nie czynność) — nie było jasne
-                        czy to otwiera podgląd kalendarza, czy coś dodaje. title/aria-label tłumaczą
-                        akcję wprost przy najechaniu, a etykieta na desktopie mówi to samo bez zgadywania. */}
+                  {/* Na telefonie oba przyciski jeden pod drugim (zamiast obok siebie) — bez tego
+                      pełny tekst "Dodaj do kalendarza" ściskał "Szczegóły & Skład" tak mocno, że
+                      ten się łamał/wychodził poza kartę. W kolumnie każdy ma całą szerokość, więc
+                      pełna, jednoznaczna etykieta mieści się WSZĘDZIE — nie trzeba już skracać jej
+                      na telefonie do czegoś słabszego (a to jedyne miejsce, gdzie title/aria-label
+                      i tak nigdy się nie pokażą, bo dotyk nie ma najechania myszką). */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                     <button
                       onClick={() => addMatchToCalendar({ id: nearestMatch.id, title: (nearestMatch as any).title, date: nearestMatch.date, timeStart: (nearestMatch as any).time_start, timeEnd: (nearestMatch as any).time_end, location: nearestMatch.location, price: nearestPrice })}
                       title="Kliknij, aby dodać ten mecz do swojego kalendarza"
                       aria-label="Dodaj ten mecz do swojego kalendarza"
-                      className="flex shrink-0 items-center gap-1.5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 px-3.5 py-3.5 text-xs font-bold text-white transition-all cursor-pointer active:scale-[0.97]"
+                      className="flex items-center justify-center gap-1.5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 px-3.5 py-3.5 text-xs font-bold text-white transition-all cursor-pointer active:scale-[0.97] w-full sm:w-auto sm:shrink-0"
                     >
                       <CalendarPlus className="h-4 w-4 text-[#FFD23F]" />
-                      <span className="sm:hidden">Dodaj</span>
-                      <span className="hidden sm:inline">Dodaj do kalendarza</span>
+                      Dodaj do kalendarza
                     </button>
 
                     <Button
                       onClick={() => handleSelectMatch(nearestMatch)}
-                      className="flex-1 sm:flex-initial sm:w-auto rounded-2xl bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white font-black text-xs gap-2 px-6 py-3.5 shadow-lg shadow-[#2C4BFF]/30 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-[#FFD23F] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B1120]"
+                      className="w-full sm:w-auto rounded-2xl bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white font-black text-xs gap-2 px-6 py-3.5 shadow-lg shadow-[#2C4BFF]/30 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-[#FFD23F] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B1120]"
                     >
                       Szczegóły &amp; Skład
                       <ArrowRight className="h-4 w-4" />
