@@ -160,7 +160,7 @@ export default function ProfilePage() {
               <Coffee className="h-4 w-4" />
             </button>
 
-            <NotificationsBell onNotificationClick={() => {}} />
+            <NotificationsBell playerId={user?.id} onNotificationClick={() => {}} />
           </div>
         </header>
 

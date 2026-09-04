@@ -44,6 +44,7 @@ import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-
 import { type Match, mainRoster, waitlist } from "@/lib/data"
 import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch, addMatchToCalendar } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
+import { notifyPush } from "@/lib/push"
 
 // ────────────────────────────────────────────────────────────────
 // TOKENY WIZUALNE — "Under the Lights": hala, reflektory, bilet meczowy
@@ -749,6 +750,15 @@ export default function DashboardPage() {
         await supabase.from("match_registrations").insert(allRegistrations)
       }
 
+      notifyPush({
+        title: datesToCreate.length > 1 ? `Dodano ${datesToCreate.length} nowych meczów` : "Nowy mecz w harmonogramie",
+        body: datesToCreate.length > 1
+          ? `${newLocation} • od ${formatDatePL(datesToCreate[0])}`
+          : `${formatDatePL(datesToCreate[0])} • ${newLocation}`,
+        url: "/",
+        excludePlayerId: user?.id
+      })
+
       notify(datesToCreate.length > 1 ? `Utworzono ${datesToCreate.length} meczów!` : "Pomyślnie utworzono nowy mecz!")
       setShowCreateModal(false)
       setNewDate("")
@@ -1003,11 +1013,16 @@ export default function DashboardPage() {
             </button>
 
             <NotificationsBell
+              playerId={user?.id}
               onNotificationClick={(notif: NotificationItem) => {
                 if (notif.type === "match") {
                   const matchId = notif.id.replace("match-", "")
                   const target = matches.find((m) => m.id === matchId)
                   if (target) handleSelectMatch(target)
+                } else if (notif.type === "announcement") {
+                  window.location.href = "/announcements"
+                } else if (notif.type === "finance") {
+                  window.location.href = "/finances"
                 }
               }}
             />

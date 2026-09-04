@@ -302,6 +302,7 @@ export default function StatsPage() {
               <Coffee className="h-4 w-4" />
             </button>
             <NotificationsBell
+              playerId={user?.id}
               onNotificationClick={(notif: NotificationItem) => {}}
             />
           </div>

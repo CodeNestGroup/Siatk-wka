@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
 import { type Match, mainRoster, waitlist } from "@/lib/data"
 import { cn, formatDatePL, addMatchToCalendar } from "@/lib/utils"
+import { notifyPush } from "@/lib/push"
 import { supabase } from "@/lib/supabase"
 
 // Te same tokeny co w dashboardzie / sidebarze ("Under the Lights").
@@ -176,6 +177,12 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     if (txErr) {
       notify("Mecz zablokowany, ale wpis do księgi zgłosił błąd.")
     } else {
+      notifyPush({
+        title: "Nowa wpłata w kasie",
+        body: `${newTx.title} (${totalCollectedSoFar} PLN)`,
+        url: "/finances",
+        excludePlayerId: currentUser?.id
+      })
       notify(
         unpaidRosterCount > 0
           ? `Pomyślnie rozliczono! +${totalCollectedSoFar} PLN w Finansach (bez ${unpaidRosterCount} nieopłaconych).`

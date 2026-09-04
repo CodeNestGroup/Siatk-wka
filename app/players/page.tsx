@@ -908,7 +908,7 @@ export default function PlayersPage() {
               <Coffee className="h-4 w-4" />
             </button>
 
-            <NotificationsBell onNotificationClick={(notif: NotificationItem) => {}} />
+            <NotificationsBell playerId={user?.id} onNotificationClick={(notif: NotificationItem) => {}} />
           </div>
         </header>
 

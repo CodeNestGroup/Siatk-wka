@@ -18,6 +18,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
+import { fetchReadKeys, markKeysRead } from "@/lib/notifications"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
 
 // ────────────────────────────────────────────────────────────────
@@ -61,23 +62,27 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
   const [unreadMatches, setUnreadMatches] = useState(false)
   const [unreadPlayers, setUnreadPlayers] = useState(false)
   const [unreadFinances, setUnreadFinances] = useState(false)
+  const [unreadAnnouncements, setUnreadAnnouncements] = useState(false)
 
   function closeSidebar() {
     setMobileOpen(false)
     onClose?.()
   }
 
+  // "Przeczytane" żyje w bazie (notification_reads), nie w localStorage — patrz
+  // lib/notifications.ts. Wcześniej te same klucze co dzwoneczek trzymał osobno tu
+  // (volley_read_matches itp.), więc telefon i komputer miały niezsynchronizowane
+  // kropki, a wyczyszczenie danych przeglądarki cofało wszystko do "nieprzeczytane".
   const checkUnreadBadges = useCallback(async () => {
-    const readMatches = JSON.parse(localStorage.getItem("volley_read_matches") || "[]")
-    const readPlayers = JSON.parse(localStorage.getItem("volley_read_players") || "[]")
-    const readTxs = JSON.parse(localStorage.getItem("volley_read_txs") || "[]")
+    if (!user?.id) return
+    const readKeys = await fetchReadKeys(user.id)
 
     // 1. MECZE
     if (pathname === "/") {
       setUnreadMatches(false)
     } else {
       const { data: matches } = await supabase.from("matches").select("id").limit(50).order("created_at", { ascending: false })
-      setUnreadMatches(!!matches?.some(m => !readMatches.includes(String(m.id))))
+      setUnreadMatches(!!matches?.some(m => !readKeys.has(`match-${m.id}`)))
     }
 
     // 2. ZAWODNICY
@@ -85,7 +90,7 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
       setUnreadPlayers(false)
     } else {
       const { data: pending } = await supabase.from("players").select("id").or("player_status_id.eq.3,role_id.eq.3")
-      setUnreadPlayers(!!pending?.some(p => !readPlayers.includes(String(p.id))))
+      setUnreadPlayers(!!pending?.some(p => !readKeys.has(`player-${p.id}`)))
     }
 
     // 3. FINANSE
@@ -93,9 +98,17 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
       setUnreadFinances(false)
     } else {
       const { data: txs } = await supabase.from("transactions").select("id").limit(50).order("created_at", { ascending: false })
-      setUnreadFinances(!!txs?.some(t => !readTxs.includes(String(t.id))))
+      setUnreadFinances(!!txs?.some(t => !readKeys.has(`tx-${t.id}`)))
     }
-  }, [pathname])
+
+    // 4. OGŁOSZENIA
+    if (pathname === "/announcements") {
+      setUnreadAnnouncements(false)
+    } else {
+      const { data: announcements } = await supabase.from("announcements").select("id").limit(50).order("created_at", { ascending: false })
+      setUnreadAnnouncements(!!announcements?.some(a => !readKeys.has(`announcement-${a.id}`)))
+    }
+  }, [pathname, user?.id])
 
   useEffect(() => {
     checkUnreadBadges()
@@ -105,9 +118,11 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
     }
   }, [checkUnreadBadges])
 
-  // Nasłuch na żywo (Supabase Realtime) — gdy ktoś inny doda mecz, wpłatę albo zgłosi się jako
-  // nowy zawodnik, wszyscy podłączeni klienci od razu przeliczają kropki/dzwonek, bez przeładowania
-  // strony. Wymaga włączonej Replication dla tabel matches/transactions/players w Supabase.
+  // Nasłuch na żywo (Supabase Realtime) — gdy ktoś inny doda mecz, wpłatę, ogłoszenie albo
+  // zgłosi się jako nowy zawodnik, wszyscy podłączeni klienci od razu przeliczają kropki/
+  // dzwonek, bez przeładowania strony. Wymaga włączonej Replication dla tabel matches/
+  // transactions/players/announcements w Supabase — jeśli jest wyłączona, kropki i tak się
+  // zaktualizują (przy nawigacji / co jakiś czas), po prostu nie "na żywo" bez odświeżenia.
   useEffect(() => {
     const channel = supabase
       .channel("sidebar-badges")
@@ -120,6 +135,9 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
       .on("postgres_changes", { event: "*", schema: "public", table: "players" }, () => {
         window.dispatchEvent(new Event("update-badges"))
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "announcements" }, () => {
+        window.dispatchEvent(new Event("update-badges"))
+      })
       .subscribe()
 
     return () => {
@@ -129,20 +147,27 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
 
   // Gdy wchodzisz w zakładkę, natychmiast oznacza jej WSZYSTKIE rekordy jako odczytane
   async function handleNavClick(path: string) {
-    if (path === "/") {
-      setUnreadMatches(false)
-      const { data } = await supabase.from("matches").select("id")
-      localStorage.setItem("volley_read_matches", JSON.stringify(data?.map(d => String(d.id)) || []))
-    }
-    if (path === "/players") {
-      setUnreadPlayers(false)
-      const { data } = await supabase.from("players").select("id").or("player_status_id.eq.3,role_id.eq.3")
-      localStorage.setItem("volley_read_players", JSON.stringify(data?.map(d => String(d.id)) || []))
-    }
-    if (path === "/finances") {
-      setUnreadFinances(false)
-      const { data } = await supabase.from("transactions").select("id")
-      localStorage.setItem("volley_read_txs", JSON.stringify(data?.map(d => String(d.id)) || []))
+    if (user?.id) {
+      if (path === "/") {
+        setUnreadMatches(false)
+        const { data } = await supabase.from("matches").select("id")
+        await markKeysRead(user.id, (data || []).map((d) => `match-${d.id}`))
+      }
+      if (path === "/players") {
+        setUnreadPlayers(false)
+        const { data } = await supabase.from("players").select("id").or("player_status_id.eq.3,role_id.eq.3")
+        await markKeysRead(user.id, (data || []).map((d) => `player-${d.id}`))
+      }
+      if (path === "/finances") {
+        setUnreadFinances(false)
+        const { data } = await supabase.from("transactions").select("id")
+        await markKeysRead(user.id, (data || []).map((d) => `tx-${d.id}`))
+      }
+      if (path === "/announcements") {
+        setUnreadAnnouncements(false)
+        const { data } = await supabase.from("announcements").select("id")
+        await markKeysRead(user.id, (data || []).map((d) => `announcement-${d.id}`))
+      }
     }
 
     closeSidebar()
@@ -175,7 +200,7 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
     { href: "/players", label: "Zawodnicy / Skład", shortLabel: "Skład", icon: Users, hasDot: unreadPlayers, color: "#7A5CFF" },
     { href: "/finances", label: "Finanse", shortLabel: "Finanse", icon: Wallet, hasDot: unreadFinances, color: "#00C48C" },
     { href: "/stats", label: "Statystyki", shortLabel: "Statystyki", icon: BarChart3, hasDot: false, color: YELLOW },
-    { href: "/announcements", label: "Ogłoszenia", shortLabel: "Ogłoszenia", icon: Megaphone, hasDot: false, color: "#FF5A5F" },
+    { href: "/announcements", label: "Ogłoszenia", shortLabel: "Ogłoszenia", icon: Megaphone, hasDot: unreadAnnouncements, color: "#FF5A5F" },
     { href: "/settings", label: "Ustawienia", shortLabel: "Ustawienia", icon: Settings, hasDot: false, color: "#94A3B8" },
     { href: "/profile", label: "Mój profil", shortLabel: "Profil", icon: User, hasDot: false, color: "#94A3B8" },
   ]

@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Bell, Calendar, Wallet, X } from "lucide-react"
+import { Bell, Calendar, Wallet, Megaphone, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { fetchReadKeys, markKeysRead } from "@/lib/notifications"
 import { formatDatePL } from "@/lib/utils"
 
 export type NotificationItem = {
@@ -11,40 +12,50 @@ export type NotificationItem = {
   title: string
   description: string
   date: string
-  type: "match" | "finance" | "player"
+  type: "match" | "finance" | "announcement"
   read: boolean
   created_at?: string
 }
 
-export function NotificationsBell({ onNotificationClick }: { onNotificationClick?: (notif: NotificationItem) => void }) {
+// "Przeczytane" żyje teraz w bazie (tabela notification_reads), nie w localStorage —
+// patrz lib/notifications.ts po wyjaśnienie dlaczego to wcześniej dawało błędne liczniki
+// (np. "+40 znowu przy kolejnym logowaniu"), niezsynchronizowane między telefonem a komputerem.
+export function NotificationsBell({
+  playerId,
+  onNotificationClick
+}: {
+  playerId?: string
+  onNotificationClick?: (notif: NotificationItem) => void
+}) {
   const [isOpen, setIsOpen] = useState(false)
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
 
   useEffect(() => {
+    if (!playerId) return
     fetchRecentNotifications()
 
     const handleRefresh = () => fetchRecentNotifications()
     window.addEventListener("update-badges", handleRefresh)
     return () => window.removeEventListener("update-badges", handleRefresh)
-  }, [])
+  }, [playerId])
 
   async function fetchRecentNotifications() {
-    // Pobieramy ID, które już widzieliśmy
-    const readMatches = JSON.parse(localStorage.getItem("volley_read_matches") || "[]")
-    const readTxs = JSON.parse(localStorage.getItem("volley_read_txs") || "[]")
+    if (!playerId) return
+    const readKeys = await fetchReadKeys(playerId)
 
-    const [{ data: matches }, { data: txs }] = await Promise.all([
+    const [{ data: matches }, { data: txs }, { data: announcements }] = await Promise.all([
       supabase.from("matches").select("*").order("created_at", { ascending: false }).limit(20),
-      supabase.from("transactions").select("*").order("created_at", { ascending: false }).limit(20)
+      supabase.from("transactions").select("*").order("created_at", { ascending: false }).limit(20),
+      supabase.from("announcements").select("*").order("created_at", { ascending: false }).limit(20)
     ])
 
     const list: NotificationItem[] = []
 
     matches?.forEach((m) => {
-      // Jeśli ID meczu NIE JEST w zapisanych, dodajemy do powiadomień
-      if (!readMatches.includes(String(m.id))) {
+      const key = `match-${m.id}`
+      if (!readKeys.has(key)) {
         list.push({
-          id: `match-${m.id}`,
+          id: key,
           dbId: String(m.id),
           title: "Nowy / Zmieniony mecz",
           description: `Mecz (${formatDatePL(m.date)}) - ${m.location || 'Hala Jaworze'}`,
@@ -57,10 +68,10 @@ export function NotificationsBell({ onNotificationClick }: { onNotificationClick
     })
 
     txs?.forEach((t) => {
-      // Jeśli ID transakcji NIE JEST w zapisanych, dodajemy
-      if (!readTxs.includes(String(t.id))) {
+      const key = `tx-${t.id}`
+      if (!readKeys.has(key)) {
         list.push({
-          id: `tx-${t.id}`,
+          id: key,
           dbId: String(t.id),
           title: t.type === "income" ? "Nowa wpłata" : "Nowy wydatek",
           description: `${t.title} (${t.amount} PLN)`,
@@ -68,6 +79,22 @@ export function NotificationsBell({ onNotificationClick }: { onNotificationClick
           type: "finance",
           read: false,
           created_at: t.created_at
+        })
+      }
+    })
+
+    announcements?.forEach((a) => {
+      const key = `announcement-${a.id}`
+      if (!readKeys.has(key)) {
+        list.push({
+          id: key,
+          dbId: String(a.id),
+          title: "Nowe ogłoszenie",
+          description: a.title,
+          date: a.created_at ? new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Dzisiaj",
+          type: "announcement",
+          read: false,
+          created_at: a.created_at
         })
       }
     })
@@ -81,32 +108,18 @@ export function NotificationsBell({ onNotificationClick }: { onNotificationClick
     setNotifications(list)
   }
 
-  function markAsRead(item: NotificationItem) {
-    if (item.type === "match") {
-      const readMatches = JSON.parse(localStorage.getItem("volley_read_matches") || "[]")
-      localStorage.setItem("volley_read_matches", JSON.stringify([...readMatches, item.dbId]))
-    } else if (item.type === "finance") {
-      const readTxs = JSON.parse(localStorage.getItem("volley_read_txs") || "[]")
-      localStorage.setItem("volley_read_txs", JSON.stringify([...readTxs, item.dbId]))
-    }
-
+  async function markAsRead(item: NotificationItem) {
+    if (!playerId) return
     setNotifications((prev) => prev.filter((n) => n.id !== item.id))
+    await markKeysRead(playerId, [item.id])
     window.dispatchEvent(new Event("update-badges")) // Gasi kropkę w menu natychmiast
   }
 
   async function markAllAsRead() {
-    // Twarde przypisanie WSZYSTKICH obecnych ID w bazie jako przeczytane. Zero zabawy w daty.
-    const [{ data: m }, { data: p }, { data: t }] = await Promise.all([
-      supabase.from("matches").select("id"),
-      supabase.from("players").select("id").or("player_status_id.eq.3,role_id.eq.3"),
-      supabase.from("transactions").select("id")
-    ])
-
-    localStorage.setItem("volley_read_matches", JSON.stringify(m?.map(x => String(x.id)) || []))
-    localStorage.setItem("volley_read_players", JSON.stringify(p?.map(x => String(x.id)) || []))
-    localStorage.setItem("volley_read_txs", JSON.stringify(t?.map(x => String(x.id)) || []))
-
+    if (!playerId) return
+    const keys = notifications.map((n) => n.id)
     setNotifications([])
+    await markKeysRead(playerId, keys)
     window.dispatchEvent(new Event("update-badges"))
   }
 
@@ -169,9 +182,9 @@ export function NotificationsBell({ onNotificationClick }: { onNotificationClick
                   className="flex items-start gap-3 p-2.5 rounded-2xl border text-xs bg-blue-50/60 border-blue-200 text-slate-900 font-bold shadow-sm transition-all cursor-pointer hover:bg-blue-100/80"
                 >
                   <div className={`flex h-8 w-8 items-center justify-center rounded-xl shrink-0 mt-0.5 ${
-                    item.type === "match" ? "bg-blue-100 text-blue-600" : "bg-emerald-100 text-emerald-600"
+                    item.type === "match" ? "bg-blue-100 text-blue-600" : item.type === "announcement" ? "bg-violet-100 text-violet-600" : "bg-emerald-100 text-emerald-600"
                   }`}>
-                    {item.type === "match" ? <Calendar className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
+                    {item.type === "match" ? <Calendar className="h-4 w-4" /> : item.type === "announcement" ? <Megaphone className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
                   </div>
 
                   <div className="flex-1 min-w-0">

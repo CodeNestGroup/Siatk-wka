@@ -28,6 +28,7 @@ import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-
 import { Button } from "@/components/ui/button"
 import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
+import { notifyPush } from "@/lib/push"
 import { getTransactions, getPlayerBalances } from "@/lib/data"
 
 // ────────────────────────────────────────────────────────────────
@@ -342,6 +343,12 @@ export default function FinancesPage() {
         notify(`Błąd zapisu: ${error.message}`)
       } else if (data && data.length > 0) {
         setTransactions([data[0], ...transactions])
+        notifyPush({
+          title: newType === "income" ? "Nowa wpłata w kasie" : "Nowy wydatek w kasie",
+          body: `${newTitle} (${amountNum} PLN)`,
+          url: "/finances",
+          excludePlayerId: user?.id
+        })
         closeTransactionModal()
         notify("Pomyślnie dodano operację do kasy!")
       }
@@ -442,6 +449,7 @@ export default function FinancesPage() {
               <Coffee className="h-4 w-4" />
             </button>
             <NotificationsBell
+              playerId={user?.id}
               onNotificationClick={(notif: NotificationItem) => {}}
             />
           </div>

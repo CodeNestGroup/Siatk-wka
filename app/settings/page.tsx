@@ -14,7 +14,9 @@ import {
   Download,
   Smartphone,
   AlertCircle,
-  Coffee
+  Coffee,
+  Bell,
+  BellOff
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
@@ -22,6 +24,7 @@ import { SupportModal } from "@/components/dashboard/support-modal"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { isPushSupported, getExistingPushSubscription, subscribeToPush, unsubscribeFromPush } from "@/lib/push"
 
 // ────────────────────────────────────────────────────────────────
 // Te same tokeny co reszta dashboardu ("Under the Lights")
@@ -35,6 +38,42 @@ export default function SettingsPage() {
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [showSupportModal, setShowSupportModal] = useState(false)
+
+  // Powiadomienia push — "checking" dopóki nie sprawdzimy realnego stanu przeglądarki,
+  // żeby nie mrugnąć złym przyciskiem na ułamek sekundy przy pierwszym renderze.
+  const [pushStatus, setPushStatus] = useState<"checking" | "unsupported" | "denied" | "enabled" | "disabled">("checking")
+  const [isTogglingPush, setIsTogglingPush] = useState(false)
+
+  useEffect(() => {
+    (async () => {
+      if (!isPushSupported()) { setPushStatus("unsupported"); return }
+      if (Notification.permission === "denied") { setPushStatus("denied"); return }
+      const sub = await getExistingPushSubscription()
+      setPushStatus(sub ? "enabled" : "disabled")
+    })()
+  }, [])
+
+  async function handleTogglePush() {
+    if (!user?.id || isTogglingPush) return
+    setIsTogglingPush(true)
+
+    if (pushStatus === "enabled") {
+      await unsubscribeFromPush()
+      setPushStatus("disabled")
+      showNotify("Powiadomienia push wyłączone na tym urządzeniu")
+    } else {
+      const ok = await subscribeToPush(user.id)
+      if (ok) {
+        setPushStatus("enabled")
+        showNotify("Powiadomienia push włączone na tym urządzeniu!")
+      } else {
+        setPushStatus(Notification.permission === "denied" ? "denied" : "unsupported")
+        showNotify("Nie udało się włączyć — sprawdź zgody powiadomień w przeglądarce")
+      }
+    }
+
+    setIsTogglingPush(false)
+  }
 
   // Stany profilowe
   const [fullName, setFullName] = useState("")
@@ -214,7 +253,7 @@ export default function SettingsPage() {
             >
               <Coffee className="h-4 w-4" />
             </button>
-            <NotificationsBell onNotificationClick={(notif: NotificationItem) => {}} />
+            <NotificationsBell playerId={user?.id} onNotificationClick={(notif: NotificationItem) => {}} />
           </div>
         </header>
 
@@ -291,6 +330,62 @@ export default function SettingsPage() {
                 </Button>
               </div>
             </form>
+          </div>
+
+          {/* Powiadomienia push — realna wersja tego, co wcześniej było martwymi przełącznikami
+              "Kanały Powiadomień" (usunięte, bo nic nie robiły). Teraz faktycznie rejestrują
+              urządzenie w Web Push, więc telefon/desktop dostaje prawdziwe powiadomienie
+              systemowe przy nowym meczu/ogłoszeniu/wpłacie — nawet gdy appka jest zamknięta. */}
+          <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-75 fill-mode-both">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+              <div className={cn(
+                "flex h-10 w-10 items-center justify-center rounded-2xl border",
+                pushStatus === "enabled" ? "bg-[#2C4BFF]/10 text-[#2C4BFF] border-[#2C4BFF]/20" : "bg-slate-100 text-slate-400 border-slate-200"
+              )}>
+                {pushStatus === "enabled" ? <Bell className="h-5 w-5" /> : <BellOff className="h-5 w-5" />}
+              </div>
+              <div>
+                <h2 className={cn(display.className, "text-sm font-bold text-slate-900")}>Powiadomienia push</h2>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">Nowy mecz, ogłoszenie albo wpłata — prosto na telefon.</p>
+              </div>
+            </div>
+
+            {pushStatus === "unsupported" && (
+              <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                Ta przeglądarka nie obsługuje powiadomień push. Na iPhonie: najpierw dodaj appkę do ekranu głównego
+                (przycisk Udostępnij → <strong className="text-slate-700">Dodaj do ekranu głównego</strong>), otwórz ją stamtąd,
+                a potem wróć tu ponownie.
+              </p>
+            )}
+
+            {pushStatus === "denied" && (
+              <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                Zablokowałeś/aś powiadomienia dla tej strony w przeglądarce — żeby je włączyć, zmień to ręcznie
+                w ustawieniach przeglądarki (ikona kłódki przy adresie strony) i wróć tutaj.
+              </p>
+            )}
+
+            {(pushStatus === "enabled" || pushStatus === "disabled") && (
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <p className="text-xs font-semibold text-slate-600">
+                  {pushStatus === "enabled" ? "Włączone na tym urządzeniu." : "Wyłączone na tym urządzeniu."}
+                </p>
+                <Button
+                  type="button"
+                  onClick={handleTogglePush}
+                  disabled={isTogglingPush}
+                  className={cn(
+                    "gap-2 rounded-xl text-xs font-bold cursor-pointer active:scale-[0.97] shadow-md",
+                    pushStatus === "enabled"
+                      ? "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-none"
+                      : "bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white shadow-[#2C4BFF]/20"
+                  )}
+                >
+                  {pushStatus === "enabled" ? <BellOff className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+                  {isTogglingPush ? "Chwila…" : pushStatus === "enabled" ? "Wyłącz powiadomienia" : "Włącz powiadomienia"}
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Sekcja 2: Rozliczenia i Wpisowe — cała sekcja "Wkrótce". Prawdziwy sposób rozliczania

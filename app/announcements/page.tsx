@@ -29,6 +29,7 @@ import { Modal } from "@/components/ui/modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
 import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
+import { notifyPush } from "@/lib/push"
 
 // ────────────────────────────────────────────────────────────────
 // Te same tokeny co reszta dashboardu ("Under the Lights")
@@ -274,6 +275,12 @@ export default function AnnouncementsPage() {
 
     if (data) {
       setAnnouncements((prev) => [data, ...prev])
+      notifyPush({
+        title: "Nowe ogłoszenie",
+        body: newTitle,
+        url: "/announcements",
+        excludePlayerId: user?.id
+      })
       notify("Ogłoszenie zostało pomyślnie opublikowane")
     }
 
@@ -499,7 +506,7 @@ export default function AnnouncementsPage() {
             >
               <Coffee className="h-4 w-4" />
             </button>
-            <NotificationsBell onNotificationClick={(notif: NotificationItem) => {}} />
+            <NotificationsBell playerId={user?.id} onNotificationClick={(notif: NotificationItem) => {}} />
           </div>
         </header>
 
