@@ -880,7 +880,12 @@ export default function PlayersPage() {
         />
 
         {/* NAGŁÓWEK — ten sam wzorzec co reszta appki */}
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0">
+        {/* iOS ze statusem "black-translucent" nakłada zegar/baterię/wifi na treść zamiast
+            rezerwować dla nich pasek — bez tego paddingu system zasłaniał ikony w nagłówku. */}
+        <header
+          className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0"
+          style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
+        >
           <div className="flex-1 flex items-center gap-2.5 overflow-hidden">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120]">
               <Coffee className="h-3.5 w-3.5 stroke-[2.5]" />

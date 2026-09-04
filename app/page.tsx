@@ -970,7 +970,15 @@ export default function DashboardPage() {
         />
 
         {/* HEADER — pasek utylitarny, świadomie wyciszony (bohaterem jest hero poniżej) */}
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0">
+        {/* iOS z paskiem statusu "black-translucent" (patrz app/layout.tsx) renderuje status bar
+            JAKO przezroczystą nakładkę na treść, nie jako osobny pasek — bez paddingu na
+            safe-area-inset-top zegar/bateria/wifi systemu nakładały się na ten nagłówek,
+            zasłaniając X i inne przyciski (dokładnie tak jak dolny pasek nawigacji już
+            wcześniej dostał to samo dla safe-area-inset-bottom). */}
+        <header
+          className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0"
+          style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
+        >
           {!coffeeBannerDismissed && (
             <div className="flex-1 flex items-center gap-2.5 overflow-hidden">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120]">

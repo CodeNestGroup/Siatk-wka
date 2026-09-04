@@ -414,7 +414,12 @@ export default function FinancesPage() {
         />
 
         {/* Header z wstęgą sponsorów */}
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/80 pl-16 pr-6 py-3.5 lg:px-6 backdrop-blur-md">
+        {/* iOS ze statusem "black-translucent" nakłada zegar/baterię/wifi na treść zamiast
+            rezerwować dla nich pasek — bez tego paddingu system zasłaniał ikony w nagłówku. */}
+        <header
+          className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200/80 bg-white/80 pl-16 pr-6 py-3.5 lg:px-6 backdrop-blur-md"
+          style={{ paddingTop: "max(0.875rem, env(safe-area-inset-top))" }}
+        >
           <style jsx>{`
             @keyframes marquee { 0% { transform: translateX(0%); } 100% { transform: translateX(-50%); } }
             .animate-marquee { display: flex; width: max-content; animation: marquee 30s linear infinite; }

@@ -506,7 +506,12 @@ export default function AnnouncementsPage() {
         />
 
         {/* Header — ta strona wcześniej w ogóle go nie miała (brak dzwonka, brak wsparcia) */}
-        <header className="sticky top-0 z-30 flex items-center justify-end border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0">
+        {/* iOS ze statusem "black-translucent" nakłada zegar/baterię/wifi na treść zamiast
+            rezerwować dla nich pasek — bez tego paddingu system zasłaniał ikony w nagłówku. */}
+        <header
+          className="sticky top-0 z-30 flex items-center justify-end border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0"
+          style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
+        >
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowSupportModal(true)}
