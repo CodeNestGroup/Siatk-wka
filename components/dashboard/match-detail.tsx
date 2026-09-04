@@ -83,6 +83,15 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   const totalCollectedSoFar = paidRosterCount * price
   const isSettled = !!match.is_settled
 
+  // Zawodnik nie może się już wypisać na mniej niż 2h przed meczem (ani gdy mecz już trwa/minął) —
+  // bez tego ktoś mógł zrezygnować dosłownie tuż przed rozpoczęciem, zostawiając drużynę w połowie
+  // składu bez czasu na znalezienie zastępstwa. Admin nadal może wypisać KOGOŚ INNEGO w każdej
+  // chwili (np. faktyczny brak stawiennictwa) — blokada dotyczy wyłącznie wypisania SAMEGO SIEBIE.
+  const TWO_HOURS_MS = 2 * 60 * 60 * 1000
+  const matchStartAt = new Date(`${match.date}T${(match.time_start || "19:00:00").slice(0, 8)}`)
+  const msUntilMatch = matchStartAt.getTime() - Date.now()
+  const canLeaveMatch = msUntilMatch >= TWO_HOURS_MS
+
   const [toast, setToast] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
@@ -213,6 +222,13 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
 
   function handleRemovePlayer(playerId: string) {
     if (isSettled) return
+
+    const isSelf = playerId === currentUser?.id
+    if (isSelf && !canLeaveMatch) {
+      notify("Za późno na wypisanie — zostały mniej niż 2h do meczu. Skontaktuj się z administratorem.")
+      return
+    }
+
     setConfirmDialog({
       title: "Wypisać zawodnika?",
       message: "Zawodnik zniknie ze składu tego meczu — będzie mógł zapisać się ponownie, jeśli zostaną wolne miejsca.",
@@ -547,14 +563,24 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
         <div className="pt-3 border-t border-slate-100 flex items-center gap-3">
           {(
             isUserInMatch ? (
-              <Button
-                variant="outline"
-                onClick={() => handleRemovePlayer(currentUser.id)}
-                className="rounded-xl border-[#FF5A5F]/30 text-[#FF5A5F] hover:bg-[#FF5A5F]/10 text-xs font-bold gap-1.5 cursor-pointer"
-              >
-                <UserMinus className="h-4 w-4" />
-                Wypisz mnie
-              </Button>
+              canLeaveMatch ? (
+                <Button
+                  variant="outline"
+                  onClick={() => handleRemovePlayer(currentUser.id)}
+                  className="rounded-xl border-[#FF5A5F]/30 text-[#FF5A5F] hover:bg-[#FF5A5F]/10 text-xs font-bold gap-1.5 cursor-pointer"
+                >
+                  <UserMinus className="h-4 w-4" />
+                  Wypisz mnie
+                </Button>
+              ) : (
+                <div
+                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs font-bold text-slate-400"
+                  title="Skontaktuj się z administratorem, jeśli musisz zrezygnować tak późno"
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                  Wypisanie zablokowane (&lt;2h do meczu)
+                </div>
+              )
             ) : (
               <Button
                 onClick={handleJoinMatch}

@@ -67,6 +67,7 @@ type Announcement = {
   matches?: {
     date: string
     location: string
+    time_start: string | null
   } | null
 }
 
@@ -90,6 +91,12 @@ type AnnouncementComment = {
 function isAuthorAdmin(author: AuthorInfo | null | undefined): boolean {
   if (!author) return false
   return author.role_id === 1 || author.email === "admin@admin.pl" || author.full_name === "Mateusz Podzorski"
+}
+
+// Mecze mają teraz ustawialną godzinę (wcześniej sztywne 19:00-21:00) — samo "Mecz: 16.10.2026"
+// bez godziny przestało wystarczać, gdy admin faktycznie ustawi inną porę niż domyślna.
+function matchDateTimeLabel(date: string, timeStart?: string | null): string {
+  return timeStart ? `${formatDatePL(date)} • ${timeStart.slice(0, 5)}` : formatDatePL(date)
 }
 
 export default function AnnouncementsPage() {
@@ -117,7 +124,7 @@ export default function AnnouncementsPage() {
   const [newCategoryId, setNewCategoryId] = useState<number>(2)
   const [newIsPinned, setNewIsPinned] = useState(false)
   const [newMatchId, setNewMatchId] = useState<string>("")
-  const [matchOptions, setMatchOptions] = useState<{ id: string; date: string; location: string | null }[]>([])
+  const [matchOptions, setMatchOptions] = useState<{ id: string; date: string; location: string | null; time_start: string | null }[]>([])
 
   const [commentsByAnnouncement, setCommentsByAnnouncement] = useState<Record<string, AnnouncementComment[]>>({})
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set())
@@ -144,7 +151,7 @@ export default function AnnouncementsPage() {
   async function fetchMatchOptions() {
     const { data, error } = await supabase
       .from('matches')
-      .select('id, date, location')
+      .select('id, date, location, time_start')
       .order('date', { ascending: false })
 
     if (error) {
@@ -167,7 +174,8 @@ export default function AnnouncementsPage() {
         ),
         matches:match_id (
           date,
-          location
+          location,
+          time_start
         )
       `)
       .order('created_at', { ascending: false })
@@ -262,7 +270,8 @@ export default function AnnouncementsPage() {
         ),
         matches:match_id (
           date,
-          location
+          location,
+          time_start
         )
       `)
       .single()
@@ -684,7 +693,7 @@ export default function AnnouncementsPage() {
                           <h3 className={cn(display.className, "text-lg font-bold text-white leading-snug")}>{item.title}</h3>
                           {item.matches?.date && (
                             <p className={cn(score.className, "flex items-center gap-1.5 text-[11px] font-semibold text-slate-400")}>
-                              <Calendar className="h-3 w-3 text-[#FFD23F]" /> Mecz: {formatDatePL(item.matches.date)}
+                              <Calendar className="h-3 w-3 text-[#FFD23F]" /> Mecz: {matchDateTimeLabel(item.matches.date, item.matches.time_start)}
                             </p>
                           )}
                         </div>
@@ -760,7 +769,7 @@ export default function AnnouncementsPage() {
                         <h3 className="text-base font-bold leading-snug text-slate-900">{item.title}</h3>
                         {item.matches?.date && (
                           <p className={cn(score.className, "flex items-center gap-1.5 text-[11px] font-semibold text-slate-500")}>
-                            <Calendar className="h-3 w-3 text-[#2C4BFF]" /> Mecz: {formatDatePL(item.matches.date)}
+                            <Calendar className="h-3 w-3 text-[#2C4BFF]" /> Mecz: {matchDateTimeLabel(item.matches.date, item.matches.time_start)}
                           </p>
                         )}
                       </div>
@@ -860,7 +869,7 @@ export default function AnnouncementsPage() {
               <option value="">— Brak —</option>
               {matchOptions.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {formatDatePL(m.date)}{m.location ? ` — ${m.location}` : ""}
+                  {matchDateTimeLabel(m.date, m.time_start)}{m.location ? ` — ${m.location}` : ""}
                 </option>
               ))}
             </select>
