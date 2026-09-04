@@ -16,6 +16,7 @@ import {
   CalendarCheck,
   Calendar,
   X,
+  Coffee,
   ChevronDown,
   MessageCircle,
   ShieldCheck
@@ -23,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
+import { SupportModal } from "@/components/dashboard/support-modal"
 import { Modal } from "@/components/ui/modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
 import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
@@ -111,6 +113,7 @@ export default function AnnouncementsPage() {
   }, [selectedCategory, search])
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [showSupportModal, setShowSupportModal] = useState(false)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
 
   const isAdmin = user?.role === "admin" || user?.is_admin || user?.email === "admin@admin.pl" || user?.name === "Mateusz Podzorski" || user?.full_name === "Mateusz Podzorski"
@@ -510,6 +513,14 @@ export default function AnnouncementsPage() {
           style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
         >
           <div className="flex items-center gap-3">
+            {/* Tylko na desktopie — na telefonie ma zostać wyłącznie dzwoneczek. */}
+            <button
+              onClick={() => setShowSupportModal(true)}
+              className="hidden sm:flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120] shadow-sm cursor-pointer active:scale-90 transition-transform"
+              title="Postaw kawę"
+            >
+              <Coffee className="h-4 w-4" />
+            </button>
             <NotificationsBell playerId={user?.id} onNotificationClick={(notif: NotificationItem) => {}} />
           </div>
         </header>
@@ -827,6 +838,8 @@ export default function AnnouncementsPage() {
           </div>
         </main>
       </div>
+
+      <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
 
       {/* MODAL NOWEGO OGŁOSZENIA */}
       <Modal

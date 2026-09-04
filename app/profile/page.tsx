@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
-import { User, Mail, Shield, Calendar, Trophy, ArrowRight, IdCard } from "lucide-react"
+import { User, Mail, Shield, Calendar, Trophy, ArrowRight, IdCard, Coffee, Heart, X } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell } from "@/components/dashboard/notifications-bell"
+import { SupportModal } from "@/components/dashboard/support-modal"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -37,6 +38,11 @@ const MONTHS_NOMINATIVE_PL = ["Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", 
 export default function ProfilePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
+
+  // Modal wsparcia. Na desktopie baner zostaje na stałe (bez krzyżyka), na telefonie dostaje
+  // krzyżyk i po zamknięciu znika całkowicie (sam dzwoneczek).
+  const [showSupportModal, setShowSupportModal] = useState(false)
+  const [coffeeBannerDismissed, setCoffeeBannerDismissed] = useState(false)
 
   // Karta profilowa wcześniej pokazywała trzy kafelki na sztywno wpisane w kod ("Aktywny
   // Gracz", "0.00 PLN (Czysto)", "Sezon 2026") — żaden nie odzwierciedlał realnych danych.
@@ -93,6 +99,10 @@ export default function ProfilePage() {
     }
 
     loadUserData()
+
+    if (localStorage.getItem("volley_coffee_banner_dismissed") === "true") {
+      setCoffeeBannerDismissed(true)
+    }
   }, [])
 
   async function handleLogout() {
@@ -100,6 +110,11 @@ export default function ProfilePage() {
     sessionStorage.clear()
     await supabase.auth.signOut()
     window.location.href = "/login"
+  }
+
+  function handleDismissCoffeeBanner() {
+    setCoffeeBannerDismissed(true)
+    localStorage.setItem("volley_coffee_banner_dismissed", "true")
   }
 
   const displayName = user?.full_name || user?.name || (user?.email === "admin@admin.pl" ? "Mateusz Podzorski" : user?.email) || "Użytkownik"
@@ -136,6 +151,44 @@ export default function ProfilePage() {
           className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0"
           style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
         >
+          {/* Desktop — baner trwały, celowo BEZ krzyżyka (ma zostać na stałe, nie do zamknięcia). */}
+          <div className="hidden sm:flex flex-1 items-center gap-2.5 overflow-hidden">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120]">
+              <Coffee className="h-3.5 w-3.5 stroke-[2.5]" />
+            </div>
+            <p className="text-xs font-medium text-slate-500 truncate">
+              Podoba Ci się nasza inicjatywa? <strong className="text-slate-700 font-semibold">Postaw kawę organizatorom lub wesprzyj rozwój projektu!</strong>
+            </p>
+            <button
+              onClick={() => setShowSupportModal(true)}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-[#0B1120] hover:bg-[#1A2340] text-white font-bold text-xs px-4 py-2 shadow-sm transition-all cursor-pointer active:scale-[0.97] shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF] focus-visible:ring-offset-2"
+            >
+              <Heart className="h-3.5 w-3.5 fill-[#FFD23F] text-[#FFD23F]" />
+              Postaw kawę
+            </button>
+          </div>
+
+          {/* Telefon — kompaktowy skrót z krzyżykiem, po zamknięciu znika całkowicie. */}
+          {!coffeeBannerDismissed && (
+            <div className="flex sm:hidden flex-1 items-center gap-2">
+              <button
+                onClick={() => setShowSupportModal(true)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120] shadow-sm cursor-pointer active:scale-90 transition-transform"
+                title="Postaw kawę"
+              >
+                <Coffee className="h-4 w-4" />
+              </button>
+              <button
+                onClick={handleDismissCoffeeBanner}
+                className="ml-auto shrink-0 flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors cursor-pointer active:scale-90"
+                title="Zamknij"
+                aria-label="Zamknij skrót wsparcia"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center gap-3 shrink-0 ml-auto pl-4">
             <NotificationsBell playerId={user?.id} onNotificationClick={() => {}} />
           </div>
@@ -259,6 +312,8 @@ export default function ProfilePage() {
 
         </main>
       </div>
+
+      <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
     </div>
   )
 }

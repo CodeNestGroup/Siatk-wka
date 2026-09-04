@@ -11,11 +11,13 @@ import {
   Percent,
   Search,
   X,
+  Coffee,
   Medal,
   ChevronDown
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
+import { SupportModal } from "@/components/dashboard/support-modal"
 import { supabase } from "@/lib/supabase"
 import { cn, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
 
@@ -95,6 +97,7 @@ export default function StatsPage() {
     setShowAllStats(false)
   }, [searchTerm])
   const [isLoading, setIsLoading] = useState(true)
+  const [showSupportModal, setShowSupportModal] = useState(false)
 
   const [matches, setMatches] = useState<any[]>([])
   const [players, setPlayers] = useState<any[]>([])
@@ -296,6 +299,15 @@ export default function StatsPage() {
           </div>
 
           <div className="flex items-center gap-3 shrink-0 ml-6">
+            {/* Tylko na desktopie — na telefonie ma zostać wyłącznie dzwoneczek, nie zabierać
+                miejsca. Bez krzyżyka: to trwały skrót, nie baner do zamykania. */}
+            <button
+              onClick={() => setShowSupportModal(true)}
+              className="hidden sm:flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120] shadow-sm cursor-pointer active:scale-90 transition-transform"
+              title="Postaw kawę"
+            >
+              <Coffee className="h-4 w-4" />
+            </button>
             <NotificationsBell
               playerId={user?.id}
               onNotificationClick={(notif: NotificationItem) => {}}
@@ -637,6 +649,8 @@ export default function StatsPage() {
 
         </main>
       </div>
+
+      <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
     </div>
   )
 }
