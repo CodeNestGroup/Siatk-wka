@@ -310,6 +310,8 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
               zależnie od urządzenia, jeden klik, żadnego wyboru */}
           <button
             onClick={handleAddToCalendar}
+            title="Kliknij, aby dodać ten mecz do swojego kalendarza"
+            aria-label="Dodaj ten mecz do swojego kalendarza"
             className="mt-3.5 flex items-center gap-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 px-3 py-1.5 text-[11px] font-bold text-white transition-all cursor-pointer active:scale-[0.97]"
           >
             <CalendarPlus className="h-3.5 w-3.5 text-[#FFD23F]" />

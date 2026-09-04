@@ -1087,13 +1087,19 @@ export default function DashboardPage() {
 
                   <div className="flex items-center gap-2 w-full sm:w-auto">
                     {/* Dodaj do kalendarza — sam wybiera Google Calendar albo .ics (Apple/Outlook)
-                        zależnie od urządzenia, jeden klik, żadnego wyboru */}
+                        zależnie od urządzenia, jeden klik, żadnego wyboru. Samo "Kalendarz" obok
+                        ikonki było niejednoznaczne (rzeczownik, nie czynność) — nie było jasne
+                        czy to otwiera podgląd kalendarza, czy coś dodaje. title/aria-label tłumaczą
+                        akcję wprost przy najechaniu, a etykieta na desktopie mówi to samo bez zgadywania. */}
                     <button
                       onClick={() => addMatchToCalendar({ id: nearestMatch.id, title: (nearestMatch as any).title, date: nearestMatch.date, timeStart: (nearestMatch as any).time_start, timeEnd: (nearestMatch as any).time_end, location: nearestMatch.location, price: nearestPrice })}
+                      title="Kliknij, aby dodać ten mecz do swojego kalendarza"
+                      aria-label="Dodaj ten mecz do swojego kalendarza"
                       className="flex shrink-0 items-center gap-1.5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 px-3.5 py-3.5 text-xs font-bold text-white transition-all cursor-pointer active:scale-[0.97]"
                     >
                       <CalendarPlus className="h-4 w-4 text-[#FFD23F]" />
-                      Kalendarz
+                      <span className="sm:hidden">Dodaj</span>
+                      <span className="hidden sm:inline">Dodaj do kalendarza</span>
                     </button>
 
                     <Button
