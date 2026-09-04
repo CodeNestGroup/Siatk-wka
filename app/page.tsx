@@ -24,8 +24,6 @@ import {
   Palmtree,
   CalendarCheck,
   CalendarX,
-  Coffee,
-  Heart,
   CheckSquare,
   Square,
   Megaphone,
@@ -39,7 +37,6 @@ import { MatchDetail } from "@/components/dashboard/match-detail"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
 import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/ui/modal"
-import { SupportModal } from "@/components/dashboard/support-modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
 import { type Match, mainRoster, waitlist } from "@/lib/data"
 import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch, addMatchToCalendar } from "@/lib/utils"
@@ -196,8 +193,6 @@ export default function DashboardPage() {
   const [isBatchDeleting, setIsBatchDeleting] = useState(false)
   const [isBatchCancelling, setIsBatchCancelling] = useState(false)
 
-  // Modal wsparcia
-  const [showSupportModal, setShowSupportModal] = useState(false)
 
   // Zastępuje natywne confirm() własnym, ostylowanym dialogiem
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
@@ -250,7 +245,6 @@ export default function DashboardPage() {
   const [durationMode, setDurationMode] = useState<"preset" | "custom_date">("preset")
   const [presetDurationMonths, setPresetDurationMonths] = useState<number>(2)
   const [repeatUntilDate, setRepeatUntilDate] = useState<string>("")
-  const [coffeeBannerDismissed, setCoffeeBannerDismissed] = useState(false)
 
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
@@ -272,9 +266,6 @@ export default function DashboardPage() {
       setReadMatchIds(JSON.parse(savedRead))
     }
 
-    if (localStorage.getItem("volley_coffee_banner_dismissed") === "true") {
-      setCoffeeBannerDismissed(true)
-    }
 
     loadData()
     loadPinnedAnnouncement()
@@ -790,13 +781,6 @@ export default function DashboardPage() {
     window.location.href = "/login"
   }
 
-  // Trwałe zamknięcie na danym urządzeniu — bez tego admin musiałby zamykać ten sam baner
-  // od nowa przy każdym wejściu, co byłoby równie irytujące jak sam baner.
-  function handleDismissCoffeeBanner() {
-    setCoffeeBannerDismissed(true)
-    localStorage.setItem("volley_coffee_banner_dismissed", "true")
-  }
-
   if (!user) return null
 
   const todayStr = new Date().toISOString().split("T")[0]
@@ -979,47 +963,9 @@ export default function DashboardPage() {
           className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0"
           style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
         >
-          {!coffeeBannerDismissed && (
-            <div className="flex-1 flex items-center gap-2.5 overflow-hidden">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120]">
-                <Coffee className="h-3.5 w-3.5 stroke-[2.5]" />
-              </div>
-
-              <p className="text-xs font-medium text-slate-500 truncate">
-                Podoba Ci się nasza inicjatywa? <strong className="text-slate-700 font-semibold">Postaw kawę organizatorom lub wesprzyj rozwój projektu!</strong>
-              </p>
-
-              <button
-                onClick={() => setShowSupportModal(true)}
-                className="ml-auto hidden sm:inline-flex items-center gap-1.5 rounded-full bg-[#0B1120] hover:bg-[#1A2340] text-white font-bold text-xs px-4 py-2 shadow-sm transition-all cursor-pointer active:scale-[0.97] shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF] focus-visible:ring-offset-2"
-              >
-                <Heart className="h-3.5 w-3.5 fill-[#FFD23F] text-[#FFD23F]" />
-                Postaw kawę
-              </button>
-
-              {/* Krzyżyk tylko na telefonie — tam baner realnie przeszkadza, zajmując cenny
-                  pasek nagłówka na wąskim ekranie. Na desktopie zostaje bez zmian, bo tam nie
-                  było na to skargi i jest więcej miejsca. */}
-              <button
-                onClick={handleDismissCoffeeBanner}
-                className="sm:hidden ml-auto shrink-0 flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors cursor-pointer active:scale-90"
-                title="Zamknij"
-                aria-label="Zamknij baner wsparcia"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-
+          {/* Baner "Postaw kawę" (tekst + odznaka + przyciski) usunięty na wyraźną prośbę —
+              cały nagłówek to teraz wyłącznie dzwoneczek powiadomień. */}
           <div className="flex items-center gap-3 shrink-0 ml-auto pl-4">
-            <button
-              onClick={() => setShowSupportModal(true)}
-              className="sm:hidden flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120] shadow-sm cursor-pointer active:scale-90 transition-transform"
-              title="Postaw kawę"
-            >
-              <Coffee className="h-4 w-4" />
-            </button>
-
             <NotificationsBell
               playerId={user?.id}
               onNotificationClick={(notif: NotificationItem) => {
@@ -1672,7 +1618,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
 
       {/* MODAL URLOPU */}
       <Modal

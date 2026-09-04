@@ -146,33 +146,37 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
   }, [])
 
   // Gdy wchodzisz w zakładkę, natychmiast oznacza jej WSZYSTKIE rekordy jako odczytane
-  async function handleNavClick(path: string) {
-    if (user?.id) {
+  // Nawigacja MUSI ruszyć natychmiast — wcześniej `router.push` czekał (await) na dwa
+  // kolejne zapytania do Supabase (odczyt ID + zapis "przeczytane"), więc każde kliknięcie
+  // w dolnym pasku na telefonie "zamulało" na czas tych zapytań, zanim cokolwiek się
+  // przełączyło. Oznaczanie jako przeczytane dzieje się teraz w tle, już PO nawigacji.
+  function handleNavClick(path: string) {
+    if (path === "/") setUnreadMatches(false)
+    if (path === "/players") setUnreadPlayers(false)
+    if (path === "/finances") setUnreadFinances(false)
+    if (path === "/announcements") setUnreadAnnouncements(false)
+
+    closeSidebar()
+    router.push(path) // Routing po stronie klienta — bez tego każdy klik przeładowywał całą aplikację od zera
+
+    if (!user?.id) return
+
+    ;(async () => {
       if (path === "/") {
-        setUnreadMatches(false)
         const { data } = await supabase.from("matches").select("id")
         await markKeysRead(user.id, (data || []).map((d) => `match-${d.id}`))
-      }
-      if (path === "/players") {
-        setUnreadPlayers(false)
+      } else if (path === "/players") {
         const { data } = await supabase.from("players").select("id").or("player_status_id.eq.3,role_id.eq.3")
         await markKeysRead(user.id, (data || []).map((d) => `player-${d.id}`))
-      }
-      if (path === "/finances") {
-        setUnreadFinances(false)
+      } else if (path === "/finances") {
         const { data } = await supabase.from("transactions").select("id")
         await markKeysRead(user.id, (data || []).map((d) => `tx-${d.id}`))
-      }
-      if (path === "/announcements") {
-        setUnreadAnnouncements(false)
+      } else if (path === "/announcements") {
         const { data } = await supabase.from("announcements").select("id")
         await markKeysRead(user.id, (data || []).map((d) => `announcement-${d.id}`))
       }
-    }
-
-    closeSidebar()
-    window.dispatchEvent(new Event("update-badges")) // Odświeża dzwonek
-    router.push(path) // Routing po stronie klienta — bez tego każdy klik przeładowywał całą aplikację od zera
+      window.dispatchEvent(new Event("update-badges")) // Odświeża dzwonek
+    })()
   }
 
   function handleLogoutClick() {

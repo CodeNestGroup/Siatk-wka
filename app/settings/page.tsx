@@ -14,13 +14,11 @@ import {
   Download,
   Smartphone,
   AlertCircle,
-  Coffee,
   Bell,
   BellOff
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
-import { SupportModal } from "@/components/dashboard/support-modal"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -37,7 +35,6 @@ export default function SettingsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
-  const [showSupportModal, setShowSupportModal] = useState(false)
 
   // Powiadomienia push — "checking" dopóki nie sprawdzimy realnego stanu przeglądarki,
   // żeby nie mrugnąć złym przyciskiem na ułamek sekundy przy pierwszym renderze.
@@ -251,13 +248,6 @@ export default function SettingsPage() {
           style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
         >
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowSupportModal(true)}
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120] shadow-sm cursor-pointer active:scale-90 transition-transform"
-              title="Postaw kawę"
-            >
-              <Coffee className="h-4 w-4" />
-            </button>
             <NotificationsBell playerId={user?.id} onNotificationClick={(notif: NotificationItem) => {}} />
           </div>
         </header>
@@ -512,8 +502,6 @@ export default function SettingsPage() {
 
         </main>
       </div>
-
-      <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
 
       {toast && (
         <div className="fixed bottom-24 lg:bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#0B1120]/95 backdrop-blur-md px-4 py-2.5 text-xs font-bold text-white shadow-xl animate-in fade-in slide-in-from-bottom-4">

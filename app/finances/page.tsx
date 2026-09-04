@@ -15,14 +15,11 @@ import {
   Trash2,
   Download,
   X,
-  Coffee,
-  Heart,
   Pencil,
   PieChart
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
-import { SupportModal } from "@/components/dashboard/support-modal"
 import { Modal } from "@/components/ui/modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
 import { Button } from "@/components/ui/button"
@@ -147,7 +144,6 @@ export default function FinancesPage() {
   // zawsze przeszukuje całą historię — ten sam mechanizm co gdzie indziej w appce.
   const [showFullHistory, setShowFullHistory] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
-  const [showSupportModal, setShowSupportModal] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
@@ -446,13 +442,6 @@ export default function FinancesPage() {
           </div>
 
           <div className="flex items-center gap-3 shrink-0 ml-6">
-            <button
-              onClick={() => setShowSupportModal(true)}
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFD23F]/90 text-[#0B1120] shadow-sm cursor-pointer active:scale-90 transition-transform"
-              title="Postaw kawę"
-            >
-              <Coffee className="h-4 w-4" />
-            </button>
             <NotificationsBell
               playerId={user?.id}
               onNotificationClick={(notif: NotificationItem) => {}}
@@ -867,8 +856,6 @@ export default function FinancesPage() {
 
         </main>
       </div>
-
-      <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
 
       {/* MODAL: Dodaj / edytuj operację */}
       <Modal
