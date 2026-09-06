@@ -894,8 +894,10 @@ export default function PlayersPage() {
         {/* NAGŁÓWEK — ten sam wzorzec co reszta appki */}
         {/* iOS ze statusem "black-translucent" nakłada zegar/baterię/wifi na treść zamiast
             rezerwować dla nich pasek — bez tego paddingu system zasłaniał ikony w nagłówku. */}
+        {/* Na telefonie header NIE jest już przyklejony (sticky tylko od sm: w górę) — patrz
+            app/page.tsx po pełne wyjaśnienie. */}
         <header
-          className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0"
+          className="static sm:sticky sm:top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0"
           style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
         >
           {/* Desktop — baner trwały, celowo BEZ krzyżyka (ma zostać na stałe, nie do zamknięcia). */}

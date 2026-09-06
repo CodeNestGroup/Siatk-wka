@@ -980,8 +980,11 @@ export default function DashboardPage() {
             safe-area-inset-top zegar/bateria/wifi systemu nakładały się na ten nagłówek,
             zasłaniając X i inne przyciski (dokładnie tak jak dolny pasek nawigacji już
             wcześniej dostał to samo dla safe-area-inset-bottom). */}
+        {/* Na telefonie header NIE jest już przyklejony (sticky tylko od sm: w górę) — na
+            wąskim ekranie zjadał cenne miejsce na treść, przewijając się razem ze wszystkim
+            innym jest mniej inwazyjny. Na desktopie zostaje przyklejony jak wcześniej. */}
         <header
-          className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0"
+          className="static sm:sticky sm:top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/90 pl-16 pr-6 py-3 lg:px-6 backdrop-blur-md shrink-0"
           style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
         >
           {/* Desktop — baner trwały, celowo BEZ krzyżyka (ma zostać na stałe, nie do zamknięcia). */}
