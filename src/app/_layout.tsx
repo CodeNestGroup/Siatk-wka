@@ -2,12 +2,16 @@ import { useEffect, useState, useCallback } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform, Linking } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import CustomAlert from '@/components/CustomAlert';
+import { useAppTheme } from '@/hooks/use-theme';
 
 export default function RootLayout() {
   const router = useRouter();
-  
+  const { c } = useAppTheme();
+
   // Stan alertu – scentralizowane zarządzanie komunikatami dla użytkownika z użyciem CustomAlert.tsx
   const [alert, setAlert] = useState<{
     visible: boolean;
@@ -117,27 +121,43 @@ export default function RootLayout() {
   }, [checkLoginState, requestPermissionsAndBatteryCheck, router]);
 
   return (
-    <>
-      {/* Stack ukrywa domyślny header, co pozwala na pełną kontrolę wyglądu w klimacie strony (#0B1120) */}
-      <Stack screenOptions={{ 
-        headerShown: false,
-        contentStyle: { backgroundColor: '#0B1120' } 
-      }}>
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(tabs)" />
-      </Stack>
+    // SafeAreaProvider musi być na samej górze drzewa — bez niego useSafeAreaInsets()/SafeAreaView
+    // działają na nieaktualnych/domyślnych wartościach zamiast rzeczywistych wcięć urządzenia,
+    // co na części telefonów (Android edge-to-edge domyślnie włączone od SDK 53) objawiało się
+    // dolnym paskiem zakładek zasłoniętym przez systemowy pasek nawigacji/gesty.
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        {/* Stack ukrywa domyślny header, co pozwala na pełną kontrolę wyglądu zależną od motywu */}
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: c.bg },
+          }}
+        >
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen
+            name="(match)"
+            options={{ animation: 'slide_from_right', gestureEnabled: true, gestureDirection: 'horizontal' }}
+          />
+          <Stack.Screen
+            name="(announcement)"
+            options={{ animation: 'slide_from_right', gestureEnabled: true, gestureDirection: 'horizontal' }}
+          />
+        </Stack>
 
-      {/* Globalny komponent CustomAlert widoczny nad całą aplikacją */}
-      <CustomAlert
-        visible={alert.visible}
-        title={alert.title}
-        message={alert.message}
-        type={alert.type}
-        confirmText={alert.confirmText}
-        cancelText={alert.cancelText}
-        onClose={alert.onConfirm}
-        onCancel={alert.onCancel}
-      />
-    </>
+        {/* Globalny komponent CustomAlert widoczny nad całą aplikacją */}
+        <CustomAlert
+          visible={alert.visible}
+          title={alert.title}
+          message={alert.message}
+          type={alert.type}
+          confirmText={alert.confirmText}
+          cancelText={alert.cancelText}
+          onClose={alert.onConfirm}
+          onCancel={alert.onCancel}
+        />
+      </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }

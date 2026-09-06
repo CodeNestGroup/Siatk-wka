@@ -1,23 +1,31 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
   StyleSheet,
   ScrollView,
   Switch,
   ActivityIndicator,
   Platform,
   Modal,
-  useColorScheme,
-  DeviceEventEmitter,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
+import { ensureCalendarPermission } from '@/services/calendarService';
+import { tapHaptic } from '@/lib/haptics';
+import { useAppTheme, type ThemeMode } from '@/hooks/use-theme';
+import { brand, radius, space, type Palette } from '@/constants/app-theme';
 import CustomAlert from '@/components/CustomAlert';
+import PressableScale from '@/components/ui/PressableScale';
+import Card from '@/components/ui/Card';
+import Pill from '@/components/ui/Pill';
+import Ticket from '@/components/ui/Ticket';
+import PrimaryButton from '@/components/ui/PrimaryButton';
+import DangerButton from '@/components/ui/DangerButton';
+import SegmentButtons from '@/components/ui/SegmentButtons';
 
 type CustomConfirmProps = {
   visible: boolean;
@@ -28,7 +36,7 @@ type CustomConfirmProps = {
   confirmText?: string;
   cancelText?: string;
   destructive?: boolean;
-  isDark: boolean;
+  c: Palette;
 };
 
 function CustomConfirm({
@@ -40,46 +48,35 @@ function CustomConfirm({
   confirmText = 'Tak',
   cancelText = 'Anuluj',
   destructive = false,
-  isDark,
+  c,
 }: CustomConfirmProps) {
   return (
-    <Modal
-      transparent
-      visible={visible}
-      animationType="fade"
-      onRequestClose={onCancel}
-    >
+    <Modal transparent visible={visible} animationType="fade" onRequestClose={onCancel}>
       <View style={confirmStyles.overlay}>
-        <View style={[confirmStyles.alertBox, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF', borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)' }]}>
-          <View style={confirmStyles.indicator} />
-          <Text style={[confirmStyles.title, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>{title}</Text>
-          <Text style={[confirmStyles.message, { color: isDark ? '#94A3B8' : '#64748B' }]}>{message}</Text>
+        <View style={[confirmStyles.alertBox, { backgroundColor: c.card, borderColor: c.line }]}>
+          <View style={[confirmStyles.indicator, { backgroundColor: brand.accent }]} />
+          <Text style={[confirmStyles.title, { color: c.ink }]}>{title}</Text>
+          <Text style={[confirmStyles.message, { color: c.ink2 }]}>{message}</Text>
           <View style={confirmStyles.confirmButtonsRow}>
-            <TouchableOpacity
-              style={[confirmStyles.confirmButton, { backgroundColor: isDark ? '#0B1120' : '#F1F5F9', borderColor: isDark ? '#334155' : '#CBD5E1' }]}
+            <PressableScale
+              style={[confirmStyles.confirmButton, { backgroundColor: c.card2, borderColor: c.line }]}
               onPress={onCancel}
-              activeOpacity={0.8}
             >
-              <Text style={[confirmStyles.cancelButtonText, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>{cancelText}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
+              <Text style={[confirmStyles.cancelButtonText, { color: c.ink }]}>{cancelText}</Text>
+            </PressableScale>
+            <PressableScale
               style={[
                 confirmStyles.confirmButton,
-                destructive ? confirmStyles.destructiveButton : confirmStyles.primaryButton,
+                destructive
+                  ? { backgroundColor: c.tintR, borderColor: 'rgba(255,90,95,0.35)' }
+                  : { backgroundColor: brand.primary, borderColor: brand.primary },
               ]}
               onPress={onConfirm}
-              activeOpacity={0.8}
             >
-              <Text
-                style={
-                  destructive
-                    ? confirmStyles.destructiveButtonText
-                    : confirmStyles.primaryButtonText
-                }
-              >
+              <Text style={destructive ? [confirmStyles.destructiveButtonText, { color: c.redInk }] : confirmStyles.primaryButtonText}>
                 {confirmText}
               </Text>
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </View>
       </View>
@@ -89,8 +86,9 @@ function CustomConfirm({
 
 export default function ProfilScreen() {
   const router = useRouter();
-  const systemColorScheme = useColorScheme();
-  
+  const { isDark, themeMode, setThemeMode, c } = useAppTheme();
+  const styles = useMemo(() => getStyles(c), [c]);
+
   const [loadingUser, setLoadingUser] = useState(true);
   const [playerId, setPlayerId] = useState<string | null>(null);
 
@@ -108,13 +106,7 @@ export default function ProfilScreen() {
   const [changingPassword, setChangingPassword] = useState(false);
 
   const [notifMatchReminders, setNotifMatchReminders] = useState(true);
-
-  // Stany zarządzania motywem
-  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
-
-  // Wyznaczanie faktycznego motywu (ciemny / jasny)
-  const isDark = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
-  const styles = getStyles(isDark);
+  const [calendarSyncEnabled, setCalendarSyncEnabled] = useState(false);
 
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
@@ -140,36 +132,14 @@ export default function ProfilScreen() {
 
   useEffect(() => {
     loadPlayerData();
-    loadThemePreference();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const loadThemePreference = async () => {
-    try {
-      const savedTheme = await AsyncStorage.getItem('app_theme_mode');
-      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
-        setThemeMode(savedTheme);
-      }
-    } catch (e) {
-      console.error('Błąd wczytywania motywu:', e);
-    }
-  };
-
-  const changeThemeMode = async (mode: 'system' | 'light' | 'dark') => {
-    setThemeMode(mode);
-    try {
-      await AsyncStorage.setItem('app_theme_mode', mode);
-      // Natychmiastowe powiadomienie nawigatora (zakładek), że motyw się zmienił
-      DeviceEventEmitter.emit('themeChanged');
-    } catch (e) {
-      console.error('Błąd zapisu motywu:', e);
-    }
-  };
 
   const loadPlayerData = async () => {
     setLoadingUser(true);
     try {
       const storedPlayerId = await AsyncStorage.getItem('current_player_id');
-      
+
       if (!storedPlayerId) {
         router.replace('/(auth)');
         return;
@@ -179,11 +149,13 @@ export default function ProfilScreen() {
 
       const { data, error } = await supabase
         .from('players')
-        .select(`
+        .select(
+          `
           *,
           roles:role_id ( name ),
           player_status:player_status_id ( name )
-        `)
+        `
+        )
         .eq('id', storedPlayerId)
         .single();
 
@@ -203,6 +175,7 @@ export default function ProfilScreen() {
       setPlayerStatusName(fetchedStatus);
 
       setNotifMatchReminders(data.notif_match_reminders ?? true);
+      setCalendarSyncEnabled(data.calendar_sync_enabled ?? false);
     } catch (e) {
       console.error(e);
     } finally {
@@ -212,18 +185,44 @@ export default function ProfilScreen() {
 
   const toggleMatchReminders = async () => {
     if (!playerId) return;
+    tapHaptic();
 
     const newValue = !notifMatchReminders;
     setNotifMatchReminders(newValue);
 
-    const { error } = await supabase
-      .from('players')
-      .update({ notif_match_reminders: newValue })
-      .eq('id', playerId);
+    const { error } = await supabase.from('players').update({ notif_match_reminders: newValue }).eq('id', playerId);
 
     if (error) {
       showAlert('Błąd', 'Nie udało się zapisać ustawienia powiadomień.');
       setNotifMatchReminders(!newValue);
+    }
+  };
+
+  // Włączenie synchronizacji od razu prosi o uprawnienia do kalendarza — jeśli użytkownik
+  // odmówi, przełącznik wraca do stanu wyłączonego zamiast później cicho nic nie robić.
+  const toggleCalendarSync = async () => {
+    if (!playerId) return;
+    tapHaptic();
+
+    const newValue = !calendarSyncEnabled;
+
+    if (newValue) {
+      const granted = await ensureCalendarPermission();
+      if (!granted) {
+        showAlert(
+          'Brak uprawnień',
+          'Aby dodawać mecze do kalendarza, zezwól aplikacji na dostęp do kalendarza w ustawieniach telefonu.'
+        );
+        return;
+      }
+    }
+
+    setCalendarSyncEnabled(newValue);
+    const { error } = await supabase.from('players').update({ calendar_sync_enabled: newValue }).eq('id', playerId);
+
+    if (error) {
+      showAlert('Błąd', 'Nie udało się zapisać ustawienia kalendarza.');
+      setCalendarSyncEnabled(!newValue);
     }
   };
 
@@ -245,27 +244,30 @@ export default function ProfilScreen() {
     setChangingPassword(true);
 
     try {
-      const { data: player, error: fetchError } = await supabase
-        .from('players')
-        .select('password')
-        .eq('id', playerId)
-        .single();
+      // Hasła w players.password są haszowane (bcrypt) triggerem po stronie bazy — porównanie
+      // "na piechotę" (player.password !== oldPassword) zawsze się nie zgadzało, bo porównywało
+      // hash z jawnym tekstem. Weryfikację i podmianę robi teraz atomowo RPC change_player_password
+      // (patrz supabase/change_player_password.sql), tak samo jak logowanie robi to w verify_login.
+      const { data, error } = await supabase.rpc('change_player_password', {
+        p_player_id: playerId,
+        p_old_password: oldPassword,
+        p_new_password: newPassword,
+      });
 
-      if (fetchError || !player || player.password !== oldPassword) {
-        setChangingPassword(false);
+      setChangingPassword(false);
+
+      if (error) {
+        showAlert('Błąd', error.message);
+        return;
+      }
+
+      if (data?.error === 'wrong_password') {
         showAlert('Błąd', 'Stare hasło jest niepoprawne.');
         return;
       }
 
-      const { error: updateError } = await supabase
-        .from('players')
-        .update({ password: newPassword })
-        .eq('id', playerId);
-
-      setChangingPassword(false);
-
-      if (updateError) {
-        showAlert('Błąd', updateError.message);
+      if (data?.error) {
+        showAlert('Błąd', 'Nie udało się zmienić hasła.');
         return;
       }
 
@@ -279,19 +281,13 @@ export default function ProfilScreen() {
     }
   };
 
-  const handleLogoutPress = () => {
-    setLogoutConfirmVisible(true);
-  };
+  const handleLogoutPress = () => setLogoutConfirmVisible(true);
 
   const executeLogout = async () => {
     setLogoutConfirmVisible(false);
-    if (playerId) {
-      await supabase
-        .from('players')
-        .update({ push_token: null })
-        .eq('id', playerId);
-    }
-
+    // Uwaga: tokeny push żyją w osobnej tabeli player_devices (per urządzenie), nie w players —
+    // usuwanie ich przy wylogowaniu wymagałoby najpierw zapisywania tokenu przy logowaniu,
+    // czego ta apka jeszcze nie robi, więc nie ma tu nic do wyczyszczenia.
     await AsyncStorage.removeItem('current_player_id');
     await AsyncStorage.removeItem('remember_me_status');
     await AsyncStorage.removeItem('current_player_data');
@@ -303,7 +299,7 @@ export default function ProfilScreen() {
   if (loadingUser) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
-        <ActivityIndicator size="large" color="#FFD23F" />
+        <ActivityIndicator size="large" color={brand.primary} />
       </SafeAreaView>
     );
   }
@@ -313,12 +309,7 @@ export default function ProfilScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <CustomAlert
-        visible={alertVisible}
-        title={alertTitle}
-        message={alertMessage}
-        onClose={handleAlertClose}
-      />
+      <CustomAlert visible={alertVisible} title={alertTitle} message={alertMessage} onClose={handleAlertClose} />
 
       <CustomConfirm
         visible={logoutConfirmVisible}
@@ -329,112 +320,55 @@ export default function ProfilScreen() {
         destructive
         onCancel={() => setLogoutConfirmVisible(false)}
         onConfirm={executeLogout}
-        isDark={isDark}
+        c={c}
       />
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Text style={styles.headerTitle}>Profil</Text>
         <Text style={styles.headerSubtitle}>Twoje dane i ustawienia konta</Text>
 
-        <View style={styles.card}>
+        <Card c={c} isDark={isDark} style={styles.card}>
           <Text style={styles.cardTitle}>Wygląd i motyw</Text>
-          <Text style={[styles.prefDescription, { marginBottom: 12 }]}>
-            Wybierz preferowany motyw aplikacji lub dopasuj go do ustawień urządzenia (obecny systemowy: {systemColorScheme === 'dark' ? 'Ciemny' : 'Jasny'}).
+          <Text style={[styles.prefDescription, styles.themeDescription]}>
+            Dopasuj motyw aplikacji lub zostaw zgodny z ustawieniami urządzenia (obecny systemowy:{' '}
+            {isDark ? 'Ciemny' : 'Jasny'}).
           </Text>
 
-          <View style={styles.themeButtonsRow}>
-            <TouchableOpacity
-              style={[
-                styles.themeButton,
-                themeMode === 'system' && styles.themeButtonActive,
-              ]}
-              onPress={() => changeThemeMode('system')}
-              activeOpacity={0.8}
-            >
-              <Text
-                style={[
-                  styles.themeButtonText,
-                  themeMode === 'system' && styles.themeButtonTextActive,
-                ]}
-              >
-                📱 Urządzenia
-              </Text>
-            </TouchableOpacity>
+          <SegmentButtons
+            c={c}
+            activeKey={themeMode}
+            onChange={(key) => setThemeMode(key as ThemeMode)}
+            options={[
+              { key: 'system', label: '📱 Urządzenia' },
+              { key: 'light', label: '☀️ Biały' },
+              { key: 'dark', label: '🌙 Czarny' },
+            ]}
+          />
+        </Card>
 
-            <TouchableOpacity
-              style={[
-                styles.themeButton,
-                themeMode === 'light' && styles.themeButtonActive,
-              ]}
-              onPress={() => changeThemeMode('light')}
-              activeOpacity={0.8}
-            >
-              <Text
-                style={[
-                  styles.themeButtonText,
-                  themeMode === 'light' && styles.themeButtonTextActive,
-                ]}
-              >
-                ☀️ Biały
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.themeButton,
-                themeMode === 'dark' && styles.themeButtonActive,
-              ]}
-              onPress={() => changeThemeMode('dark')}
-              activeOpacity={0.8}
-            >
-              <Text
-                style={[
-                  styles.themeButtonText,
-                  themeMode === 'dark' && styles.themeButtonTextActive,
-                ]}
-              >
-                🌙 Czarny
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.card}>
+        <Card c={c} isDark={isDark} style={styles.card}>
           <Text style={styles.cardTitle}>Dane profilu</Text>
 
-          <View style={styles.profileHeaderBox}>
-            <View style={styles.profileAvatarPlaceholder}>
-              <Text style={styles.profileAvatarText}>
-                {fullName ? fullName.charAt(0).toUpperCase() : 'P'}
-              </Text>
-            </View>
-            <View style={styles.profileInfoWrap}>
-              <Text style={styles.profileFullName} numberOfLines={1}>
-                {fullName || 'Gracz'}
-              </Text>
-              <View style={styles.badgesRow}>
-                <View style={styles.roleBadge}>
-                  <Text style={styles.roleBadgeText}>{roleName}</Text>
-                </View>
-                <View style={styles.statusBadge}>
-                  <Text style={styles.statusBadgeText}>{playerStatusName}</Text>
+          <Ticket style={styles.profileTicket}>
+            <View style={styles.profileHeaderBox}>
+              <View style={styles.profileAvatar}>
+                <Text style={styles.profileAvatarText}>{fullName ? fullName.charAt(0).toUpperCase() : 'P'}</Text>
+              </View>
+              <View style={styles.profileInfoWrap}>
+                <Text style={styles.profileFullName} numberOfLines={1}>
+                  {fullName || 'Gracz'}
+                </Text>
+                <View style={styles.badgesRow}>
+                  <Pill c={c} variant="solidAmber" label={roleName} />
+                  <Pill c={c} variant="solidGreen" label={playerStatusName} />
                 </View>
               </View>
             </View>
-          </View>
+          </Ticket>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Nazwa (Full name)</Text>
-            <TextInput
-              style={[styles.input, styles.inputReadOnly]}
-              value={fullName}
-              editable={false}
-              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
-            />
+            <TextInput style={[styles.input, styles.inputReadOnly]} value={fullName} editable={false} />
           </View>
 
           <View style={styles.inputGroup}>
@@ -443,7 +377,6 @@ export default function ProfilScreen() {
               style={[styles.input, styles.inputReadOnly]}
               value={showSensitiveData ? phone : maskedPhone}
               editable={false}
-              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
             />
           </View>
 
@@ -453,23 +386,21 @@ export default function ProfilScreen() {
               style={[styles.input, styles.inputReadOnly]}
               value={showSensitiveData ? email : maskedEmail}
               editable={false}
-              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
             />
           </View>
 
-          <TouchableOpacity
+          <PressableScale
             style={styles.revealButton}
             onPressIn={() => setShowSensitiveData(true)}
             onPressOut={() => setShowSensitiveData(false)}
-            activeOpacity={0.8}
           >
             <Text style={styles.revealButtonText}>
               {showSensitiveData ? '🔓 Dane odsłonięte' : '🔒 Przytrzymaj, aby zobaczyć telefon i email'}
             </Text>
-          </TouchableOpacity>
-        </View>
+          </PressableScale>
+        </Card>
 
-        <View style={styles.card}>
+        <Card c={c} isDark={isDark} style={styles.card}>
           <Text style={styles.cardTitle}>Zmiana hasła</Text>
 
           <View style={styles.inputGroup}>
@@ -477,7 +408,7 @@ export default function ProfilScreen() {
             <TextInput
               style={styles.input}
               placeholder="Wpisz obecne hasło"
-              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+              placeholderTextColor={c.ink3}
               secureTextEntry
               value={oldPassword}
               onChangeText={setOldPassword}
@@ -489,7 +420,7 @@ export default function ProfilScreen() {
             <TextInput
               style={styles.input}
               placeholder="Minimum 6 znaków"
-              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+              placeholderTextColor={c.ink3}
               secureTextEntry
               value={newPassword}
               onChangeText={setNewPassword}
@@ -501,352 +432,144 @@ export default function ProfilScreen() {
             <TextInput
               style={styles.input}
               placeholder="Powtórz nowe hasło"
-              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+              placeholderTextColor={c.ink3}
               secureTextEntry
               value={confirmPassword}
               onChangeText={setConfirmPassword}
             />
           </View>
 
-          <TouchableOpacity
-            style={[styles.button, changingPassword && styles.buttonDisabled]}
+          <PrimaryButton
+            label={changingPassword ? 'Zmienianie...' : 'Zmień hasło'}
             onPress={handleChangePassword}
-            disabled={changingPassword}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.buttonText}>
-              {changingPassword ? 'Zmienianie...' : 'Zmień hasło'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+            loading={changingPassword}
+          />
+        </Card>
 
-        <View style={styles.card}>
+        <Card c={c} isDark={isDark} style={styles.card}>
           <Text style={styles.cardTitle}>Powiadomienia</Text>
 
           <View style={styles.prefRow}>
             <View style={styles.prefTextWrap}>
               <Text style={styles.prefLabel}>Przypomnienia o meczach</Text>
-              <Text style={styles.prefDescription}>
-                Przypomnienia o nadchodzących meczach (24h przed)
-              </Text>
+              <Text style={styles.prefDescription}>24h przed meczem</Text>
             </View>
             <Switch
               value={notifMatchReminders}
               onValueChange={toggleMatchReminders}
-              trackColor={{ false: isDark ? '#334155' : '#CBD5E1', true: '#2C4BFF' }}
-              thumbColor="#fff"
+              trackColor={{ false: c.line, true: brand.primary }}
+              thumbColor="#FFFFFF"
             />
           </View>
-        </View>
 
-        <TouchableOpacity
-          style={styles.logoutButton}
-          onPress={handleLogoutPress}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.logoutButtonText}>Wyloguj się</Text>
-        </TouchableOpacity>
+          <View style={styles.prefDivider} />
+
+          <View style={styles.prefRow}>
+            <View style={styles.prefTextWrap}>
+              <Text style={styles.prefLabel}>Dodawaj mecze do kalendarza</Text>
+              <Text style={styles.prefDescription}>Zapis i wypis aktualizują wydarzenie w kalendarzu telefonu</Text>
+            </View>
+            <Switch
+              value={calendarSyncEnabled}
+              onValueChange={toggleCalendarSync}
+              trackColor={{ false: c.line, true: brand.primary }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+        </Card>
+
+        <DangerButton label="Wyloguj się" onPress={handleLogoutPress} c={c} style={styles.logoutButton} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const confirmStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: 24 },
   alertBox: {
     width: '100%',
     maxWidth: 360,
-    borderRadius: 24,
+    borderRadius: radius.xl,
+    borderWidth: 1,
     padding: 24,
     alignItems: 'center',
-    borderWidth: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.4,
     shadowRadius: 15,
     elevation: 8,
   },
-  indicator: {
-    width: 48,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#FFD23F',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '800',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  message: {
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  confirmButtonsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    width: '100%',
-  },
-  confirmButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  cancelButtonText: {
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  primaryButton: {
-    backgroundColor: '#2C4BFF',
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  destructiveButton: {
-    backgroundColor: '#0B1120',
-    borderWidth: 1,
-    borderColor: '#FF5A5F',
-  },
-  destructiveButtonText: {
-    color: '#FF5A5F',
-    fontSize: 15,
-    fontWeight: '800',
-  },
+  indicator: { width: 48, height: 6, borderRadius: 3, marginBottom: 16 },
+  title: { fontSize: 22, fontWeight: '800', marginBottom: 10, textAlign: 'center' },
+  message: { fontSize: 16, textAlign: 'center', marginBottom: 24, lineHeight: 22 },
+  confirmButtonsRow: { flexDirection: 'row', gap: 12, width: '100%' },
+  confirmButton: { flex: 1, paddingVertical: 14, borderRadius: radius.lg, alignItems: 'center', borderWidth: 1 },
+  cancelButtonText: { fontSize: 15, fontWeight: '800' },
+  primaryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
+  destructiveButtonText: { fontSize: 15, fontWeight: '800' },
 });
 
-const getStyles = (isDark: boolean) =>
+const getStyles = (c: Palette) =>
   StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: isDark ? '#0B1120' : '#F8FAFC' },
-    loadingContainer: {
-      flex: 1,
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 16,
-    },
-    scrollContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40 },
+    safeArea: { flex: 1, backgroundColor: c.bg },
+    loadingContainer: { flex: 1, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' },
+    scrollContent: { paddingHorizontal: space.screen, paddingTop: 12, paddingBottom: 40 },
 
-    headerTitle: {
-      fontSize: 24,
-      fontWeight: '800',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-    },
-    headerSubtitle: {
-      fontSize: 14,
-      color: isDark ? '#94A3B8' : '#64748B',
-      marginTop: 4,
-      marginBottom: 20,
-      fontWeight: '500',
-    },
+    headerTitle: { fontSize: 24, fontWeight: '800', color: c.ink },
+    headerSubtitle: { fontSize: 12.5, color: c.ink3, marginTop: 4, marginBottom: 20, fontWeight: '500' },
 
-    card: {
-      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-      borderRadius: 24,
-      padding: 16,
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: isDark ? 0.35 : 0.08,
-      shadowRadius: 12,
-      elevation: 6,
-    },
-    cardTitle: {
-      fontSize: 16,
-      fontWeight: '800',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-      marginBottom: 16,
-    },
+    card: { marginBottom: space.gap },
+    cardTitle: { fontSize: 16, fontWeight: '800', color: c.ink, marginBottom: 14 },
 
-    themeButtonsRow: {
-      flexDirection: 'row',
-      gap: 8,
-    },
-    themeButton: {
-      flex: 1,
-      backgroundColor: isDark ? '#0B1120' : '#F1F5F9',
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#CBD5E1',
-      borderRadius: 14,
-      paddingVertical: 12,
-      alignItems: 'center',
-    },
-    themeButtonActive: {
-      backgroundColor: '#2C4BFF',
-      borderColor: '#2C4BFF',
-    },
-    themeButtonText: {
-      color: isDark ? '#94A3B8' : '#64748B',
-      fontSize: 13,
-      fontWeight: '700',
-    },
-    themeButtonTextActive: {
-      color: '#FFFFFF',
-      fontWeight: '900',
-    },
+    themeDescription: { marginBottom: 14 },
 
-    profileHeaderBox: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      padding: 14,
-      borderRadius: 18,
-      marginBottom: 18,
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#E2E8F0',
-    },
-    profileAvatarPlaceholder: {
+    profileTicket: { marginBottom: 16 },
+    profileHeaderBox: { flexDirection: 'row', alignItems: 'center', padding: 14 },
+    profileAvatar: {
       width: 48,
       height: 48,
-      borderRadius: 16,
-      backgroundColor: '#FFD23F',
+      borderRadius: radius.lg,
+      backgroundColor: brand.primary,
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: 12,
     },
-    profileAvatarText: {
-      color: '#0B1120',
-      fontSize: 20,
-      fontWeight: '900',
-    },
-    profileInfoWrap: {
-      flex: 1,
-    },
-    profileFullName: {
-      fontSize: 16,
-      fontWeight: '800',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-      marginBottom: 6,
-    },
-    badgesRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 6,
-    },
-    roleBadge: {
-      backgroundColor: '#FFD23F',
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 8,
-    },
-    roleBadgeText: {
-      color: '#0B1120',
-      fontSize: 11,
-      fontWeight: '900',
-    },
-    statusBadge: {
-      backgroundColor: isDark ? 'rgba(0, 196, 140, 0.15)' : 'rgba(0, 196, 140, 0.1)',
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: '#00C48C',
-    },
-    statusBadgeText: {
-      color: '#00C48C',
-      fontSize: 11,
-      fontWeight: '800',
-    },
+    profileAvatarText: { color: '#FFFFFF', fontSize: 20, fontWeight: '800' },
+    profileInfoWrap: { flex: 1 },
+    profileFullName: { fontSize: 16, fontWeight: '800', color: brand.ticketInk, marginBottom: 7 },
+    badgesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
 
     inputGroup: { marginBottom: 14 },
-    label: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-      marginBottom: 6,
-    },
+    label: { fontSize: 13, fontWeight: '700', color: c.ink, marginBottom: 6 },
     input: {
       borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#CBD5E1',
-      borderRadius: 16,
+      borderColor: c.line,
+      borderRadius: radius.md,
       paddingHorizontal: 14,
       paddingVertical: Platform.OS === 'ios' ? 12 : 10,
       fontSize: 15,
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      color: isDark ? '#FFFFFF' : '#0F172A',
+      backgroundColor: c.card2,
+      color: c.ink,
       fontWeight: '500',
     },
-    inputReadOnly: {
-      color: isDark ? '#94A3B8' : '#64748B',
-      opacity: 0.9,
-    },
+    inputReadOnly: { color: c.ink2, opacity: 0.9 },
 
     revealButton: {
-      backgroundColor: isDark ? '#0B1120' : '#F1F5F9',
+      backgroundColor: c.card2,
       borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#CBD5E1',
-      borderRadius: 16,
+      borderColor: c.line,
+      borderRadius: radius.md,
       paddingVertical: 12,
       alignItems: 'center',
-      marginTop: 6,
-    },
-    revealButtonText: {
-      color: isDark ? '#94A3B8' : '#64748B',
-      fontSize: 13,
-      fontWeight: '800',
-    },
-
-    button: {
-      backgroundColor: '#2C4BFF',
-      borderRadius: 16,
-      paddingVertical: 14,
-      alignItems: 'center',
       marginTop: 4,
     },
-    buttonDisabled: { opacity: 0.6 },
-    buttonText: {
-      color: '#FFFFFF',
-      fontSize: 15,
-      fontWeight: '900',
-    },
+    revealButtonText: { color: c.ink2, fontSize: 13, fontWeight: '800' },
 
-    logoutButton: {
-      backgroundColor: isDark ? '#0B1120' : '#FFFFFF',
-      borderWidth: 1,
-      borderColor: '#FF5A5F',
-      borderRadius: 20,
-      paddingVertical: 16,
-      alignItems: 'center',
-      marginTop: 4,
-      marginBottom: 20,
-    },
-    logoutButtonText: {
-      color: '#FF5A5F',
-      fontSize: 15,
-      fontWeight: '800',
-    },
+    logoutButton: { marginTop: 4, marginBottom: 20 },
 
-    prefRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingVertical: 4,
-    },
+    prefRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
+    prefDivider: { height: 1, backgroundColor: c.line, marginVertical: 10 },
     prefTextWrap: { flex: 1, paddingRight: 12 },
-    prefLabel: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-      marginBottom: 2,
-    },
-    prefDescription: {
-      fontSize: 12,
-      color: isDark ? '#94A3B8' : '#64748B',
-      lineHeight: 16,
-      fontWeight: '500',
-    },
+    prefLabel: { fontSize: 14, fontWeight: '700', color: c.ink, marginBottom: 2 },
+    prefDescription: { fontSize: 12, color: c.ink2, lineHeight: 16, fontWeight: '500' },
   });

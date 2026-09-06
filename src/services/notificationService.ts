@@ -1,4 +1,5 @@
 import * as Notifications from 'expo-notifications';
+import { supabase } from '@/lib/supabase';
 
 export async function syncMatchNotifications(matches: Array<{ id: string; title: string | null; date: string; time_start: string; location: string; status_id: number; isRegistered?: boolean }>) {
   try {
@@ -33,4 +34,31 @@ export async function syncMatchNotifications(matches: Array<{ id: string; title:
   } catch (error) {
     console.error('Błąd synchronizacji powiadomień:', error);
   }
+}
+
+/**
+ * Odświeża lokalne przypomnienia 24h-przed-meczem dla jednego gracza po każdej zmianie jego
+ * zapisów (zapis/wypis, pojedynczy lub zbiorczy). Wcześniej ta sama sekwencja zapytań była
+ * powielona w kilku ekranach — teraz jest w jednym miejscu.
+ */
+export async function resyncNotificationsForPlayer(playerId: string): Promise<void> {
+  const { data: matchesData } = await supabase.from('matches').select('*');
+  const { data: regsData } = await supabase
+    .from('match_registrations')
+    .select('match_id, player_id')
+    .eq('player_id', playerId);
+
+  if (!matchesData) return;
+
+  const registeredMatchIds = new Set((regsData ?? []).map((r) => r.match_id));
+  const formattedMatches = matchesData.map((m) => ({
+    id: m.id,
+    title: m.title,
+    date: m.date,
+    time_start: m.time_start,
+    location: m.location,
+    status_id: m.status_id,
+    isRegistered: registeredMatchIds.has(m.id),
+  }));
+  await syncMatchNotifications(formattedMatches);
 }

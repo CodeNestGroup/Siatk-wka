@@ -18,7 +18,8 @@
         "foregroundImage": "./assets/images/icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.bartoszbrudny.escovolleymanager"
+      "package": "com.bartoszbrudny.escovolleymanager",
+      "versionCode": 1
     },
     "web": {
       "output": "static",
@@ -34,7 +35,24 @@
           "imageWidth": 76
         }
       ],
-      "expo-image"
+      "expo-image",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Aplikacja doda mecz do Twojego kalendarza, jeśli włączysz tę opcję w Profilu."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "buildArchs": ["armeabi-v7a", "arm64-v8a"]
+          }
+        }
+      ],
+      "./plugins/withReleaseSigning.js"
     ],
     "experiments": {
       "typedRoutes": true,

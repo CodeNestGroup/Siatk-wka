@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { tapHaptic } from '@/lib/haptics';
 
 type CustomAlertProps = {
   visible: boolean;
@@ -64,7 +65,10 @@ export default function CustomAlert({
             {cancelText && onCancel && (
               <TouchableOpacity
                 style={[styles.button, styles.cancelButton]}
-                onPress={onCancel}
+                onPress={() => {
+                  tapHaptic();
+                  onCancel();
+                }}
                 activeOpacity={0.8}
               >
                 <Text style={styles.cancelButtonText}>{cancelText}</Text>
@@ -73,11 +77,14 @@ export default function CustomAlert({
 
             <TouchableOpacity
               style={[
-                styles.button, 
+                styles.button,
                 styles.actionButton,
                 cancelText ? { flex: 1 } : { width: '100%' }
               ]}
-              onPress={onClose}
+              onPress={() => {
+                tapHaptic();
+                onClose();
+              }}
               activeOpacity={0.8}
             >
               <Text style={styles.buttonText}>{confirmText}</Text>

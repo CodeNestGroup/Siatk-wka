@@ -42,3 +42,6 @@ example
 /ios
 /android
 .env
+
+# release signing (keystore + passwords) — never commit, back up separately
+/credentials/

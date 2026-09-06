@@ -1,22 +1,21 @@
-import React, { useCallback, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  ActivityIndicator,
-  RefreshControl,
-  useColorScheme,
-} from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime } from '@/lib/format';
-import { getCurrentPlayer, Player } from '@/lib/player';
+import { isMatchFinished } from '@/lib/match-rules';
+import { getCurrentPlayer, type Player } from '@/lib/player';
 import { syncMatchNotifications } from '@/services/notificationService';
+import { useAppTheme } from '@/hooks/use-theme';
+import { useItemBadges } from '@/hooks/use-badges';
+import { brand, space, type Palette } from '@/constants/app-theme';
 import CustomAlert from '@/components/CustomAlert';
+import PressableScale from '@/components/ui/PressableScale';
+import Card from '@/components/ui/Card';
+import Pill, { type PillVariant } from '@/components/ui/Pill';
+import DateChip from '@/components/ui/DateChip';
+import SegmentButtons from '@/components/ui/SegmentButtons';
 
 type MatchItem = {
   id: string;
@@ -29,6 +28,7 @@ type MatchItem = {
   capacity: number | null;
   price_per_player: number;
   status_id: number;
+  created_at: string;
   mainCount?: number;
   totalRegistrationsCount?: number;
   capacityLimit?: number;
@@ -38,24 +38,14 @@ type MatchItem = {
 
 type TabType = 'upcoming' | 'past';
 
-function isMatchFinished(dateStr: string, timeEndStr: string, timeStartStr: string): boolean {
-  try {
-    const timeString = timeEndStr || timeStartStr || '23:59';
-    const matchDateTime = new Date(`${dateStr}T${timeString}`);
-    const now = new Date();
-    return matchDateTime.getTime() < now.getTime();
-  } catch {
-    return false;
-  }
-}
-
+// Pełna lista meczów (nadchodzące/zakończone), tylko do przeglądania — zapis/wypis dzieje się
+// dopiero po wejściu w szczegóły (MatchView), stąd ten ekran tylko liczy skład/rezerwę do
+// wyświetlenia i nie ma tu żadnych mutacji match_registrations.
 export default function ScheduleScreen() {
   const router = useRouter();
-  const systemColorScheme = useColorScheme();
-
-  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
-  const isDark = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
-  const styles = getStyles(isDark);
+  const { isDark, c } = useAppTheme();
+  const styles = useMemo(() => getStyles(c), [c]);
+  const badges = useItemBadges('matches');
 
   const [matches, setMatches] = useState<MatchItem[]>([]);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
@@ -73,24 +63,11 @@ export default function ScheduleScreen() {
     setAlertVisible(true);
   };
 
-  const loadThemePreference = async () => {
-    try {
-      const savedTheme = await AsyncStorage.getItem('app_theme_mode');
-      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
-        setThemeMode(savedTheme);
-      }
-    } catch (e) {
-      console.error('Błąd wczytywania motywu:', e);
-    }
-  };
-
   const loadSchedule = useCallback(async () => {
     const player = await getCurrentPlayer();
     setCurrentPlayer(player);
 
-    const { data: matchesData, error: matchesError } = await supabase
-      .from('matches')
-      .select('*');
+    const { data: matchesData, error: matchesError } = await supabase.from('matches').select('*');
 
     if (matchesError || !matchesData) {
       showAlert('Błąd', 'Nie udało się pobrać listy meczów: ' + (matchesError?.message || ''));
@@ -113,9 +90,11 @@ export default function ScheduleScreen() {
       const matchRegs = registrations.filter((r) => r.match_id === match.id);
       const capacityLimit = match.capacity ?? match.max_players ?? 10;
 
+      // Jak wszędzie indziej: brak osobnej flagi rezerwy w bazie — pierwsze `capacityLimit`
+      // zapisów (posortowanych po created_at) to skład główny, reszta to lista rezerwowa.
       const mainList = matchRegs.slice(0, capacityLimit);
       const userReg = player ? matchRegs.find((r) => r.player_id === player.id) : null;
-      
+
       let regStatus: 'main' | 'waitlist' | undefined = undefined;
       if (userReg) {
         const isInMain = mainList.some((r) => r.player_id === player?.id);
@@ -135,21 +114,28 @@ export default function ScheduleScreen() {
     setMatches(processedMatches);
     setLoading(false);
 
+    // Terminarz widzi wszystkie mecze na raz, więc to najwygodniejsze miejsce, żeby po każdym
+    // odświeżeniu przeplanować lokalne przypomnienia (24h przed startem) dla zapisanych meczów.
     await syncMatchNotifications(processedMatches);
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadThemePreference();
+      badges.enter();
       loadSchedule();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loadSchedule])
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadThemePreference();
     await loadSchedule();
     setRefreshing(false);
+  };
+
+  const handlePress = (item: MatchItem) => {
+    badges.markOpened(item.id);
+    router.push(`/(match)/${item.id}?from=terminarz`);
   };
 
   const filteredMatches = matches
@@ -166,52 +152,36 @@ export default function ScheduleScreen() {
   if (loading && matches.length === 0) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
-        <ActivityIndicator size="large" color="#2C4BFF" />
+        <ActivityIndicator size="large" color={brand.primary} />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <CustomAlert
-        visible={alertVisible}
-        title={alertTitle}
-        message={alertMessage}
-        onClose={() => setAlertVisible(false)}
-      />
+      <CustomAlert visible={alertVisible} title={alertTitle} message={alertMessage} onClose={() => setAlertVisible(false)} />
 
       <FlatList
         data={filteredMatches}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#2C4BFF"
-          />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={brand.primary} />}
         ListHeaderComponent={
           <View>
             <Text style={styles.headerTitle}>Terminarz Meczów</Text>
             <Text style={styles.headerSubtitle}>Wszystkie nadchodzące i archiwalne spotkania</Text>
 
-            <View style={styles.tabsContainer}>
-              <TouchableOpacity
-                style={[styles.tabButton, activeTab === 'upcoming' && styles.tabButtonActive]}
-                onPress={() => setActiveTab('upcoming')}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.tabText, activeTab === 'upcoming' && styles.tabTextActive]}>Nadchodzące</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.tabButton, activeTab === 'past' && styles.tabButtonActive]}
-                onPress={() => setActiveTab('past')}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.tabText, activeTab === 'past' && styles.tabTextActive]}>Zakończone</Text>
-              </TouchableOpacity>
+            <View style={styles.segmentWrap}>
+              <SegmentButtons
+                c={c}
+                activeKey={activeTab}
+                onChange={(key) => setActiveTab(key as TabType)}
+                options={[
+                  { key: 'upcoming', label: 'Nadchodzące' },
+                  { key: 'past', label: 'Zakończone' },
+                ]}
+              />
             </View>
           </View>
         }
@@ -223,91 +193,54 @@ export default function ScheduleScreen() {
           </View>
         }
         renderItem={({ item }) => {
-          const { day, month } = formatMatchDate(item.date);
           const isCancelled = item.status_id === 2;
           const finished = isMatchFinished(item.date, item.time_end, item.time_start);
-          const isWaitlist = item.registrationStatus === 'waitlist';
           const title = item.title?.trim() || 'Trening Siatkówki';
           const capacityLimit = item.capacityLimit ?? 10;
           const currentSigned = item.totalRegistrationsCount ?? 0;
-          
-          return (
-            <TouchableOpacity
-              style={[styles.matchCard, isCancelled && styles.matchCardCancelled]}
-              onPress={() => router.push(`/(match)/${item.id}`)}
-              activeOpacity={0.9}
-            >
-              {!isCancelled && !finished && currentPlayer && item.isRegistered && (
-                <View style={[
-                  styles.sideStatusBar,
-                  isWaitlist ? styles.sideBarWaitlist : styles.sideBarMain
-                ]} />
-              )}
+          const { weekday } = formatMatchDate(item.date);
 
-              <View style={styles.cardInnerContainer}>
-                <View style={styles.cardMainRow}>
-                  <View style={[styles.dateBox, isCancelled && styles.dateBoxCancelled]}>
-                    <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>{day}</Text>
-                    <Text 
-                      style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]} 
-                      numberOfLines={1} 
-                      adjustsFontSizeToFit
-                    >
-                      {month}
+          let statusLabel = 'NADCHODZĄCY';
+          let statusVariant: PillVariant = 'blue';
+          if (isCancelled) {
+            statusLabel = '⚠ ODWOŁANY';
+            statusVariant = 'red';
+          } else if (finished) {
+            statusLabel = 'ZAKOŃCZONY';
+            statusVariant = 'neutral';
+          }
+
+          const isNew = badges.isNew(item.id, item.created_at);
+
+          return (
+            <PressableScale onPress={() => handlePress(item)} style={styles.rowWrap}>
+              <Card c={c} isDark={isDark} danger={isCancelled}>
+                <View style={styles.rowMain}>
+                  <DateChip date={item.date} width={52} height={58} dot={isNew} c={c} />
+                  <View style={styles.rowInfo}>
+                    <View style={styles.pillsRow}>
+                      <Pill c={c} variant={statusVariant} label={statusLabel} />
+                      {!isCancelled && currentPlayer && item.isRegistered && (
+                        <Pill c={c} variant="green" label="JESTEŚ W SKŁADZIE" />
+                      )}
+                      {isNew && <Pill c={c} variant="amber" label="NOWY" />}
+                    </View>
+                    <Text style={[styles.title, isCancelled && styles.titleCancelled]} numberOfLines={1}>
+                      {title}
+                    </Text>
+                    <Text style={styles.meta} numberOfLines={1}>
+                      {weekday} · {formatTime(item.time_start)}–{formatTime(item.time_end)} · {item.location}
                     </Text>
                   </View>
-
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <View style={styles.titleRow}>
-                      <Text style={[styles.matchTitle, isCancelled && styles.matchTitleCancelled]} numberOfLines={1}>
-                        {title}
-                      </Text>
-                      
-                      {isCancelled ? (
-                        <View style={styles.badgeCancelledBg}>
-                          <Text style={styles.badgeCancelledText}>⚠️ Odwołany</Text>
-                        </View>
-                      ) : (
-                        currentPlayer && item.isRegistered && (
-                          <View style={[
-                            styles.inlineStatusBadge,
-                            isWaitlist ? styles.badgeWaitlistBg : styles.badgeMainBg,
-                          ]}>
-                            <Text style={[
-                              styles.inlineStatusText,
-                              isWaitlist ? styles.badgeWaitlistText : styles.badgeMainText,
-                            ]}>
-                              {isWaitlist ? '⏳ Rezerwa' : '✅ Zapisany'}
-                            </Text>
-                          </View>
-                        )
-                      )}
-                    </View>
-
-                    <View style={styles.iconInfoRow}>
-                      <View style={styles.iconContainer}>
-                        <Text style={styles.containerIconText}>📍</Text>
-                      </View>
-                      <Text style={styles.matchInfo} numberOfLines={1}>{item.location}</Text>
-                    </View>
-
-                    <View style={styles.iconInfoRow2}>
-                      <View style={styles.infoPill}>
-                        <Text style={styles.infoPillIcon}>🕒</Text>
-                        <Text style={styles.infoPillText}>{formatTime(item.time_start)}</Text>
-                      </View>
-
-                      <View style={styles.infoPill}>
-                        <Text style={styles.infoPillIcon}>👥</Text>
-                        <Text style={styles.infoPillText}>{currentSigned}/{capacityLimit}</Text>
-                      </View>
-
-                      <Text style={styles.priceText}>{Number(item.price_per_player)} PLN</Text>
-                    </View>
+                  <View style={styles.countCol}>
+                    <Text style={styles.countValue}>
+                      {currentSigned}/{capacityLimit}
+                    </Text>
+                    <Text style={styles.countLabel}>SKŁAD</Text>
                   </View>
                 </View>
-              </View>
-            </TouchableOpacity>
+              </Card>
+            </PressableScale>
           );
         }}
       />
@@ -315,208 +248,27 @@ export default function ScheduleScreen() {
   );
 }
 
-const getStyles = (isDark: boolean) =>
+const getStyles = (c: Palette) =>
   StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: isDark ? '#0B1120' : '#F8FAFC' },
-    loadingContainer: {
-      flex: 1,
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 16,
-    },
-    listContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32 },
+    safeArea: { flex: 1, backgroundColor: c.bg },
+    loadingContainer: { flex: 1, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' },
+    listContent: { paddingHorizontal: space.screen, paddingTop: 12, paddingBottom: 32 },
 
-    headerTitle: {
-      fontSize: 24,
-      fontWeight: '800',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-    },
-    headerSubtitle: {
-      fontSize: 14,
-      color: isDark ? '#94A3B8' : '#64748B',
-      marginTop: 4,
-      marginBottom: 16,
-      fontWeight: '500',
-    },
+    headerTitle: { fontSize: 24, fontWeight: '800', color: c.ink },
+    headerSubtitle: { fontSize: 12.5, color: c.ink3, marginTop: 4, marginBottom: 4, fontWeight: '500' },
+    segmentWrap: { marginTop: 16, marginBottom: 6 },
 
-    tabsContainer: {
-      flexDirection: 'row',
-      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-      borderRadius: 24,
-      padding: 4,
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.03,
-      shadowRadius: 4,
-      elevation: 2,
-    },
-    tabButton: {
-      flex: 1,
-      paddingVertical: 12,
-      alignItems: 'center',
-      borderRadius: 20,
-    },
-    tabButtonActive: {
-      backgroundColor: '#2C4BFF',
-    },
-    tabText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: isDark ? '#94A3B8' : '#64748B',
-    },
-    tabTextActive: {
-      color: '#FFFFFF',
-      fontWeight: '900',
-    },
-
-    matchCard: {
-      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-      borderRadius: 24,
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
-      overflow: 'hidden',
-      position: 'relative',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: isDark ? 0.3 : 0.06,
-      shadowRadius: 8,
-      elevation: 3,
-      flexDirection: 'row',
-      alignItems: 'stretch',
-    },
-    matchCardCancelled: { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' },
-
-    sideStatusBar: {
-      position: 'absolute',
-      left: 0,
-      top: 0,
-      bottom: 0,
-      width: 6,
-    },
-    sideBarMain: { backgroundColor: '#2C4BFF' },
-    sideBarWaitlist: { backgroundColor: '#94A3B8' },
-
-    cardInnerContainer: {
-      flex: 1,
-      padding: 16,
-      paddingLeft: 20,
-    },
-    cardMainRow: { flexDirection: 'row', alignItems: 'center' },
-    
-    dateBox: {
-      width: 68,
-      height: 68,
-      borderRadius: 18,
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#E2E8F0',
-      paddingHorizontal: 4,
-    },
-    dateBoxCancelled: { borderColor: '#FF5A5F' },
-    dateDay: { fontSize: 20, fontWeight: '800', color: '#2C4BFF' },
-    dateDayCancelled: { color: '#FF5A5F' },
-    dateMonth: { 
-      fontSize: 11, 
-      fontWeight: '700', 
-      color: isDark ? '#94A3B8' : '#64748B', 
-      textTransform: 'uppercase',
-      textAlign: 'center',
-      width: '100%',
-    },
-    dateMonthCancelled: { color: '#FF5A5F' },
-
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 6,
-    },
-    matchTitle: { fontSize: 16, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A', flex: 1, marginRight: 6 },
-    matchTitleCancelled: { textDecorationLine: 'line-through', color: isDark ? '#64748B' : '#94A3B8' },
-
-    inlineStatusBadge: {
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 10,
-    },
-    badgeMainBg: { 
-      backgroundColor: isDark ? 'rgba(44, 75, 255, 0.25)' : '#EFF6FF', 
-      borderWidth: 1, 
-      borderColor: isDark ? '#4F6FFF' : '#BFDBFE' 
-    },
-    badgeWaitlistBg: { 
-      backgroundColor: isDark ? 'rgba(148, 163, 184, 0.2)' : '#F1F5F9', 
-      borderWidth: 1, 
-      borderColor: isDark ? '#64748B' : '#CBD5E1' 
-    },
-    inlineStatusText: { fontSize: 11, fontWeight: '800' },
-    badgeMainText: { color: isDark ? '#93C5FD' : '#2C4BFF' },
-    badgeWaitlistText: { color: isDark ? '#CBD5E1' : '#475569' },
-
-    badgeCancelledBg: { backgroundColor: isDark ? 'rgba(255, 90, 95, 0.2)' : '#FEF2F2', borderWidth: 1, borderColor: '#FF5A5F', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-    badgeCancelledText: { fontSize: 11, fontWeight: '800', color: '#FF5A5F' },
-
-    iconInfoRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 6,
-    },
-    iconInfoRow2: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginTop: 2,
-    },
-    iconContainer: {
-      width: 24,
-      height: 24,
-      borderRadius: 6,
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#E2E8F0',
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginRight: 6,
-    },
-    containerIconText: {
-      fontSize: 11,
-    },
-    matchInfo: { fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', fontWeight: '500', flex: 1 },
-    
-    infoPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#E2E8F0',
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 10,
-      marginRight: 6,
-    },
-    infoPillIcon: {
-      fontSize: 11,
-      marginRight: 4,
-    },
-    infoPillText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-    },
-
-    priceText: {
-      fontSize: 14,
-      fontWeight: '800',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-    },
+    rowWrap: { marginBottom: space.gap },
+    rowMain: { flexDirection: 'row', alignItems: 'center' },
+    rowInfo: { flex: 1, marginLeft: 12, marginRight: 10 },
+    pillsRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: 6 },
+    title: { fontSize: 14.5, fontWeight: '800', color: c.ink, marginBottom: 3 },
+    titleCancelled: { textDecorationLine: 'line-through', color: c.ink2 },
+    meta: { fontSize: 11.5, fontWeight: '600', color: c.ink2 },
+    countCol: { alignItems: 'flex-end' },
+    countValue: { fontSize: 15, fontWeight: '800', color: c.priInk },
+    countLabel: { fontSize: 9.5, fontWeight: '800', letterSpacing: 0.6, color: c.ink3, marginTop: 2 },
 
     emptyState: { paddingVertical: 40, alignItems: 'center' },
-    emptyText: { fontSize: 15, color: isDark ? '#94A3B8' : '#64748B', fontStyle: 'italic', fontWeight: '500' },
+    emptyText: { fontSize: 15, color: c.ink2, fontWeight: '500' },
   });

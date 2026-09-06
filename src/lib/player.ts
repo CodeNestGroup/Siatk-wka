@@ -9,6 +9,10 @@ export type Player = {
   email?: string;
   phone?: string | null;
   role?: string;
+  role_id?: number | null;
+  roles?: { name: string } | null;
+  // Zgoda z Profilu: czy mecze, na które się zapisuje, mają trafiać do kalendarza telefonu.
+  calendar_sync_enabled?: boolean;
 };
 
 // 1. Pobierz aktualnie zalogowanego gracza WYŁĄCZNIE na podstawie AsyncStorage
@@ -22,7 +26,7 @@ export async function getCurrentPlayer(): Promise<Player | null> {
 
     const { data, error } = await supabase
       .from('players')
-      .select('*')
+      .select('*, roles:role_id ( name )')
       .eq('id', savedPlayerId)
       .maybeSingle();
 
@@ -35,6 +39,11 @@ export async function getCurrentPlayer(): Promise<Player | null> {
     console.error('Błąd podczas pobierania aktywnego gracza:', err);
     return null;
   }
+}
+
+// Admin widzi statusy płatności innych zawodników (patrz sekcja 4.1 instrukcji redesignu).
+export function isAdminPlayer(player: Player | null): boolean {
+  return player?.roles?.name === 'admin';
 }
 
 // 2. Funkcja do "logowania" – zapisuje ID wybranego gracza do AsyncStorage

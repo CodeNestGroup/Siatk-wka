@@ -39,6 +39,19 @@ export function formatTime(timeStr: string): string {
   return timeStr?.slice(0, 5) ?? '';
 }
 
+const MONTH_ABBR = ['STY', 'LUT', 'MAR', 'KWI', 'MAJ', 'CZE', 'LIP', 'SIE', 'WRZ', 'PAŹ', 'LIS', 'GRU'];
+
+export function formatDateChip(dateStr: string): { day: number; monthAbbr: string } {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return { day: date.getDate(), monthAbbr: MONTH_ABBR[date.getMonth()] };
+}
+
+export function formatShortDate(dateStr: string): string {
+  const [, month, day] = dateStr.split('-').map(Number);
+  return `${day}.${String(month).padStart(2, '0')}`;
+}
+
 export function isDateInPast(dateStr: string): boolean {
   const [year, month, day] = dateStr.split('-').map(Number);
   const matchDate = new Date(year, month - 1, day);

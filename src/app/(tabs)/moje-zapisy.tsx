@@ -1,23 +1,28 @@
-import React, { useCallback, useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  ActivityIndicator,
-  RefreshControl,
-  ScrollView,
-  useColorScheme,
-} from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime } from '@/lib/format';
-import { getCurrentPlayer, Player } from '@/lib/player';
-import { syncMatchNotifications } from '@/services/notificationService';
+import { canCancelMatch, isMatchFinished } from '@/lib/match-rules';
+import { getCurrentPlayer, type Player } from '@/lib/player';
+import { resyncNotificationsForPlayer } from '@/services/notificationService';
+import { afterCancel } from '@/services/registrationService';
+import { removeMatchFromCalendar } from '@/services/calendarService';
+import { successHaptic } from '@/lib/haptics';
+import { showToast } from '@/lib/toast';
+import { useAppTheme } from '@/hooks/use-theme';
+import { brand, space, radius, type Palette } from '@/constants/app-theme';
 import CustomAlert from '@/components/CustomAlert';
+import PressableScale from '@/components/ui/PressableScale';
+import Card from '@/components/ui/Card';
+import Pill, { type PillVariant } from '@/components/ui/Pill';
+import DateChip from '@/components/ui/DateChip';
+import SegmentButtons from '@/components/ui/SegmentButtons';
+import Chip from '@/components/ui/Chip';
+import DangerButton from '@/components/ui/DangerButton';
+import ToastHost from '@/components/ui/Toast';
 
 type MatchInfo = {
   id: string;
@@ -44,28 +49,21 @@ type MyRegistration = {
 };
 
 type TabType = 'active' | 'past';
+type RangeKey = 'week' | 'month' | 'year' | 'all';
+type PaymentFilter = 'all' | 'paid' | 'unpaid';
 
-function canCancelMatch(matchDateStr: string, matchTimeStartStr: string): boolean {
-  try {
-    const matchDateTime = new Date(`${matchDateStr}T${matchTimeStartStr}`);
-    const now = new Date();
-    const diffMs = matchDateTime.getTime() - now.getTime();
-    return diffMs / (1000 * 60 * 60) > 2;
-  } catch {
-    return true;
-  }
-}
+const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
+  { key: 'week', label: 'Ten tydzień' },
+  { key: 'month', label: 'Ten miesiąc' },
+  { key: 'year', label: 'Ten rok' },
+  { key: 'all', label: 'Wszystkie' },
+];
 
-function isMatchFinished(dateStr: string, timeEndStr: string, timeStartStr: string): boolean {
-  try {
-    const timeString = timeEndStr || timeStartStr || '23:59';
-    const matchDateTime = new Date(`${dateStr}T${timeString}`);
-    const now = new Date();
-    return matchDateTime.getTime() < now.getTime();
-  } catch {
-    return false;
-  }
-}
+const PAYMENT_FILTER_OPTIONS: { key: PaymentFilter; label: string }[] = [
+  { key: 'all', label: 'Wszystkie' },
+  { key: 'paid', label: 'Opłacone' },
+  { key: 'unpaid', label: 'Nie opłacone' },
+];
 
 function RegistrationCard({
   reg,
@@ -76,166 +74,92 @@ function RegistrationCard({
   activeTab,
   isSelectionMode,
   isSelected,
+  c,
   isDark,
 }: {
   reg: MyRegistration;
   onCancel: (reg: MyRegistration) => void;
-  onPress: (matchId: string) => void;
+  onPress: () => void;
   onLongPress: () => void;
   cancelling: boolean;
   activeTab: TabType;
   isSelectionMode: boolean;
   isSelected: boolean;
+  c: Palette;
   isDark: boolean;
 }) {
   if (!reg.matches) return null;
+  const styles = getCardStyles(c);
 
-  const styles = getStyles(isDark);
-  const { day, month } = formatMatchDate(reg.matches.date);
-  const title = reg.matches.title?.trim() || 'Trening Siatkówki';
+  const match = reg.matches;
+  const title = match.title?.trim() || 'Trening Siatkówki';
   const isWaitlist = reg.registrationStatus === 'waitlist';
-  const isCancelled = reg.matches.status_id === 2;
-  const finished = isMatchFinished(reg.matches.date, reg.matches.time_end, reg.matches.time_start);
+  const isCancelled = match.status_id === 2;
+  const finished = isMatchFinished(match.date, match.time_end, match.time_start);
+  const { weekday } = formatMatchDate(match.date);
 
-  const capacityLimit = reg.matches.capacity ?? reg.matches.max_players ?? 10;
-  const currentSigned = reg.totalRegisteredCount ?? 0;
+  let statusLabel = 'NADCHODZĄCY';
+  let statusVariant: PillVariant = 'blue';
+  if (isCancelled) {
+    statusLabel = '⚠ ODWOŁANY';
+    statusVariant = 'red';
+  } else if (finished) {
+    statusLabel = 'ZAKOŃCZONY';
+    statusVariant = 'neutral';
+  }
 
   return (
-    <TouchableOpacity
-      style={[
-        styles.matchCard,
-        isCancelled && styles.matchCardCancelled,
-        isSelectionMode && isSelected && styles.matchCardSelected,
-      ]}
-      activeOpacity={0.9}
-      onPress={() => {
-        if (isSelectionMode) {
-          onLongPress();
-        } else {
-          reg.matches && onPress(reg.matches.id);
-        }
-      }}
-      onLongPress={onLongPress}
-    >
-      {!isCancelled && !finished && !isSelectionMode && (
-        <View style={[
-          styles.sideStatusBar,
-          isWaitlist ? styles.sideBarWaitlist : styles.sideBarMain
-        ]} />
-      )}
-
-      {isSelectionMode && (
-        <View style={styles.checkboxContainer}>
-          <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
-            {isSelected && <Text style={styles.checkmark}>✓</Text>}
-          </View>
-        </View>
-      )}
-
-      <View style={styles.cardInnerContainer}>
-        <View style={styles.cardMainRow}>
-          <View style={[styles.dateBox, isCancelled && styles.dateBoxCancelled]}>
-            <Text style={[styles.dateDay, isCancelled && styles.dateDayCancelled]}>
-              {day}
+    <PressableScale onPress={onPress} onLongPress={onLongPress} delayLongPress={420} style={styles.wrap}>
+      <Card
+        c={c}
+        isDark={isDark}
+        danger={isCancelled}
+        style={isSelectionMode && isSelected ? styles.cardSelected : undefined}
+      >
+        <View style={styles.mainRow}>
+          {isSelectionMode && (
+            <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
+              {isSelected && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
+            </View>
+          )}
+          <DateChip date={match.date} width={48} height={54} c={c} />
+          <View style={styles.infoCol}>
+            <Text style={[styles.title, isCancelled && styles.titleCancelled]} numberOfLines={1}>
+              {title}
             </Text>
-            <Text 
-              style={[styles.dateMonth, isCancelled && styles.dateMonthCancelled]} 
-              numberOfLines={1} 
-              adjustsFontSizeToFit
-            >
-              {month}
+            <Text style={styles.meta} numberOfLines={1}>
+              {weekday} · {formatTime(match.time_start)}–{formatTime(match.time_end)} · {match.location}
             </Text>
-          </View>
-
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <View style={styles.titleRow}>
-              <Text
-                style={[
-                  styles.matchTitle,
-                  isCancelled && styles.matchTitleCancelled,
-                ]}
-                numberOfLines={1}
-              >
-                {title}
-              </Text>
-              
-              {isCancelled ? (
-                <View style={styles.badgeCancelledBg}>
-                  <Text style={styles.badgeCancelledText}>⚠️ Odwołany</Text>
-                </View>
-              ) : (
-                <View
-                  style={[
-                    styles.inlineStatusBadge,
-                    isWaitlist ? styles.badgeWaitlistBg : styles.badgeMainBg,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.inlineStatusText,
-                      isWaitlist ? styles.badgeWaitlistText : styles.badgeMainText,
-                    ]}
-                  >
-                    {isWaitlist ? '⏳ Rezerwa' : '✅ Zapisany'}
-                  </Text>
-                </View>
+            <View style={styles.pillsRow}>
+              <Pill c={c} variant={statusVariant} label={statusLabel} />
+              {!isCancelled && (
+                <Pill c={c} variant={isWaitlist ? 'amber' : 'green'} label={isWaitlist ? 'REZERWA' : 'SKŁAD GŁÓWNY'} />
               )}
-            </View>
-
-            <View style={styles.iconInfoRow}>
-              <View style={styles.iconContainer}>
-                <Text style={styles.containerIconText}>📍</Text>
-              </View>
-              <Text style={styles.matchInfo} numberOfLines={1}>{reg.matches.location}</Text>
-            </View>
-
-            <View style={styles.iconInfoRow2}>
-              <View style={styles.infoPill}>
-                <Text style={styles.infoPillIcon}>🕒</Text>
-                <Text style={styles.infoPillText}>{formatTime(reg.matches.time_start)}</Text>
-              </View>
-
-              <View style={styles.infoPill}>
-                <Text style={styles.infoPillIcon}>👥</Text>
-                <Text style={styles.infoPillText}>{currentSigned}/{capacityLimit}</Text>
-              </View>
-
-              <Text style={styles.priceText}>{Number(reg.matches.price_per_player)} PLN</Text>
+              <Pill c={c} variant={reg.is_paid ? 'green' : 'amber'} label={reg.is_paid ? 'OPŁACONE' : 'NIE OPŁACONE'} />
             </View>
           </View>
         </View>
 
-        {activeTab === 'active' && !isCancelled && !isSelectionMode && (
-          <View style={styles.cardFooter}>
-            <TouchableOpacity
-              style={styles.quickCancelBtnInline}
-              onPress={(e) => {
-                e.stopPropagation();
-                onCancel(reg);
-              }}
-              disabled={cancelling}
-              activeOpacity={0.7}
-            >
-              {cancelling ? (
-                <ActivityIndicator size="small" color="#DC2626" />
-              ) : (
-                <Text style={styles.quickCancelText}>Wypisz się</Text>
-              )}
-            </TouchableOpacity>
+        {!isSelectionMode && activeTab === 'active' && !isCancelled && (
+          <View style={styles.footerWrap}>
+            <DangerButton
+              label="Wypisz się z meczu"
+              onPress={() => onCancel(reg)}
+              loading={cancelling}
+              c={c}
+              icon="exit-outline"
+            />
           </View>
         )}
-      </View>
-    </TouchableOpacity>
+      </Card>
+    </PressableScale>
   );
 }
 
 export default function MojeZapisyScreen() {
   const router = useRouter();
-  const systemColorScheme = useColorScheme();
-
-  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
-  const isDark = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
-  const styles = getStyles(isDark);
+  const { isDark, c } = useAppTheme();
+  const styles = useMemo(() => getStyles(c), [c]);
 
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [registrations, setRegistrations] = useState<MyRegistration[]>([]);
@@ -245,24 +169,20 @@ export default function MojeZapisyScreen() {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabType>('active');
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
 
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedRegIds, setSelectedRegIds] = useState<string[]>([]);
-  const [selectedRange, setSelectedRange] = useState<
-    'week' | 'month' | 'quarter' | 'year' | 'all' | null
-  >(null);
+  const [selectedRange, setSelectedRange] = useState<RangeKey | null>(null);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [footerHeight, setFooterHeight] = useState(0);
 
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
   const [alertCallback, setAlertCallback] = useState<(() => void) | null>(null);
 
-  const showAlert = (
-    title: string,
-    message: string,
-    onCloseCallback?: () => void
-  ) => {
+  const showAlert = (title: string, message: string, onCloseCallback?: () => void) => {
     setAlertTitle(title);
     setAlertMessage(message);
     setAlertCallback(() => onCloseCallback || null);
@@ -274,17 +194,6 @@ export default function MojeZapisyScreen() {
     if (alertCallback) {
       alertCallback();
       setAlertCallback(null);
-    }
-  };
-
-  const loadThemePreference = async () => {
-    try {
-      const savedTheme = await AsyncStorage.getItem('app_theme_mode');
-      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
-        setThemeMode(savedTheme);
-      }
-    } catch (e) {
-      console.error('Błąd wczytywania motywu:', e);
     }
   };
 
@@ -334,24 +243,16 @@ export default function MojeZapisyScreen() {
       const allRegs = allRegsForMatches ?? [];
 
       const processed: MyRegistration[] = userRegs.map((reg: any) => {
-        const match: MatchInfo | null = Array.isArray(reg.matches)
-          ? reg.matches[0] ?? null
-          : reg.matches;
+        const match: MatchInfo | null = Array.isArray(reg.matches) ? reg.matches[0] ?? null : reg.matches;
 
         if (!match) {
-          return {
-            ...reg,
-            matches: null,
-          } as MyRegistration;
+          return { ...reg, matches: null } as MyRegistration;
         }
 
         const matchAllRegs = allRegs.filter((r) => r.match_id === match.id);
         const capacityLimit = match.capacity ?? match.max_players ?? 10;
         const mainList = matchAllRegs.slice(0, capacityLimit);
-
-        const isInMain = mainList.some(
-          (r) => r.player_id === player.id
-        );
+        const isInMain = mainList.some((r) => r.player_id === player.id);
 
         return {
           ...reg,
@@ -372,47 +273,21 @@ export default function MojeZapisyScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadThemePreference();
       loadData();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadThemePreference();
     await loadData();
     setRefreshing(false);
   };
 
-  const updateNotificationsAfterChange = async (playerId: string) => {
-    const { data: matchesData } = await supabase.from('matches').select('*');
-    const { data: regsData } = await supabase
-      .from('match_registrations')
-      .select('match_id, player_id')
-      .eq('player_id', playerId);
+  const executeCancellation = async (reg: MyRegistration) => {
+    setCancellingId(reg.id);
 
-    if (matchesData) {
-      const registeredMatchIds = new Set((regsData || []).map((r) => r.match_id));
-      const formattedMatches = matchesData.map((m) => ({
-        id: m.id,
-        title: m.title,
-        date: m.date,
-        time_start: m.time_start,
-        location: m.location,
-        status_id: m.status_id,
-        isRegistered: registeredMatchIds.has(m.id),
-      }));
-      await syncMatchNotifications(formattedMatches);
-    }
-  };
-
-  const executeCancellation = async (regId: string) => {
-    setCancellingId(regId);
-
-    const { error } = await supabase
-      .from('match_registrations')
-      .delete()
-      .eq('id', regId);
+    const { error } = await supabase.from('match_registrations').delete().eq('id', reg.id);
 
     setCancellingId(null);
 
@@ -421,8 +296,10 @@ export default function MojeZapisyScreen() {
       return;
     }
 
-    if (currentPlayer) {
-      await updateNotificationsAfterChange(currentPlayer.id);
+    if (currentPlayer && reg.matches) {
+      const capacityLimit = reg.matches.capacity ?? reg.matches.max_players ?? 10;
+      const willPromote = reg.registrationStatus === 'main' && (reg.totalRegisteredCount ?? 0) > capacityLimit;
+      await afterCancel(reg.matches, currentPlayer, { willPromote });
     }
     await loadData();
   };
@@ -433,70 +310,40 @@ export default function MojeZapisyScreen() {
         showAlert('Błąd', 'Nie można wypisać się z odwołanego meczu.');
         return;
       }
-
       if (!canCancelMatch(reg.matches.date, reg.matches.time_start)) {
-        showAlert(
-          'Błąd',
-          'Nie można wypisać się na mniej niż 2 godziny przed meczem.'
-        );
+        showAlert('Błąd', 'Nie można wypisać się na mniej niż 2 godziny przed meczem.');
         return;
       }
     }
-
-    executeCancellation(reg.id);
+    executeCancellation(reg);
   };
 
   const handlePressMatch = (matchId: string) => {
-    router.push(`/(match)/${matchId}`);
+    router.push(`/(match)/${matchId}?from=moje-zapisy`);
   };
 
   const filteredRegistrations = registrations
     .filter((reg) => {
       if (!reg.matches) return false;
-
-      const finished = isMatchFinished(
-        reg.matches.date,
-        reg.matches.time_end,
-        reg.matches.time_start
-      );
-
-      if (activeTab === 'active') {
-        return !finished;
-      } else {
-        return finished;
-      }
+      const finished = isMatchFinished(reg.matches.date, reg.matches.time_end, reg.matches.time_start);
+      if (activeTab === 'active' ? finished : !finished) return false;
+      if (paymentFilter === 'paid' && !reg.is_paid) return false;
+      if (paymentFilter === 'unpaid' && reg.is_paid) return false;
+      return true;
     })
     .sort((a, b) => {
       if (!a.matches || !b.matches) return 0;
-
-      const timeA = new Date(
-        `${a.matches.date}T${a.matches.time_start}`
-      ).getTime();
-
-      const timeB = new Date(
-        `${b.matches.date}T${b.matches.time_start}`
-      ).getTime();
-
-      if (activeTab === 'active') {
-        return timeA - timeB;
-      } else {
-        return timeB - timeA;
-      }
+      const timeA = new Date(`${a.matches.date}T${a.matches.time_start}`).getTime();
+      const timeB = new Date(`${b.matches.date}T${b.matches.time_start}`).getTime();
+      return activeTab === 'active' ? timeA - timeB : timeB - timeA;
     });
 
   const toggleSelectReg = (regId: string) => {
-    if (selectedRegIds.includes(regId)) {
-      setSelectedRegIds(
-        selectedRegIds.filter((id) => id !== regId)
-      );
-    } else {
-      setSelectedRegIds([...selectedRegIds, regId]);
-    }
+    setSelectedRegIds((prev) => (prev.includes(regId) ? prev.filter((id) => id !== regId) : [...prev, regId]));
   };
 
   const handleLongPressCard = (regId: string) => {
     if (activeTab !== 'active') return;
-
     if (!isSelectionMode) {
       setIsSelectionMode(true);
       setSelectedRegIds([regId]);
@@ -505,52 +352,50 @@ export default function MojeZapisyScreen() {
     }
   };
 
-  const handleRangeSelect = (
-    range: 'week' | 'month' | 'quarter' | 'year' | 'all'
-  ) => {
-    setSelectedRange(range);
+  const handleCardPress = (reg: MyRegistration) => {
+    if (isSelectionMode) {
+      toggleSelectReg(reg.id);
+    } else if (reg.matches) {
+      handlePressMatch(reg.matches.id);
+    }
+  };
 
+  const handleRangeSelect = (range: RangeKey) => {
+    setSelectedRange(range);
     const now = new Date();
     const idsToSelect: string[] = [];
 
     filteredRegistrations.forEach((reg) => {
+      // Zakresy zaznaczają tylko mecze, z których faktycznie da się jeszcze wypisać:
+      // pomijamy odwołane i te, które wpadły już w okno "mniej niż 2h do startu".
       if (!reg.matches || reg.matches.status_id === 2) return;
+      if (!canCancelMatch(reg.matches.date, reg.matches.time_start)) return;
 
       const matchDate = new Date(reg.matches.date);
-      const diffTime = matchDate.getTime() - now.getTime();
-      const diffDays = diffTime / (1000 * 3600 * 24);
+      const diffDays = (matchDate.getTime() - now.getTime()) / (1000 * 3600 * 24);
 
       let matchesCriteria = false;
+      if (range === 'week' && diffDays >= 0 && diffDays <= 7) matchesCriteria = true;
+      else if (range === 'month' && diffDays >= 0 && diffDays <= 30) matchesCriteria = true;
+      else if (range === 'year' && diffDays >= 0 && diffDays <= 365) matchesCriteria = true;
+      else if (range === 'all' && diffDays >= 0) matchesCriteria = true;
 
-      if (range === 'week' && diffDays >= 0 && diffDays <= 7) {
-        matchesCriteria = true;
-      } else if (range === 'month' && diffDays >= 0 && diffDays <= 30) {
-        matchesCriteria = true;
-      } else if (range === 'quarter' && diffDays >= 0 && diffDays <= 90) {
-        matchesCriteria = true;
-      } else if (range === 'year' && diffDays >= 0 && diffDays <= 365) {
-        matchesCriteria = true;
-      } else if (range === 'all' && diffDays >= 0) {
-        matchesCriteria = true;
-      }
-
-      if (matchesCriteria) {
-        idsToSelect.push(reg.id);
-      }
+      if (matchesCriteria) idsToSelect.push(reg.id);
     });
 
     setSelectedRegIds(idsToSelect);
   };
 
+  const handleDeselectAll = () => {
+    setSelectedRange(null);
+    setSelectedRegIds([]);
+  };
+
   const handleBulkCancel = async () => {
     if (selectedRegIds.length === 0) return;
-
     setBulkActionLoading(true);
 
-    const { error } = await supabase
-      .from('match_registrations')
-      .delete()
-      .in('id', selectedRegIds);
+    const { error } = await supabase.from('match_registrations').delete().in('id', selectedRegIds);
 
     setBulkActionLoading(false);
 
@@ -560,8 +405,19 @@ export default function MojeZapisyScreen() {
     }
 
     if (currentPlayer) {
-      await updateNotificationsAfterChange(currentPlayer.id);
+      await resyncNotificationsForPlayer(currentPlayer.id);
+      successHaptic();
+
+      if (currentPlayer.calendar_sync_enabled) {
+        // Zbiorczy wypis może obejmować kilka różnych meczów — usuwamy każde wydarzenie osobno.
+        const matchIds = registrations
+          .filter((r) => selectedRegIds.includes(r.id) && r.matches)
+          .map((r) => r.matches!.id);
+        await Promise.all(matchIds.map((id) => removeMatchFromCalendar(id)));
+      }
     }
+
+    showToast(`Wypisano Cię z ${selectedRegIds.length} meczów.`, 'exit-outline');
 
     setIsSelectionMode(false);
     setSelectedRegIds([]);
@@ -572,264 +428,118 @@ export default function MojeZapisyScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView
-        style={styles.loadingContainer}
-        edges={['bottom', 'left', 'right']}
-      >
-        <ActivityIndicator size="large" color="#2C4BFF" />
+      <SafeAreaView style={styles.loadingContainer} edges={['bottom', 'left', 'right']}>
+        <ActivityIndicator size="large" color={brand.primary} />
       </SafeAreaView>
     );
   }
 
+  const showBulkFooter = isSelectionMode && activeTab === 'active';
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <CustomAlert
-        visible={alertVisible}
-        title={alertTitle}
-        message={alertMessage}
-        onClose={handleAlertClose}
-      />
+      <CustomAlert visible={alertVisible} title={alertTitle} message={alertMessage} onClose={handleAlertClose} />
 
       <FlatList
         data={filteredRegistrations}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#2C4BFF"
-          />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={brand.primary} />}
         ListHeaderComponent={
           <View>
             <Text style={styles.headerTitle}>Moje zapisy</Text>
             <Text style={styles.headerSubtitle}>
-              Mecze, na które się zapisałeś (przytrzymaj kafelek, aby
-              zaznaczyć wiele)
+              Mecze, na które się zapisałeś (przytrzymaj kafelek, aby zaznaczyć wiele)
             </Text>
 
             {errorMsg && (
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>
-                  Błąd wczytywania: {errorMsg}
-                </Text>
+                <Text style={styles.errorText}>Błąd wczytywania: {errorMsg}</Text>
               </View>
             )}
 
             {!currentPlayer && !loading && (
               <View style={styles.warnBox}>
-                <Text style={styles.warnText}>
-                  Nie znaleziono Twojego profilu gracza.
-                </Text>
+                <Text style={styles.warnText}>Nie znaleziono Twojego profilu gracza.</Text>
               </View>
             )}
 
             {isSelectionMode && activeTab === 'active' && (
               <View style={styles.selectionToolbar}>
-                <Text style={styles.toolbarTitle}>
-                  Wybierz zakres dat:
-                </Text>
-
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.rangeScroll}
-                >
-                  <TouchableOpacity
-                    style={[
-                      styles.rangeChip,
-                      selectedRange === 'week' &&
-                        styles.rangeChipActive,
-                    ]}
-                    onPress={() => handleRangeSelect('week')}
-                  >
-                    <Text
-                      style={[
-                        styles.rangeText,
-                        selectedRange === 'week' &&
-                          styles.rangeTextActive,
-                      ]}
-                    >
-                      Tydzień
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.rangeChip,
-                      selectedRange === 'month' &&
-                        styles.rangeChipActive,
-                    ]}
-                    onPress={() => handleRangeSelect('month')}
-                  >
-                    <Text
-                      style={[
-                        styles.rangeText,
-                        selectedRange === 'month' &&
-                          styles.rangeTextActive,
-                      ]}
-                    >
-                      Miesiąc
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.rangeChip,
-                      selectedRange === 'quarter' &&
-                        styles.rangeChipActive,
-                    ]}
-                    onPress={() => handleRangeSelect('quarter')}
-                  >
-                    <Text
-                      style={[
-                        styles.rangeText,
-                        selectedRange === 'quarter' &&
-                          styles.rangeTextActive,
-                      ]}
-                    >
-                      Kwartał
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.rangeChip,
-                      selectedRange === 'year' &&
-                        styles.rangeChipActive,
-                    ]}
-                    onPress={() => handleRangeSelect('year')}
-                  >
-                    <Text
-                      style={[
-                        styles.rangeText,
-                        selectedRange === 'year' &&
-                          styles.rangeTextActive,
-                      ]}
-                    >
-                      Rok
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.rangeChip,
-                      selectedRange === 'all' &&
-                        styles.rangeChipActive,
-                    ]}
-                    onPress={() => handleRangeSelect('all')}
-                  >
-                    <Text
-                      style={[
-                        styles.rangeText,
-                        selectedRange === 'all' &&
-                          styles.rangeTextActive,
-                      ]}
-                    >
-                      Wszystko
-                    </Text>
-                  </TouchableOpacity>
-                </ScrollView>
-
-                <View style={styles.toolbarActionsRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.bulkCancelBtn,
-                      bulkActionLoading && { opacity: 0.6 },
-                    ]}
-                    onPress={handleBulkCancel}
-                    disabled={
-                      selectedRegIds.length === 0 ||
-                      bulkActionLoading
-                    }
-                  >
-                    {bulkActionLoading ? (
-                      <ActivityIndicator
-                        size="small"
-                        color="#FFFFFF"
-                      />
-                    ) : (
-                      <Text style={styles.bulkCancelText}>
-                        Wypisz zaznaczone ({selectedRegIds.length})
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.closeSelectionBtn}
+                <View style={styles.selectionTopRow}>
+                  <Text style={styles.selectionCount}>
+                    Zaznaczono {selectedRegIds.length} z {filteredRegistrations.length}
+                  </Text>
+                  <PressableScale
                     onPress={() => {
                       setIsSelectionMode(false);
                       setSelectedRegIds([]);
                       setSelectedRange(null);
                     }}
                   >
-                    <Text style={styles.closeSelectionText}>
-                      Zamknij
-                    </Text>
-                  </TouchableOpacity>
+                    <Text style={styles.cancelSelectionText}>Anuluj</Text>
+                  </PressableScale>
                 </View>
+
+                <FlatList
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  data={[...RANGE_OPTIONS, { key: 'deselect' as const, label: 'Odznacz' }]}
+                  keyExtractor={(item) => item.key}
+                  contentContainerStyle={styles.rangeRow}
+                  renderItem={({ item }) => (
+                    <Chip
+                      label={item.label}
+                      active={item.key !== 'deselect' && selectedRange === item.key}
+                      onPress={() =>
+                        item.key === 'deselect' ? handleDeselectAll() : handleRangeSelect(item.key as RangeKey)
+                      }
+                      c={c}
+                    />
+                  )}
+                />
               </View>
             )}
 
-            <View style={styles.tabsContainer}>
-              <TouchableOpacity
-                style={[
-                  styles.tabButton,
-                  activeTab === 'active' &&
-                    styles.tabButtonActive,
-                ]}
-                onPress={() => {
-                  setActiveTab('active');
+            <View style={styles.segmentWrap}>
+              <SegmentButtons
+                c={c}
+                activeKey={activeTab}
+                onChange={(key) => {
+                  setActiveTab(key as TabType);
                   setIsSelectionMode(false);
                   setSelectedRegIds([]);
+                  setSelectedRange(null);
                 }}
-                activeOpacity={0.7}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    activeTab === 'active' &&
-                      styles.tabTextActive,
-                  ]}
-                >
-                  Nadchodzące
-                </Text>
-              </TouchableOpacity>
+                options={[
+                  { key: 'active', label: 'Nadchodzące' },
+                  { key: 'past', label: 'Zakończone' },
+                ]}
+              />
+            </View>
 
-              <TouchableOpacity
-                style={[
-                  styles.tabButton,
-                  activeTab === 'past' &&
-                    styles.tabButtonActive,
-                ]}
-                onPress={() => {
-                  setActiveTab('past');
-                  setIsSelectionMode(false);
-                  setSelectedRegIds([]);
-                }}
-                activeOpacity={0.7}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    activeTab === 'past' &&
-                      styles.tabTextActive,
-                  ]}
-                >
-                  Zakończone
-                </Text>
-              </TouchableOpacity>
+            <View style={styles.paymentFilterRow}>
+              {PAYMENT_FILTER_OPTIONS.map((opt) => (
+                <Chip
+                  key={opt.key}
+                  label={opt.label}
+                  active={paymentFilter === opt.key}
+                  onPress={() => setPaymentFilter(opt.key)}
+                  c={c}
+                />
+              ))}
             </View>
           </View>
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>
-              {activeTab === 'active'
-                ? 'Brak nadchodzących zapisów.'
-                : 'Brak zakończonych zapisów.'}
+              {paymentFilter !== 'all'
+                ? 'Brak zapisów spełniających wybrany filtr płatności.'
+                : activeTab === 'active'
+                  ? 'Brak nadchodzących zapisów.'
+                  : 'Brak zakończonych zapisów.'}
             </Text>
           </View>
         }
@@ -837,378 +547,98 @@ export default function MojeZapisyScreen() {
           <RegistrationCard
             reg={item}
             onCancel={handleCancel}
-            onPress={handlePressMatch}
+            onPress={() => handleCardPress(item)}
             onLongPress={() => handleLongPressCard(item.id)}
             cancelling={cancellingId === item.id}
             activeTab={activeTab}
-            isSelectionMode={
-              isSelectionMode && activeTab === 'active'
-            }
+            isSelectionMode={isSelectionMode && activeTab === 'active'}
             isSelected={selectedRegIds.includes(item.id)}
+            c={c}
             isDark={isDark}
           />
         )}
       />
+
+      {showBulkFooter && (
+        <View style={styles.bulkFooter} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
+          <DangerButton
+            label={`Wypisz się z zaznaczonych (${selectedRegIds.length})`}
+            onPress={handleBulkCancel}
+            disabled={selectedRegIds.length === 0}
+            loading={bulkActionLoading}
+            c={c}
+            icon="exit-outline"
+          />
+        </View>
+      )}
+
+      <ToastHost c={c} isDark={isDark} bottom={(showBulkFooter ? footerHeight : 0) + 10} />
     </SafeAreaView>
   );
 }
 
-const getStyles = (isDark: boolean) =>
+const getStyles = (c: Palette) =>
   StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: isDark ? '#0B1120' : '#F8FAFC' },
-    loadingContainer: {
-      flex: 1,
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 16,
-    },
-    listContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32 },
+    safeArea: { flex: 1, backgroundColor: c.bg },
+    loadingContainer: { flex: 1, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' },
+    listContent: { paddingHorizontal: space.screen, paddingTop: 12, paddingBottom: 32 },
 
-    headerTitle: {
-      fontSize: 24,
-      fontWeight: '800',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-    },
-    headerSubtitle: {
-      fontSize: 14,
-      color: isDark ? '#94A3B8' : '#64748B',
-      marginTop: 4,
-      marginBottom: 16,
-      fontWeight: '500',
-    },
+    headerTitle: { fontSize: 24, fontWeight: '800', color: c.ink },
+    headerSubtitle: { fontSize: 12.5, color: c.ink3, marginTop: 4, marginBottom: 4, fontWeight: '500' },
+    segmentWrap: { marginTop: 12, marginBottom: 6 },
+    paymentFilterRow: { flexDirection: 'row', gap: 8, marginBottom: 6 },
+
+    errorBox: { backgroundColor: c.tintR, borderRadius: 16, padding: 14, marginTop: 14, borderWidth: 1, borderColor: brand.danger },
+    errorText: { color: c.redInk, fontSize: 13, fontWeight: '600' },
+    warnBox: { backgroundColor: c.tintA, borderRadius: 16, padding: 14, marginTop: 14, borderWidth: 1, borderColor: brand.accent },
+    warnText: { color: c.amberInk, fontSize: 13, fontWeight: '600' },
 
     selectionToolbar: {
-      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-      borderRadius: 24,
-      padding: 16,
-      marginBottom: 16,
+      backgroundColor: c.tintB,
+      borderRadius: radius.xl,
       borderWidth: 1,
-      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.05,
-      shadowRadius: 8,
-      elevation: 3,
-    },
-    toolbarTitle: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-      marginBottom: 8,
-    },
-    rangeScroll: { marginBottom: 10 },
-    rangeChip: {
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 14,
-      backgroundColor: isDark ? '#0B1120' : '#F1F5F9',
-      marginRight: 6,
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#E2E8F0',
-    },
-    rangeChipActive: {
-      backgroundColor: '#2C4BFF',
-      borderColor: '#2C4BFF',
-    },
-    rangeText: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: isDark ? '#94A3B8' : '#64748B',
-    },
-    rangeTextActive: {
-      color: '#FFFFFF',
-      fontWeight: '800',
-    },
-    toolbarActionsRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    bulkCancelBtn: {
-      backgroundColor: '#FF5A5F',
-      borderRadius: 16,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      flex: 1,
-      marginRight: 8,
-      alignItems: 'center',
-    },
-    bulkCancelText: {
-      color: '#FFFFFF',
-      fontSize: 13,
-      fontWeight: '800',
-    },
-    closeSelectionBtn: {
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#CBD5E1',
-      borderRadius: 16,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      backgroundColor: isDark ? '#0B1120' : '#F1F5F9',
-    },
-    closeSelectionText: {
-      color: isDark ? '#FFFFFF' : '#0F172A',
-      fontSize: 13,
-      fontWeight: '700',
-    },
-
-    // Zwiększony margines i padding checkboxa, żeby nie dotykał krawędzi kafelka
-    checkboxContainer: {
-      marginLeft: 14,
-      marginRight: 4,
-      justifyContent: 'center',
-    },
-    checkbox: {
-      width: 24,
-      height: 24,
-      borderRadius: 8,
-      borderWidth: 2,
-      borderColor: '#2C4BFF',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: isDark ? '#0B1120' : '#FFFFFF',
-    },
-    checkboxChecked: {
-      backgroundColor: '#2C4BFF',
-    },
-    checkmark: {
-      color: '#FFFFFF',
-      fontSize: 14,
-      fontWeight: '900',
-    },
-
-    errorBox: {
-      backgroundColor: isDark ? 'rgba(255, 90, 95, 0.15)' : '#FEF2F2',
-      borderRadius: 16,
+      borderColor: 'rgba(44,75,255,0.35)',
       padding: 14,
-      marginBottom: 14,
-      borderWidth: 1,
-      borderColor: '#FF5A5F',
+      marginTop: 14,
     },
-    errorText: {
-      color: '#FF5A5F',
-      fontSize: 14,
-      fontWeight: '600',
-    },
-
-    warnBox: {
-      backgroundColor: isDark ? 'rgba(255, 210, 63, 0.15)' : '#FEFCE8',
-      borderRadius: 16,
-      padding: 14,
-      marginBottom: 14,
-      borderWidth: 1,
-      borderColor: '#FFD23F',
-    },
-    warnText: {
-      color: isDark ? '#FFD23F' : '#CA8A04',
-      fontSize: 14,
-      fontWeight: '600',
-    },
-
-    tabsContainer: {
-      flexDirection: 'row',
-      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-      borderRadius: 24,
-      padding: 4,
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.03,
-      shadowRadius: 4,
-      elevation: 2,
-    },
-    tabButton: {
-      flex: 1,
-      paddingVertical: 12,
-      alignItems: 'center',
-      borderRadius: 20,
-    },
-    tabButtonActive: {
-      backgroundColor: '#2C4BFF',
-    },
-    tabText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: isDark ? '#94A3B8' : '#64748B',
-    },
-    tabTextActive: {
-      color: '#FFFFFF',
-      fontWeight: '900',
-    },
-
-    matchCard: {
-      backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-      borderRadius: 24,
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
-      overflow: 'hidden',
-      position: 'relative',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: isDark ? 0.3 : 0.06,
-      shadowRadius: 8,
-      elevation: 3,
-      flexDirection: 'row',
-      alignItems: 'stretch',
-    },
-    matchCardCancelled: { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' },
-    matchCardSelected: {
-      borderColor: '#2C4BFF',
-      borderWidth: 2,
-      backgroundColor: isDark ? '#162032' : '#F8FAFC',
-    },
-
-    sideStatusBar: {
-      position: 'absolute',
-      left: 0,
-      top: 0,
-      bottom: 0,
-      width: 6,
-    },
-    sideBarMain: { backgroundColor: '#2C4BFF' },
-    sideBarWaitlist: { backgroundColor: '#94A3B8' },
-
-    cardInnerContainer: {
-      flex: 1,
-      padding: 16,
-      paddingLeft: 20,
-    },
-    cardMainRow: { flexDirection: 'row', alignItems: 'center' },
-    
-    dateBox: {
-      width: 68,
-      height: 68,
-      borderRadius: 18,
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#E2E8F0',
-      paddingHorizontal: 4,
-    },
-    dateBoxCancelled: { borderColor: '#FF5A5F' },
-    dateDay: { fontSize: 20, fontWeight: '800', color: '#2C4BFF' },
-    dateDayCancelled: { color: '#FF5A5F' },
-    dateMonth: { 
-      fontSize: 11, 
-      fontWeight: '700', 
-      color: isDark ? '#94A3B8' : '#64748B', 
-      textTransform: 'uppercase',
-      textAlign: 'center',
-      width: '100%',
-    },
-    dateMonthCancelled: { color: '#FF5A5F' },
-
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 6,
-    },
-    matchTitle: { fontSize: 16, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A', flex: 1, marginRight: 6 },
-    matchTitleCancelled: { textDecorationLine: 'line-through', color: isDark ? '#64748B' : '#94A3B8' },
-
-    inlineStatusBadge: {
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 10,
-    },
-    // Poprawiona czytelność: mocniejsze tło i pełny kontrast napisów statusu na ciemnym tle
-    badgeMainBg: { 
-      backgroundColor: isDark ? 'rgba(44, 75, 255, 0.25)' : '#EFF6FF', 
-      borderWidth: 1, 
-      borderColor: isDark ? '#4F6FFF' : '#BFDBFE' 
-    },
-    badgeWaitlistBg: { 
-      backgroundColor: isDark ? 'rgba(148, 163, 184, 0.2)' : '#F1F5F9', 
-      borderWidth: 1, 
-      borderColor: isDark ? '#64748B' : '#CBD5E1' 
-    },
-    inlineStatusText: { fontSize: 11, fontWeight: '800' },
-    badgeMainText: { color: isDark ? '#93C5FD' : '#2C4BFF' },
-    badgeWaitlistText: { color: isDark ? '#CBD5E1' : '#475569' },
-
-    badgeCancelledBg: { backgroundColor: isDark ? 'rgba(255, 90, 95, 0.2)' : '#FEF2F2', borderWidth: 1, borderColor: '#FF5A5F', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-    badgeCancelledText: { fontSize: 11, fontWeight: '800', color: '#FF5A5F' },
-
-    iconInfoRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 6,
-    },
-    iconInfoRow2: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginTop: 2,
-    },
-    iconContainer: {
-      width: 24,
-      height: 24,
-      borderRadius: 6,
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#E2E8F0',
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginRight: 6,
-    },
-    containerIconText: {
-      fontSize: 11,
-    },
-    matchInfo: { fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', fontWeight: '500', flex: 1 },
-    
-    infoPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC',
-      borderWidth: 1,
-      borderColor: isDark ? '#334155' : '#E2E8F0',
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 10,
-      marginRight: 6,
-    },
-    infoPillIcon: {
-      fontSize: 11,
-      marginRight: 4,
-    },
-    infoPillText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-    },
-
-    priceText: {
-      fontSize: 14,
-      fontWeight: '800',
-      color: isDark ? '#FFFFFF' : '#0F172A',
-    },
-
-    cardFooter: {
-      marginTop: 12,
-      paddingTop: 10,
-      borderTopWidth: 1,
-      borderTopColor: isDark ? 'rgba(255, 255, 255, 0.06)' : '#F1F5F9',
-      flexDirection: 'row',
-      justifyContent: 'flex-end',
-      alignItems: 'center',
-    },
-    quickCancelBtnInline: {
-      borderWidth: 1,
-      borderColor: '#FF5A5F',
-      borderRadius: 12,
-      paddingVertical: 8,
-      paddingHorizontal: 16,
-      alignItems: 'center',
-      backgroundColor: isDark ? 'rgba(255, 90, 95, 0.12)' : '#FEF2F2',
-    },
-    quickCancelText: { color: '#FF5A5F', fontSize: 12, fontWeight: '800' },
+    selectionTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+    selectionCount: { fontSize: 13, fontWeight: '800', color: c.priInk },
+    cancelSelectionText: { fontSize: 12.5, fontWeight: '800', color: c.ink2 },
+    rangeRow: { gap: 8 },
 
     emptyState: { paddingVertical: 40, alignItems: 'center' },
-    emptyText: { fontSize: 15, color: isDark ? '#94A3B8' : '#64748B', fontStyle: 'italic', fontWeight: '500' },
+    emptyText: { fontSize: 15, color: c.ink2, fontWeight: '500' },
+
+    bulkFooter: {
+      padding: space.screen,
+      paddingTop: 14,
+      backgroundColor: c.card,
+      borderTopWidth: 1,
+      borderTopColor: c.line,
+    },
+  });
+
+const getCardStyles = (c: Palette) =>
+  StyleSheet.create({
+    wrap: { marginBottom: space.gap },
+    cardSelected: { borderColor: brand.primary, backgroundColor: c.tintB },
+    mainRow: { flexDirection: 'row', alignItems: 'center' },
+    checkbox: {
+      width: 26,
+      height: 26,
+      borderRadius: radius.xs,
+      borderWidth: 2,
+      borderColor: brand.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 10,
+      backgroundColor: c.card2,
+    },
+    checkboxChecked: { backgroundColor: brand.primary },
+    infoCol: { flex: 1, marginLeft: 12 },
+    title: { fontSize: 14.5, fontWeight: '800', color: c.ink, marginBottom: 3 },
+    titleCancelled: { textDecorationLine: 'line-through', color: c.ink2 },
+    meta: { fontSize: 11.5, fontWeight: '600', color: c.ink2, marginBottom: 6 },
+    pillsRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+    footerWrap: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: c.line },
   });

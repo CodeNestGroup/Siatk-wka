@@ -1,35 +1,37 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   Switch,
   Image,
-  useColorScheme,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { syncMatchNotifications } from '@/services/notificationService';
+import { useAppTheme } from '@/hooks/use-theme';
+import { brand, radius, space, type Palette } from '@/constants/app-theme';
 import CustomAlert from '@/components/CustomAlert';
+import Card from '@/components/ui/Card';
+import PressableScale from '@/components/ui/PressableScale';
+import PrimaryButton from '@/components/ui/PrimaryButton';
 
 const CURRENT_PLAYER_KEY = 'current_player_id';
 const REMEMBER_ME_KEY = 'remember_me_status';
-const THEME_STORAGE_KEY = 'app_theme_mode';
 
+// Logowanie nie korzysta z Supabase Auth — nie ma tu prawdziwej sesji/JWT. "Zalogowanie" to
+// zapisanie player.id z RPC verify_login w AsyncStorage; wszystkie kolejne zapytania w apce
+// identyfikują gracza właśnie po tym id (patrz src/lib/player.ts: getCurrentPlayer()).
 export default function LoginScreen() {
   const router = useRouter();
-  const systemColorScheme = useColorScheme();
-
-  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
-  const isDark = themeMode === 'system' ? systemColorScheme === 'dark' : themeMode === 'dark';
-  const styles = getStyles(isDark);
+  const { isDark, c } = useAppTheme();
+  const styles = getStyles(c);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -50,35 +52,19 @@ export default function LoginScreen() {
     onConfirm: () => {},
   });
 
-  // Wczytywanie motywu: domyślnie system, a jeśli użytkownik zmienił w aplikacji, to preferencja z AsyncStorage
-  const loadThemePreference = async () => {
-    try {
-      const savedTheme = await AsyncStorage.getItem(THEME_STORAGE_KEY);
-      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
-        setThemeMode(savedTheme);
-      } else {
-        // Pierwsze odpalenie / brak zapisu - wymuś domyślnie z urządzenia
-        setThemeMode('system');
-      }
-    } catch (e) {
-      console.error('Błąd wczytywania motywu na ekranie logowania:', e);
-    }
-  };
-
-  useFocusEffect(
-    useCallback(() => {
-      loadThemePreference();
-    }, [])
-  );
-
-  const showAlert = (title: string, message: string, type: 'error' | 'success' | 'info' = 'error', onCloseCallback?: () => void) => {
+  const showAlert = (
+    title: string,
+    message: string,
+    type: 'error' | 'success' | 'info' = 'error',
+    onCloseCallback?: () => void
+  ) => {
     setAlertState({
       visible: true,
       title,
       message,
       type,
       onConfirm: () => {
-        setAlertState(prev => ({ ...prev, visible: false }));
+        setAlertState((prev) => ({ ...prev, visible: false }));
         if (onCloseCallback) onCloseCallback();
       },
     });
@@ -93,6 +79,9 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
+      // verify_login robi po stronie bazy to, czego apka nigdy nie powinna: porównuje hasło
+      // z zaszyfrowanym (bcrypt/pgcrypto) players.password i sprawdza rolę konta. Zwraca albo
+      // dane gracza, albo { error: 'wrong_password' | 'pending' | ... } — nigdy samego hasła.
       const { data, error } = await supabase.rpc('verify_login', {
         p_email: email.trim().toLowerCase(),
         p_password: password,
@@ -101,6 +90,7 @@ export default function LoginScreen() {
       if (error || !data || data.error) {
         setLoading(false);
         const errType = data?.error;
+        // role_id = 3 ("pending") = konto czeka na akceptację admina — patrz players_role w bazie.
         if (errType === 'pending') {
           showAlert(
             'Konto oczekuje na zatwierdzenie',
@@ -167,23 +157,21 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Nagłówek aplikacji */}
           <View style={styles.header}>
-            <View style={styles.logoCircle}>
-              <Image source={require('@/assets/images/icon.png')} style={styles.logoImage} resizeMode="cover"/>
+            <View style={styles.logoSquare}>
+              <Image source={require('@/assets/images/icon.png')} style={styles.logoImage} resizeMode="cover" />
             </View>
             <Text style={styles.title}>ESCO VolleyManager</Text>
             <Text style={styles.subtitle}>Zaloguj się do swojego konta</Text>
           </View>
 
-          {/* Formularz logowania */}
-          <View style={styles.form}>
+          <Card c={c} isDark={isDark} style={styles.form}>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Adres E-mail</Text>
               <TextInput
                 style={styles.input}
                 placeholder="twoj@email.com"
-                placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+                placeholderTextColor={c.ink3}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 value={email}
@@ -196,7 +184,7 @@ export default function LoginScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="••••••••"
-                placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+                placeholderTextColor={c.ink3}
                 secureTextEntry
                 autoCapitalize="none"
                 value={password}
@@ -204,36 +192,24 @@ export default function LoginScreen() {
               />
             </View>
 
-            {/* Przełącznik zapamiętywania sesji */}
             <View style={styles.rememberRow}>
               <Text style={styles.rememberText}>Pozostań zalogowany</Text>
               <Switch
                 value={rememberMe}
                 onValueChange={setRememberMe}
-                trackColor={{ false: isDark ? '#334155' : '#CBD5E1', true: '#2C4BFF' }}
-                thumbColor={Platform.OS === 'ios' ? '#fff' : (rememberMe ? '#2C4BFF' : '#f4f3f4')}
+                trackColor={{ false: c.line, true: brand.primary }}
+                thumbColor="#FFFFFF"
               />
             </View>
 
-            {/* Główny przycisk akcji */}
-            <TouchableOpacity
-              style={[styles.button, loading && styles.buttonDisabled]}
-              onPress={handleLogin}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.buttonText}>
-                {loading ? 'Logowanie...' : 'ZALOGUJ SIĘ'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+            <PrimaryButton label={loading ? 'Logowanie...' : 'ZALOGUJ SIĘ'} onPress={handleLogin} loading={loading} />
+          </Card>
 
-          {/* Przejście do rejestracji */}
           <View style={styles.registerRow}>
             <Text style={styles.registerText}>Nie masz konta? </Text>
-            <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
+            <PressableScale onPress={() => router.push('/(auth)/register')}>
               <Text style={styles.registerLink}>Zarejestruj się</Text>
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -241,135 +217,41 @@ export default function LoginScreen() {
   );
 }
 
-const getStyles = (isDark: boolean) =>
+const getStyles = (c: Palette) =>
   StyleSheet.create({
-    safeArea: { 
-      flex: 1, 
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC' 
-    },
-    container: { 
-      flex: 1 
-    },
-    scrollContent: { 
-      flexGrow: 1, 
-      justifyContent: 'center', 
-      paddingHorizontal: 24, 
-      paddingVertical: 32 
-    },
-    header: { 
-      alignItems: 'center', 
-      marginBottom: 28 
-    },
-    logoCircle: { 
-      width: 110, 
-      height: 110, 
-      borderRadius: 28, 
-      backgroundColor: isDark ? '#1E293B' : '#FFFFFF', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
+    safeArea: { flex: 1, backgroundColor: c.bg },
+    container: { flex: 1 },
+    scrollContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 32 },
+    header: { alignItems: 'center', marginBottom: 28 },
+    logoSquare: {
+      width: 34,
+      height: 34,
+      borderRadius: radius.xs,
+      backgroundColor: brand.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
       marginBottom: 16,
-      borderWidth: 1,
-      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
       overflow: 'hidden',
-      shadowColor: '#2C4BFF',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: isDark ? 0.3 : 0.1,
-      shadowRadius: 16,
-      elevation: 8,
     },
-    logoImage: {
-      width: '100%',
-      height: '100%',
-    },
-    title: { 
-      fontSize: 30, 
-      fontWeight: '800', 
-      color: isDark ? '#FFFFFF' : '#0F172A', 
-      marginBottom: 8,
-      letterSpacing: 0.5,
-    },
-    subtitle: { 
-      fontSize: 16, 
-      color: isDark ? '#94A3B8' : '#64748B', 
-      fontWeight: '500', 
-      textAlign: 'center' 
-    },
-    form: { 
-      backgroundColor: isDark ? '#1E293B' : '#FFFFFF', 
-      borderRadius: 32, 
-      padding: 24,
+    logoImage: { width: '100%', height: '100%' },
+    title: { fontSize: 26, fontWeight: '800', color: c.ink, marginBottom: 8, letterSpacing: 0.3 },
+    subtitle: { fontSize: 14.5, color: c.ink2, fontWeight: '500', textAlign: 'center' },
+    form: { padding: space.cardPad },
+    inputGroup: { marginBottom: 16 },
+    label: { fontSize: 13.5, fontWeight: '700', color: c.ink, marginBottom: 7 },
+    input: {
       borderWidth: 1,
-      borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0',
-      shadowColor: '#000000',
-      shadowOffset: { width: 0, height: 12 },
-      shadowOpacity: isDark ? 0.4 : 0.06,
-      shadowRadius: 20,
-      elevation: 10,
+      borderColor: c.line,
+      borderRadius: radius.md,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      fontSize: 15,
+      backgroundColor: c.card2,
+      color: c.ink,
     },
-    inputGroup: { 
-      marginBottom: 18 
-    },
-    label: { 
-      fontSize: 15, 
-      fontWeight: '700', 
-      color: isDark ? '#F1F5F9' : '#0F172A', 
-      marginBottom: 8 
-    },
-    input: { 
-      borderWidth: 1, 
-      borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : '#CBD5E1', 
-      borderRadius: 16, 
-      paddingHorizontal: 16, 
-      paddingVertical: 14, 
-      fontSize: 16, 
-      backgroundColor: isDark ? '#0B1120' : '#F8FAFC', 
-      color: isDark ? '#FFFFFF' : '#0F172A' 
-    },
-    rememberRow: { 
-      flexDirection: 'row', 
-      justifyContent: 'space-between', 
-      alignItems: 'center', 
-      marginBottom: 20, 
-      marginTop: 6 
-    },
-    rememberText: { 
-      fontSize: 15, 
-      color: isDark ? '#F1F5F9' : '#0F172A', 
-      fontWeight: '600' 
-    },
-    button: { 
-      backgroundColor: '#2C4BFF', 
-      borderRadius: 16, 
-      paddingVertical: 18, 
-      alignItems: 'center', 
-      marginTop: 8,
-      shadowColor: '#2C4BFF',
-      shadowOffset: { width: 0, height: 6 },
-      shadowOpacity: 0.35,
-      shadowRadius: 10,
-      elevation: 6,
-    },
-    buttonDisabled: { 
-      opacity: 0.6 
-    },
-    buttonText: { 
-      color: '#FFFFFF', 
-      fontSize: 16, 
-      fontWeight: '800',
-      letterSpacing: 1,
-    },
-    registerRow: { 
-      flexDirection: 'row', 
-      justifyContent: 'center', 
-      marginTop: 28 
-    },
-    registerText: { 
-      color: isDark ? '#94A3B8' : '#64748B', 
-      fontSize: 16 
-    },
-    registerLink: { 
-      color: '#2C4BFF', 
-      fontSize: 16, 
-      fontWeight: '800' 
-    },
+    rememberRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, marginTop: 4 },
+    rememberText: { fontSize: 14, color: c.ink, fontWeight: '600' },
+    registerRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 26 },
+    registerText: { color: c.ink2, fontSize: 14.5 },
+    registerLink: { color: c.priInk, fontSize: 14.5, fontWeight: '800' },
   });
