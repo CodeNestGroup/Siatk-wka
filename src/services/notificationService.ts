@@ -19,7 +19,7 @@ export async function syncMatchNotifications(matches: Array<{ id: string; title:
       if (triggerTime.getTime() > Date.now()) {
         await Notifications.scheduleNotificationAsync({
           content: {
-            title: "🏐 Mecz już jutro!",
+            title: "Mecz już jutro!",
             body: `Przypomnienie: ${match.title || 'Trening'} odbędzie się jutro o ${match.time_start.slice(0, 5)}. Miejsce: ${match.location}`,
             data: { screen: 'match-detail', matchId: match.id },
             sound: true,

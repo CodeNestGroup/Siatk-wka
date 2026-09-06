@@ -451,7 +451,7 @@ export default function AnnouncementDetailScreen() {
 
                 <View style={styles.matchActionWrap}>
                   {matchIsFinished ? (
-                    <Pill c={c} variant={matchIsCancelled ? 'red' : 'neutral'} label={matchIsCancelled ? '⚠ Mecz odwołany' : 'Mecz zakończony'} />
+                    <Pill c={c} variant={matchIsCancelled ? 'red' : 'neutral'} label={matchIsCancelled ? 'Mecz odwołany' : 'Mecz zakończony'} />
                   ) : !currentPlayer ? null : myMatchReg ? (
                     matchIsCancellable ? (
                       <DangerButton

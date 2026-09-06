@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   Easing,
   interpolateColor,
@@ -13,7 +14,7 @@ import { tapHaptic } from '@/lib/haptics';
 const EASING = Easing.bezier(0.2, 0.8, 0.2, 1);
 const PRIMARY_SHADOW = shadow(false).primary;
 
-export type SegmentOption = { key: string; label: string };
+export type SegmentOption = { key: string; label: string; icon?: keyof typeof Ionicons.glyphMap };
 
 type Props = {
   options: SegmentOption[];
@@ -29,6 +30,7 @@ export default function SegmentButtons({ options, activeKey, onChange, c }: Prop
         <SegmentButton
           key={opt.key}
           label={opt.label}
+          icon={opt.icon}
           active={opt.key === activeKey}
           onPress={() => onChange(opt.key)}
           c={c}
@@ -40,11 +42,13 @@ export default function SegmentButtons({ options, activeKey, onChange, c }: Prop
 
 function SegmentButton({
   label,
+  icon,
   active,
   onPress,
   c,
 }: {
   label: string;
+  icon?: keyof typeof Ionicons.glyphMap;
   active: boolean;
   onPress: () => void;
   c: Palette;
@@ -85,9 +89,12 @@ function SegmentButton({
           animatedStyle,
         ]}
       >
-        <Animated.Text style={[styles.text, textStyle]} numberOfLines={1}>
-          {label}
-        </Animated.Text>
+        <View style={styles.contentRow}>
+          {icon && <Ionicons name={icon} size={13} color={active ? '#FFFFFF' : c.ink2} />}
+          <Animated.Text style={[styles.text, textStyle]} numberOfLines={1}>
+            {label}
+          </Animated.Text>
+        </View>
       </Animated.View>
     </Pressable>
   );
@@ -104,5 +111,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  contentRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   text: { fontSize: 12.5, fontWeight: '800' },
 });

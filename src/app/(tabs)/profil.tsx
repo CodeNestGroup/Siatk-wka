@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { ensureCalendarPermission } from '@/services/calendarService';
@@ -339,9 +340,9 @@ export default function ProfilScreen() {
             activeKey={themeMode}
             onChange={(key) => setThemeMode(key as ThemeMode)}
             options={[
-              { key: 'system', label: '📱 Urządzenia' },
-              { key: 'light', label: '☀️ Biały' },
-              { key: 'dark', label: '🌙 Czarny' },
+              { key: 'system', label: 'Urządzenia', icon: 'phone-portrait-outline' },
+              { key: 'light', label: 'Biały', icon: 'sunny-outline' },
+              { key: 'dark', label: 'Czarny', icon: 'moon-outline' },
             ]}
           />
         </Card>
@@ -394,8 +395,9 @@ export default function ProfilScreen() {
             onPressIn={() => setShowSensitiveData(true)}
             onPressOut={() => setShowSensitiveData(false)}
           >
+            <Ionicons name={showSensitiveData ? 'lock-open-outline' : 'lock-closed-outline'} size={14} color={c.ink2} />
             <Text style={styles.revealButtonText}>
-              {showSensitiveData ? '🔓 Dane odsłonięte' : '🔒 Przytrzymaj, aby zobaczyć telefon i email'}
+              {showSensitiveData ? 'Dane odsłonięte' : 'Przytrzymaj, aby zobaczyć telefon i email'}
             </Text>
           </PressableScale>
         </Card>
@@ -555,12 +557,15 @@ const getStyles = (c: Palette) =>
     inputReadOnly: { color: c.ink2, opacity: 0.9 },
 
     revealButton: {
+      flexDirection: 'row',
       backgroundColor: c.card2,
       borderWidth: 1,
       borderColor: c.line,
       borderRadius: radius.md,
       paddingVertical: 12,
       alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
       marginTop: 4,
     },
     revealButtonText: { color: c.ink2, fontSize: 13, fontWeight: '800' },

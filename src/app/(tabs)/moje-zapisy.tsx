@@ -101,7 +101,7 @@ function RegistrationCard({
   let statusLabel = 'NADCHODZĄCY';
   let statusVariant: PillVariant = 'blue';
   if (isCancelled) {
-    statusLabel = '⚠ ODWOŁANY';
+    statusLabel = 'ODWOŁANY';
     statusVariant = 'red';
   } else if (finished) {
     statusLabel = 'ZAKOŃCZONY';

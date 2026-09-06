@@ -11,5 +11,5 @@ export default function MatchDetailScreen() {
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
   const backLabel = (from && BACK_LABELS[from]) || BACK_LABELS.terminarz;
 
-  return <MatchView matchId={id} compact showBack backLabel={backLabel} />;
+  return <MatchView matchId={id} showBack backLabel={backLabel} />;
 }

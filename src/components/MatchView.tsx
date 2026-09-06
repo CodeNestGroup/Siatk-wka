@@ -3,10 +3,11 @@ import { View, Text, StyleSheet, ScrollView, Dimensions, ActivityIndicator } fro
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase';
 import { formatMatchDate, formatTime, isDateInPast } from '@/lib/format';
-import { getCurrentPlayer, isAdminPlayer, type Player } from '@/lib/player';
+import { getCurrentPlayer, type Player } from '@/lib/player';
 import { afterSignUp, afterCancel } from '@/services/registrationService';
 import { useAppTheme } from '@/hooks/use-theme';
 import { useItemBadges } from '@/hooks/use-badges';
@@ -42,8 +43,8 @@ type Match = {
 
 type NestedRole = { name: string } | { name: string }[] | null | undefined;
 type NestedPlayer =
-  | { full_name: string; roles?: NestedRole }
-  | { full_name: string; roles?: NestedRole }[]
+  | { full_name: string; roles?: NestedRole; is_core_roster?: boolean | null; core_order?: number | null }
+  | { full_name: string; roles?: NestedRole; is_core_roster?: boolean | null; core_order?: number | null }[]
   | null
   | undefined;
 
@@ -68,11 +69,11 @@ type Announcement = {
   players?: NestedPlayer;
 };
 
-function getPlayerInfo(playersField: NestedPlayer): { name: string; isAdmin: boolean } {
+function getPlayerInfo(playersField: NestedPlayer): { name: string; isAdmin: boolean; isCoreRoster: boolean } {
   const p = unwrapRelation(playersField);
-  if (!p) return { name: 'Nieznany gracz', isAdmin: false };
+  if (!p) return { name: 'Nieznany gracz', isAdmin: false, isCoreRoster: false };
   const role = unwrapRelation(p.roles);
-  return { name: p.full_name || 'Nieznany gracz', isAdmin: role?.name === 'admin' };
+  return { name: p.full_name || 'Nieznany gracz', isAdmin: role?.name === 'admin', isCoreRoster: !!p.is_core_roster };
 }
 
 function getAuthorName(playersField: NestedPlayer): string {
@@ -82,22 +83,20 @@ function getAuthorName(playersField: NestedPlayer): string {
 
 function ProgressBar({ pct, height = 7 }: { pct: number; height?: number }) {
   const clamped = Math.max(0, Math.min(1, pct));
-  const tipWidth = Math.max(8, height * 1.6);
+  // Gradient renderowany tak, jakby zawsze pokrywał CAŁY tor (100%), a nie tylko wypełnioną
+  // część — dzięki temu przycięcie go przez rodzica (fillWrap, szerokości `clamped*100%` toru,
+  // z overflow:hidden) odsłania kolejny fragment tej samej, spójnej skali kolorów niebiesko-
+  // złotych zamiast rozciągać gradient od nowa przy każdej zmianie procentu zapełnienia.
+  const gradientWidthPct = clamped > 0 ? 100 / clamped : 100;
   return (
     <View style={[progressStyles.track, { height, borderRadius: height / 2 }]}>
-      <View style={[progressStyles.fill, { width: `${clamped * 100}%`, borderRadius: height / 2 }]}>
-        {clamped > 0.06 && (
-          <View
-            style={[
-              progressStyles.tip,
-              {
-                width: tipWidth,
-                borderTopRightRadius: height / 2,
-                borderBottomRightRadius: height / 2,
-              },
-            ]}
-          />
-        )}
+      <View style={[progressStyles.fillWrap, { width: `${clamped * 100}%`, borderRadius: height / 2 }]}>
+        <LinearGradient
+          colors={[brand.primary, brand.ticketAccent]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[progressStyles.fillGradient, { width: `${gradientWidthPct}%` }]}
+        />
       </View>
     </View>
   );
@@ -105,23 +104,25 @@ function ProgressBar({ pct, height = 7 }: { pct: number; height?: number }) {
 
 const progressStyles = StyleSheet.create({
   track: { backgroundColor: 'rgba(255,255,255,0.1)', overflow: 'hidden' },
-  fill: { height: '100%', backgroundColor: brand.primary },
-  tip: { position: 'absolute', right: 0, top: 0, bottom: 0, backgroundColor: brand.accent },
+  fillWrap: { height: '100%', overflow: 'hidden' },
+  fillGradient: { height: '100%' },
 });
 
 type Props = {
   matchId?: string;
-  compact?: boolean;
   showBack?: boolean;
   backLabel?: string;
 };
 
-export default function MatchView({ matchId, compact = false, showBack = false, backLabel = 'TERMINARZ' }: Props) {
+export default function MatchView({ matchId, showBack = false, backLabel = 'TERMINARZ' }: Props) {
   const router = useRouter();
   const { isDark, c } = useAppTheme();
   const styles = useMemo(() => getStyles(c, isDark), [c, isDark]);
 
   const [match, setMatch] = useState<Match | null>(null);
+  // Czy to konkretnie NAJBLIŻSZY nadchodzący mecz (a nie dowolny inny) — od tego zależy, czy
+  // bilet dostaje złote akcenty (jak widget "Najbliższe spotkanie" na stronie WWW) czy granatowe.
+  const [isNearestMatch, setIsNearestMatch] = useState(false);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
@@ -191,9 +192,28 @@ export default function MatchView({ matchId, compact = false, showBack = false, 
 
     setMatch(matchData);
 
+    // Ekran Start pyta od razu o najbliższy mecz, więc to co się wczyta zawsze nim jest. Ekran
+    // szczegółów (z Terminarza/Moich zapisów) dostaje konkretne matchId, więc trzeba osobno
+    // sprawdzić, czy akurat TEN mecz jest tym samym, co pokazałby ekran Start.
+    if (!matchId) {
+      setIsNearestMatch(true);
+    } else {
+      const { data: nearestData } = await supabase
+        .from('matches')
+        .select('id')
+        .gte('date', new Date().toISOString().split('T')[0])
+        .order('date', { ascending: true })
+        .order('time_start', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      setIsNearestMatch(nearestData?.id === matchData.id);
+    }
+
     const { data: regsData, error: regsError } = await supabase
       .from('match_registrations')
-      .select('id, match_id, player_id, is_paid, created_at, players:player_id ( full_name, roles:role_id ( name ) )')
+      .select(
+        'id, match_id, player_id, is_paid, created_at, players:player_id ( full_name, is_core_roster, core_order, roles:role_id ( name ) )'
+      )
       .eq('match_id', matchData.id)
       .order('created_at', { ascending: true });
 
@@ -280,21 +300,30 @@ export default function MatchView({ matchId, compact = false, showBack = false, 
   const isCancellable = canCancelMatch(match.date, match.time_start);
   const title = match.title?.trim() || (matchId ? 'Szczegóły Meczu' : 'Najbliższy Trening');
   const { weekday } = formatMatchDate(match.date);
-  const viewerIsAdmin = isAdminPlayer(currentPlayer);
   const pct = capacity > 0 ? Math.min(1, registrations.length / capacity) : 0;
+  // Ikony godziny/lokalizacji złote tylko na bilecie najbliższego meczu — reszta zostaje przy
+  // istniejącym jasnoniebieskim akcencie biletu (brand.ticketLabel), tak jak zwykłe wiersze
+  // terminarza na stronie WWW klubu.
+  const metaIconColor = isNearestMatch ? brand.ticketAccent : brand.ticketLabel;
+  const hasCoreRosterMembers = registrations.some((r) => getPlayerInfo(r.players).isCoreRoster);
 
   const getStatusInfo = (fullLabel: boolean): { label: string; variant: PillVariant } => {
-    if (isCancelled) return { label: '⚠ ODWOŁANY', variant: 'red' };
+    if (isCancelled) return { label: 'ODWOŁANY', variant: 'red' };
     if (isFinished) return { label: 'ZAKOŃCZONY', variant: 'neutral' };
-    return { label: fullLabel ? 'NADCHODZĄCY MECZ' : 'NADCHODZĄCY', variant: 'blue' };
+    // Złoty tylko dla NAJBLIŻSZEGO meczu (tak jak widget "Najbliższe spotkanie" na stronie WWW
+    // klubu) — każdy kolejny nadchodzący mecz zostaje przy granatowo-niebieskiej plakietce.
+    return {
+      label: fullLabel ? 'NADCHODZĄCY MECZ' : 'NADCHODZĄCY',
+      variant: isNearestMatch ? 'solidGold' : 'blue',
+    };
   };
 
   const getUserStatusInfo = (): { label: string; variant: PillVariant } => {
-    if (isCancelled) return { label: '⚠ Mecz odwołany', variant: 'red' };
+    if (isCancelled) return { label: 'Mecz odwołany', variant: 'red' };
     if (!myRegistration) return { label: 'Nie jesteś zapisany', variant: 'neutral' };
     return isUserInMain
-      ? { label: '✓ Jesteś w składzie głównym', variant: 'green' }
-      : { label: '⏳ Jesteś na liście rezerwowej', variant: 'amber' };
+      ? { label: 'Jesteś w składzie głównym', variant: 'green' }
+      : { label: 'Jesteś na liście rezerwowej', variant: 'amber' };
   };
 
   const handleSignUp = async () => {
@@ -358,8 +387,6 @@ export default function MatchView({ matchId, compact = false, showBack = false, 
     const info = getPlayerInfo(item.players);
     // "Własny" wygrywa z "admin", jeśli to samo (spójne z regułą kart komentarzy).
     const rowKind: 'own' | 'admin' | 'other' = isMe ? 'own' : info.isAdmin ? 'admin' : 'other';
-    // Status płatności innych osób widzi tylko admin — zwykły gracz widzi wyłącznie swój.
-    const canSeePayment = isMe || viewerIsAdmin;
 
     return (
       <Animated.View
@@ -372,7 +399,12 @@ export default function MatchView({ matchId, compact = false, showBack = false, 
           rowKind === 'admin' && styles.participantRowAdmin,
         ]}
       >
-        <Text style={styles.participantNumber}>{index + 1}</Text>
+        <View style={styles.participantNumberWrap}>
+          <Text style={styles.participantNumber}>{index + 1}</Text>
+          {/* Kropka stałego składu — to samo co żółta kropka i legenda "= stały skład" przy
+              liście zawodników na stronie WWW klubu (players.is_core_roster). */}
+          {info.isCoreRoster && <View style={styles.coreRosterDot} />}
+        </View>
         <View style={styles.participantInfo}>
           <Text style={styles.participantName} numberOfLines={1}>
             {info.name}
@@ -380,13 +412,12 @@ export default function MatchView({ matchId, compact = false, showBack = false, 
           <View style={styles.participantPillsRow}>
             {rowKind === 'own' && <Pill c={c} variant="green" label="TY" />}
             {rowKind === 'admin' && <Pill c={c} variant="blue" label="ADMIN" />}
-            {canSeePayment && (
-              <Pill
-                c={c}
-                variant={item.is_paid ? 'green' : 'amber'}
-                label={item.is_paid ? 'OPŁACONE' : 'NIE OPŁACONE'}
-              />
-            )}
+            {/* Widoczne dla każdego, tak jak na stronie WWW klubu — status opłat nie jest już ukrywany przed zwykłymi graczami. */}
+            <Pill
+              c={c}
+              variant={item.is_paid ? 'green' : 'amber'}
+              label={item.is_paid ? `✓ ${Number(match.price_per_player)} PLN` : 'NIE OPŁACONE'}
+            />
           </View>
         </View>
       </Animated.View>
@@ -458,64 +489,43 @@ export default function MatchView({ matchId, compact = false, showBack = false, 
         )}
 
         <View style={styles.ticketWrap}>
-          {compact ? (
-            <Ticket>
-              <View style={styles.compactRow}>
-                <DateChip date={match.date} width={46} height={52} c={darkPalette} />
-                <View style={styles.compactInfoCol}>
-                  <Text style={[styles.compactTitle, isCancelled && styles.titleCancelled]} numberOfLines={1}>
-                    {title}
-                  </Text>
-                  <Text style={styles.compactMeta} numberOfLines={1}>
-                    {weekday} · {formatTime(match.time_start)}–{formatTime(match.time_end)} · {match.location}
-                  </Text>
-                </View>
-                <View style={styles.compactPriceCol}>
-                  <Text style={styles.compactPrice}>{Number(match.price_per_player)} PLN</Text>
-                  <Text style={styles.compactPerPerson}>ZA OSOBĘ</Text>
-                </View>
-              </View>
-              <TicketPerforation c={c} compact />
-              <View style={styles.compactFooterRow}>
-                <Text style={styles.compactZapisani} numberOfLines={1}>
-                  ZAPISANI {registrations.length}/{capacity}
+          <Ticket>
+            <View style={styles.fullTop}>
+              <View style={styles.fullTopRow}>
+                <Pill c={darkPalette} variant={getStatusInfo(true).variant} label={getStatusInfo(true).label} />
+                <Text style={[styles.fullPrice, isCancelled && styles.textCancelled]}>
+                  {Number(match.price_per_player)} PLN / os.
                 </Text>
-                <View style={styles.compactProgressWrap}>
-                  <ProgressBar pct={pct} height={6} />
-                </View>
-                <Text style={styles.compactRez}>rez. {waitlist.length}</Text>
               </View>
-            </Ticket>
-          ) : (
-            <Ticket>
-              <View style={styles.fullTop}>
-                <View style={styles.fullTopRow}>
-                  <Pill c={darkPalette} variant={getStatusInfo(true).variant} label={getStatusInfo(true).label} />
-                  <Text style={styles.fullPrice}>{Number(match.price_per_player)} PLN / os.</Text>
-                </View>
-                <Text style={[styles.fullTitle, isCancelled && styles.titleCancelled]} numberOfLines={1}>
-                  {title}
-                </Text>
-                <View style={styles.fullDateRow}>
-                  <DateChip date={match.date} width={56} height={62} c={darkPalette} />
-                  <View style={styles.fullDateCol}>
-                    <Text style={styles.fullWeekday}>{weekday}</Text>
-                    <View style={styles.fullMetaRow}>
-                      <Ionicons name="time-outline" size={14} color={brand.ticketLabel} />
-                      <Text style={styles.fullMetaText}>
-                        {formatTime(match.time_start)} – {formatTime(match.time_end)}
-                      </Text>
-                    </View>
-                    <View style={styles.fullMetaRow}>
-                      <Ionicons name="location-outline" size={14} color={brand.ticketLabel} />
-                      <Text style={styles.fullMetaText} numberOfLines={1}>
-                        {match.location}
-                      </Text>
-                    </View>
+              <Text style={[styles.fullTitle, isCancelled && styles.textCancelled]} numberOfLines={1}>
+                {title}
+              </Text>
+              <View style={styles.fullDateRow}>
+                <DateChip date={match.date} width={56} height={62} c={darkPalette} />
+                <View style={styles.fullDateCol}>
+                  <Text style={[styles.fullWeekday, isCancelled && styles.textCancelled]}>{weekday}</Text>
+                  <View style={styles.fullMetaRow}>
+                    <Ionicons name="time-outline" size={14} color={metaIconColor} />
+                    <Text style={[styles.fullMetaText, isCancelled && styles.textCancelled]}>
+                      {formatTime(match.time_start)} – {formatTime(match.time_end)}
+                    </Text>
+                  </View>
+                  <View style={styles.fullMetaRow}>
+                    <Ionicons name="location-outline" size={14} color={metaIconColor} />
+                    <Text style={[styles.fullMetaText, isCancelled && styles.textCancelled]} numberOfLines={1}>
+                      {match.location}
+                    </Text>
                   </View>
                 </View>
               </View>
-              <TicketPerforation c={c} compact={false} />
+            </View>
+            <TicketPerforation c={c} />
+            {isCancelled ? (
+              <View style={styles.cancelledBanner}>
+                <Ionicons name="ban-outline" size={16} color={darkPalette.redInk} />
+                <Text style={styles.cancelledBannerText}>Mecz odwołany — zapisy i płatności są zablokowane</Text>
+              </View>
+            ) : (
               <View style={styles.fullBottom}>
                 <View style={styles.zapisaniRow}>
                   <Text style={styles.zapisaniLabel}>ZAPISANI</Text>
@@ -534,8 +544,8 @@ export default function MatchView({ matchId, compact = false, showBack = false, 
                   Skład główny {mainList.length} / {capacity} · rezerwa {waitlist.length}
                 </Text>
               </View>
-            </Ticket>
-          )}
+            )}
+          </Ticket>
         </View>
 
         <View style={styles.segmentWrap}>
@@ -563,6 +573,12 @@ export default function MatchView({ matchId, compact = false, showBack = false, 
               <Text style={styles.sectionHeading}>
                 Skład Główny ({mainList.length}/{capacity})
               </Text>
+              {hasCoreRosterMembers && (
+                <View style={styles.legendRow}>
+                  <View style={styles.coreRosterDotLegend} />
+                  <Text style={styles.legendText}>stały skład</Text>
+                </View>
+              )}
               {mainList.length === 0 ? (
                 <Text style={styles.emptySubText}>Brak zapisanych graczy.</Text>
               ) : (
@@ -659,9 +675,11 @@ const getStyles = (c: Palette, isDark: boolean) =>
 
     fullTop: { padding: 16 },
     fullTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-    fullPrice: { fontSize: 13, fontWeight: '800', color: brand.accent },
+    fullPrice: { fontSize: 13, fontWeight: '800', color: brand.ticketPrice },
     fullTitle: { fontSize: 22, fontWeight: '800', color: brand.ticketInk, marginBottom: 14 },
-    titleCancelled: { textDecorationLine: 'line-through', color: brand.ticketMuted },
+    // Odwołany mecz przekreśla cenę, tytuł, dzień tygodnia, godzinę i lokalizację — nie tylko tytuł —
+    // żeby było to widoczne od razu, bez czytania treści (jak prosił użytkownik: "więcej przekreśleń").
+    textCancelled: { textDecorationLine: 'line-through', color: brand.ticketMuted },
     fullDateRow: { flexDirection: 'row', alignItems: 'center' },
     fullDateCol: { flex: 1, marginLeft: 14 },
     fullWeekday: { fontSize: 15, fontWeight: '800', color: brand.ticketInk, marginBottom: 5 },
@@ -675,17 +693,20 @@ const getStyles = (c: Palette, isDark: boolean) =>
     userStatusPill: { marginTop: 10 },
     subMetaText: { fontSize: 11, fontWeight: '700', color: brand.ticketLabel, marginTop: 8 },
 
-    compactRow: { flexDirection: 'row', alignItems: 'center', padding: 14 },
-    compactInfoCol: { flex: 1, marginLeft: 12, marginRight: 10 },
-    compactTitle: { fontSize: 16, fontWeight: '800', color: brand.ticketInk },
-    compactMeta: { fontSize: 11.5, fontWeight: '700', color: brand.ticketInk2, marginTop: 3 },
-    compactPriceCol: { alignItems: 'flex-end' },
-    compactPrice: { fontSize: 14, fontWeight: '800', color: brand.accent },
-    compactPerPerson: { fontSize: 8, fontWeight: '800', letterSpacing: 0.6, color: brand.ticketMuted, marginTop: 2 },
-    compactFooterRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
-    compactZapisani: { fontSize: 10, fontWeight: '800', color: brand.ticketLabel },
-    compactProgressWrap: { flex: 1 },
-    compactRez: { fontSize: 10, fontWeight: '700', color: brand.ticketLabel },
+    // Zastępuje pasek zapisu/wypisu, gdy mecz jest odwołany — czerwony baner ostrzegawczy
+    // w stylu strony WWW klubu ("Mecz odwołany — zapisy i płatności są zablokowane").
+    cancelledBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginHorizontal: 16,
+      marginBottom: 16,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: radius.md,
+      backgroundColor: 'rgba(255,90,95,0.14)',
+    },
+    cancelledBannerText: { flex: 1, fontSize: 12, fontWeight: '800', color: darkPalette.redInk },
 
     segmentWrap: { paddingHorizontal: space.screen, marginTop: 14, marginBottom: 12 },
 
@@ -695,6 +716,9 @@ const getStyles = (c: Palette, isDark: boolean) =>
 
     sectionHeading: { fontSize: 15, fontWeight: '800', color: c.ink, marginBottom: 10 },
     sectionHeadingSpaced: { marginTop: 18 },
+    legendRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -4, marginBottom: 10 },
+    coreRosterDotLegend: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: brand.ticketAccent },
+    legendText: { fontSize: 11, fontWeight: '600', color: c.ink2 },
     emptySubText: { fontSize: 13, color: c.ink2, fontWeight: '500', marginBottom: 10 },
 
     participantRow: {
@@ -720,7 +744,17 @@ const getStyles = (c: Palette, isDark: boolean) =>
       borderLeftWidth: 3,
       borderLeftColor: brand.primary,
     },
-    participantNumber: { width: 22, fontSize: 13, fontWeight: '800', color: c.ink3 },
+    participantNumberWrap: { width: 22 },
+    participantNumber: { fontSize: 13, fontWeight: '800', color: c.ink3 },
+    coreRosterDot: {
+      position: 'absolute',
+      top: -2,
+      left: 12,
+      width: 7,
+      height: 7,
+      borderRadius: 3.5,
+      backgroundColor: brand.ticketAccent,
+    },
     participantInfo: { flex: 1, marginLeft: 6 },
     participantName: { fontSize: 13, fontWeight: '700', color: c.ink },
     participantPillsRow: { flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' },

@@ -11,6 +11,11 @@ export const brand = {
   ticketInk2: '#93A9E8',
   ticketLabel: '#7C93FF',
   ticketMuted: '#5D7099',
+  // Gradient i akcenty biletu dopasowane 1:1 do strony esco-volleymanager.vercel.app
+  // (linear-gradient 135deg + poświata niebieska/złota w rogach biletu, jako gradient radialny SVG).
+  ticketGradient: ['#0B1120', '#121B33', '#16204A'] as const,
+  ticketAccent: '#FFD23F',   // złote ikony godziny/lokalizacji na bilecie (jak na stronie WWW)
+  ticketPrice: '#00E0A2',    // zielona stawka za mecz (jak na stronie WWW)
 };
 
 export const dark = {

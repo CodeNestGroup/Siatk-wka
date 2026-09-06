@@ -37,6 +37,9 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
+  // Nie ma samoobsługowego resetu hasła (brak Supabase Auth, więc brak maila resetującego) —
+  // jedyna ścieżka to admin ręcznie ustawiający nowe hasło startowe w bazie.
+  const [showForgotHelp, setShowForgotHelp] = useState(false);
 
   const [alertState, setAlertState] = useState<{
     visible: boolean;
@@ -180,7 +183,12 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Hasło</Text>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Hasło</Text>
+                <PressableScale onPress={() => setShowForgotHelp((v) => !v)} disableHaptic>
+                  <Text style={styles.forgotLink}>Zapomniałeś hasła?</Text>
+                </PressableScale>
+              </View>
               <TextInput
                 style={styles.input}
                 placeholder="••••••••"
@@ -190,6 +198,13 @@ export default function LoginScreen() {
                 value={password}
                 onChangeText={setPassword}
               />
+              {showForgotHelp && (
+                <View style={styles.forgotBox}>
+                  <Text style={styles.forgotBoxText}>
+                    Skontaktuj się z administratorem klubu — ustawi Ci nowe hasło startowe, którym się zalogujesz.
+                  </Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.rememberRow}>
@@ -239,6 +254,15 @@ const getStyles = (c: Palette) =>
     form: { padding: space.cardPad },
     inputGroup: { marginBottom: 16 },
     label: { fontSize: 13.5, fontWeight: '700', color: c.ink, marginBottom: 7 },
+    labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    forgotLink: { fontSize: 12.5, fontWeight: '700', color: c.priInk, marginBottom: 7 },
+    forgotBox: {
+      marginTop: 10,
+      padding: 12,
+      borderRadius: radius.md,
+      backgroundColor: c.tintB,
+    },
+    forgotBoxText: { fontSize: 12.5, fontWeight: '600', color: c.ink, lineHeight: 18 },
     input: {
       borderWidth: 1,
       borderColor: c.line,

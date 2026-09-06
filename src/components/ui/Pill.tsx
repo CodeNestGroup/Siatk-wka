@@ -10,7 +10,8 @@ export type PillVariant =
   | 'neutral'
   | 'solidAmber'
   | 'solidBlue'
-  | 'solidGreen';
+  | 'solidGreen'
+  | 'solidGold';
 
 type Props = {
   label: string;
@@ -35,6 +36,9 @@ function colorsFor(variant: PillVariant, c: Palette): { bg: string; fg: string }
       return { bg: brand.primary, fg: '#FFFFFF' };
     case 'solidGreen':
       return { bg: brand.success, fg: '#04281D' };
+    case 'solidGold':
+      // Ten sam żółty co widget "Najbliższe spotkanie" na stronie WWW klubu.
+      return { bg: brand.ticketAccent, fg: '#0B1120' };
     case 'neutral':
     default:
       return { bg: 'rgba(148,163,184,0.18)', fg: c.ink2 };

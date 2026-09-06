@@ -19,6 +19,7 @@ import CustomAlert from '@/components/CustomAlert';
 import Card from '@/components/ui/Card';
 import PressableScale from '@/components/ui/PressableScale';
 import PrimaryButton from '@/components/ui/PrimaryButton';
+import TurnstileWidget from '@/components/TurnstileWidget';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -286,15 +287,8 @@ export default function RegisterScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Zabezpieczenie przed botami — ile to {human.a} + {human.b}?</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Wpisz wynik działania"
-                placeholderTextColor={c.ink3}
-                keyboardType="number-pad"
-                value={human.answer}
-                onChangeText={human.setAnswer}
-              />
+              <Text style={styles.label}>Zabezpieczenie przed botami</Text>
+              <TurnstileWidget key={human.widgetResetKey} c={c} onToken={human.setTurnstileToken} />
             </View>
 
             <PrimaryButton
