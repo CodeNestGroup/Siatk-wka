@@ -40,7 +40,7 @@ import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/ui/modal"
 import { SupportModal } from "@/components/dashboard/support-modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
-import { type Match, mainRoster } from "@/lib/data"
+import { type Match, mainRoster, isMatchCancelled } from "@/lib/data"
 import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch, addMatchToCalendar } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import { notifyPush } from "@/lib/push"
@@ -128,12 +128,8 @@ function buildMatchSearchTokens(match: any): string[] {
   return normalizeSearchText(parts.join(" ")).split(/[^a-z0-9]+/).filter(Boolean)
 }
 
-// Wspólne reguły statusu meczu — używane zarówno przy filtrowaniu listy, jak i przy liczeniu
-// ile meczów kryje się pod każdą zakładką (żeby te dwie rzeczy nigdy sobie nie przeczyły)
-function isMatchCancelled(m: any): boolean {
-  return m.status_id === 4 || m.matches_status?.name?.toLowerCase().includes("odwoł")
-}
-
+// isMatchCancelled żyje teraz w lib/data.ts — współdzielona ze szczegółami meczu
+// (MatchDetail), żeby lista i modal nigdy sobie nie przeczyły co do statusu.
 function isMatchPast(m: any, todayStr: string): boolean {
   return (m.date < todayStr || m.status_id === 3 || m.is_settled) && !isMatchCancelled(m)
 }

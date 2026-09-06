@@ -13,15 +13,14 @@ import {
   UserPlus,
   UserMinus,
   Trash2,
-  Copy,
-  Check,
   Clock,
   MessageCircle,
-  CalendarPlus
+  CalendarPlus,
+  Ban
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
-import { type Match, mainRoster, waitlist } from "@/lib/data"
+import { type Match, mainRoster, waitlist, isMatchCancelled } from "@/lib/data"
 import { cn, formatDatePL, addMatchToCalendar } from "@/lib/utils"
 import { notifyPush } from "@/lib/push"
 import { supabase } from "@/lib/supabase"
@@ -82,6 +81,12 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   const unpaidRosterCount = rawRoster.length - paidRosterCount
   const totalCollectedSoFar = paidRosterCount * price
   const isSettled = !!match.is_settled
+  // Mecz odwołany zamraża cały skład — zapisy, wypisy i płatności przestają mieć sens, skoro
+  // wydarzenie się nie odbędzie. Wcześniej te akcje działały nadal (widać było tylko czerwony
+  // badge "Odwołany" w nagłówku), więc dało się np. dopisać kogoś do meczu, który już nie istnieje.
+  // Ta sama reguła co na liście meczów (lib/data.ts) — samo `status_id === 4` nie zawsze
+  // wystarcza, stąd fallback po nazwie statusu z joina `matches_status`.
+  const isCancelled = isMatchCancelled(match)
 
   // Zawodnik nie może się już wypisać na mniej niż 2h przed meczem (ani gdy mecz już trwa/minął) —
   // bez tego ktoś mógł zrezygnować dosłownie tuż przed rozpoczęciem, zostawiając drużynę w połowie
@@ -95,7 +100,6 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   const [toast, setToast] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
 
   const isUserInMatch = match.players?.some(
@@ -124,12 +128,6 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     return fullMessage
   }
 
-  function handleCopyRoster() {
-    navigator.clipboard.writeText(buildRosterMessage())
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
   function handleShareWhatsApp() {
     const url = `https://wa.me/?text=${encodeURIComponent(buildRosterMessage())}`
     window.open(url, "_blank", "noopener,noreferrer")
@@ -140,7 +138,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   }
 
   async function handleSettleAndSave() {
-    if (isSettled || rawRoster.length === 0) return
+    if (isSettled || isCancelled || rawRoster.length === 0) return
     setIsSaving(true)
 
     // Zatwierdzenie TYLKO blokuje mecz do edycji — nie zmienia niczyjego realnego statusu
@@ -204,7 +202,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   }
 
   async function handleTogglePaid(playerId: string, currentlyPaid: boolean) {
-    if (isSettled || !isAdmin) return
+    if (isSettled || isCancelled || !isAdmin) return
 
     const { error } = await supabase
       .from("match_registrations")
@@ -221,7 +219,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   }
 
   function handleRemovePlayer(playerId: string) {
-    if (isSettled) return
+    if (isSettled || isCancelled) return
 
     const isSelf = playerId === currentUser?.id
     if (isSelf && !canLeaveMatch) {
@@ -257,7 +255,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     // Blokada podwójnego zapisu — bez tego szybki podwójny klik/tap (zanim interfejs zdąży
     // się przerenderować z `isUserInMatch`) potrafił wstawić dwa wiersze rejestracji dla tej
     // samej osoby, bo tabela nie ma unikalnego ograniczenia na parę (mecz, zawodnik).
-    if (!currentUser || isSettled || isJoining || isUserInMatch) return
+    if (!currentUser || isSettled || isCancelled || isJoining || isUserInMatch) return
     setIsJoining(true)
 
     const { error } = await supabase.from("match_registrations").insert([
@@ -306,11 +304,11 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
               "rounded-md px-2 py-0.5 text-[10px] font-black uppercase border",
               isSettled
                 ? "bg-white/10 text-slate-300 border-white/20"
-                : match.status_id === 4
+                : isCancelled
                 ? "bg-[#FF5A5F]/15 text-[#FF9296] border-[#FF5A5F]/30"
                 : "bg-[#2C4BFF]/20 border-[#2C4BFF]/40 text-[#8FA1FF]"
             )}>
-              {isSettled ? "Mecz Rozliczony" : match.status_id === 4 ? "Odwołany" : "Skład Meczowy"}
+              {isSettled ? "Mecz Rozliczony" : isCancelled ? "Odwołany" : "Skład Meczowy"}
             </span>
             <span className="text-xs text-slate-400 font-semibold">• Składka: {price} PLN / os.</span>
           </div>
@@ -346,8 +344,11 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
       {/* TREŚĆ */}
       <div className="p-4 sm:p-7 space-y-5">
 
-        {/* Pasek zapełnienia składu — ten sam język wizualny co w hero na dashboardzie */}
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-1.5">
+        {/* Jedna karta statusu zamiast trzech osobnych widgetów — wcześniej liczba "X/Y w składzie"
+            powtarzała się aż trzy razy (tu, w kafelku "Opłacono" i w nagłówku listy niżej), a
+            "Opłacono X/Y" i "Zebrana kasa" to i tak ta sama informacja podana dwoma sposobami.
+            Tu wszystko w jednym miejscu: ile w składzie, ile opłaciło, ile zebrano. */}
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2.5">
           <div className="flex justify-between items-baseline text-[11px] font-bold">
             <span className="text-slate-500 uppercase tracking-wide">Skład główny</span>
             <span className={cn(score.className, "text-slate-900 text-base tabular-nums")}>{rawRoster.length} / {capacity}</span>
@@ -358,28 +359,30 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
               style={{ width: `${Math.min(100, (rawRoster.length / capacity) * 100)}%`, background: `linear-gradient(90deg, ${COBALT}, ${YELLOW})` }}
             />
           </div>
-        </div>
-
-        {/* Podsumowanie */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-2xl border border-[#00C48C]/25 bg-[#00C48C]/[0.06] p-3.5 text-center">
-            <p className="text-[10px] font-extrabold uppercase text-[#00875F]">Opłacono</p>
-            <p className={cn(score.className, "text-xl font-semibold text-[#00875F] mt-0.5 tabular-nums")}>
-              {paidRosterCount} <span className="text-xs text-slate-400 font-bold">/ {rawRoster.length}</span>
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 text-center">
-            <p className="text-[10px] font-extrabold uppercase text-slate-400">Zebrana kasa</p>
-            <p className={cn(score.className, "text-xl font-semibold text-slate-900 mt-0.5 tabular-nums")}>
-              {totalCollectedSoFar} <span className="text-xs text-slate-400 font-bold">PLN</span>
-            </p>
-            <p className="text-[9px] text-slate-400 font-semibold mt-0.5">{paidRosterCount} × {price} PLN</p>
+          <div className="flex items-center justify-between border-t border-slate-200/80 pt-2.5 text-[11px] font-bold">
+            <span className="flex items-center gap-1.5 text-[#00875F]">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {paidRosterCount}/{rawRoster.length} opłaciło
+            </span>
+            <span className={cn(score.className, "text-slate-900 tabular-nums")}>
+              {totalCollectedSoFar} <span className="text-[10px] text-slate-400 font-bold">PLN zebrano</span>
+            </span>
           </div>
         </div>
 
-        {/* Przycisk rozliczenia dla Admina */}
-        {isAdmin && !isSettled && match.status_id !== 4 && (
+        {/* Odwołany mecz zamraża skład — bez tego dało się dalej dopisywać/wypisywać graczy
+            i przełączać płatności na spotkaniu, które i tak się nie odbędzie. */}
+        {isCancelled ? (
+          <div className="w-full rounded-2xl py-3 font-bold flex items-center justify-center gap-2 bg-[#FF5A5F]/10 text-[#E0454A] border border-[#FF5A5F]/25 text-xs">
+            <Ban className="h-4 w-4" />
+            Mecz odwołany — zapisy i płatności są zablokowane
+          </div>
+        ) : isSettled ? (
+          <div className="w-full rounded-2xl py-3 font-bold flex items-center justify-center gap-2 bg-slate-100 text-slate-500 border border-slate-200 text-xs">
+            <Lock className="h-4 w-4 text-[#00875F]" />
+            Mecz został już rozliczony i zaksięgowany w finansach
+          </div>
+        ) : isAdmin && (
           <Button
             onClick={handleSettleAndSave}
             disabled={isSaving || rawRoster.length === 0}
@@ -390,37 +393,31 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
           </Button>
         )}
 
-        {isSettled && (
-          <div className="w-full rounded-2xl py-3 font-bold flex items-center justify-center gap-2 bg-slate-100 text-slate-500 border border-slate-200 text-xs">
-            <Lock className="h-4 w-4 text-[#00875F]" />
-            Mecz został już rozliczony i zaksięgowany w finansach
-          </div>
-        )}
-
-        {/* Lista Zawodników — nagłówek z akcjami (Kopiuj/WhatsApp) zostaje NA STAŁE widoczny nad
-            listą, poza jej scrollowanym kontenerem. Wcześniej był wewnątrz `overflow-y-auto`,
-            więc przy przewijaniu składu znikał razem z resztą, a pasek scrolla wizualnie nachodził
-            na napis "WhatsApp" po prawej stronie. */}
+        {/* Lista Zawodników — nagłówek z akcją WhatsApp zostaje NA STAŁE widoczny nad listą,
+            poza jej scrollowanym kontenerem. Wcześniej był wewnątrz `overflow-y-auto`, więc przy
+            przewijaniu składu znikał razem z resztą, a pasek scrolla wizualnie nachodził na napis
+            "WhatsApp" po prawej stronie. */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs font-bold text-slate-700">
             <span>Powołani Zawodnicy ({rawRoster.length}/{capacity}):</span>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleCopyRoster}
-                className="text-[11px] font-bold text-[#2C4BFF] hover:text-[#1D3AE8] flex items-center gap-1 cursor-pointer"
-              >
-                {copied ? <Check className="h-3.5 w-3.5 text-[#00875F]" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? "Skopiowano!" : "Kopiuj"}
-              </button>
-              <button
-                onClick={handleShareWhatsApp}
-                className="text-[11px] font-bold text-[#00875F] hover:text-[#00693F] flex items-center gap-1 cursor-pointer"
-              >
-                <MessageCircle className="h-3.5 w-3.5" />
-                WhatsApp
-              </button>
-            </div>
+            <button
+              onClick={handleShareWhatsApp}
+              className="text-[11px] font-bold text-[#00875F] hover:text-[#00693F] flex items-center gap-1 cursor-pointer"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              WhatsApp
+            </button>
           </div>
+
+          {/* Legenda żółtej kropki — na telefonie nie ma najechania myszką, więc sam `title`
+              na kropce nikomu by jej nie wytłumaczył. Pokazuje się tylko gdy realnie jest komu
+              ją tłumaczyć (ktoś w składzie ma status stałego gracza). */}
+          {sortedRoster.some((p: any) => p.is_core_roster) && (
+            <p className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400">
+              <span className="h-2 w-2 rounded-full bg-[#FFD23F] ring-1 ring-[#FFD23F]/40 shrink-0" />
+              = stały skład
+            </p>
+          )}
 
           <div className="space-y-4 max-h-72 overflow-y-auto pr-1">
             {/* SKŁAD GŁÓWNY */}
@@ -433,7 +430,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
               sortedRoster.map((player: any, idx: number) => {
                 const isCurrent = player.id === currentUser?.id || player.email === currentUser?.email
                 const isPaid = !!(player.paid || player.is_paid)
-                const canTogglePaid = isAdmin && !isSettled
+                const canTogglePaid = isAdmin && !isSettled && !isCancelled
 
                 return (
                   <div
@@ -494,7 +491,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
                         </span>
                       )}
 
-                      {(isAdmin || isCurrent) && !isSettled && (
+                      {(isAdmin || isCurrent) && !isSettled && !isCancelled && (
                         <button
                           onClick={() => handleRemovePlayer(player.id)}
                           className="rounded-xl p-1.5 text-slate-400 hover:bg-[#FF5A5F]/10 hover:text-[#FF5A5F] transition-colors active:scale-90 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5A5F]"
@@ -544,7 +541,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
                         )}
                       </div>
 
-                      {(isAdmin || isCurrent) && !isSettled && (
+                      {(isAdmin || isCurrent) && !isSettled && !isCancelled && (
                         <button
                           onClick={() => handleRemovePlayer(player.id)}
                           className="rounded-xl p-1 text-slate-400 hover:bg-[#FF5A5F]/10 hover:text-[#FF5A5F] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5A5F]"
@@ -564,7 +561,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
 
         {/* Dolne przyciski — samo zamknięcie robi już X w nagłówku (plus klik w tło / Escape),
             więc tu zostaje tylko realna akcja (dołącz/wypisz), gdy jest dostępna */}
-        {!isSettled && (
+        {!isSettled && !isCancelled && (
         <div className="pt-3 border-t border-slate-100 flex items-center gap-3">
           {(
             isUserInMatch ? (

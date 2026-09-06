@@ -103,6 +103,14 @@ export async function getMatches(): Promise<Match[]> {
 // FUNKCJE POMOCNICZE (Zabezpieczone przed brakującymi polami)
 // ------------------------------------------------------------------
 
+// Wspólna reguła "czy mecz jest odwołany" — używana zarówno w liście meczów, jak i w
+// szczegółach meczu, żeby te dwa miejsca nigdy sobie nie przeczyły. `status_id === 4` nie
+// zawsze wystarcza (nie każdy rekord ma ustawione id w tym samym schemacie), więc dorzucamy
+// fallback po nazwie statusu z joina `matches_status`.
+export function isMatchCancelled(m: any): boolean {
+  return m.status_id === 4 || !!m.matches_status?.name?.toLowerCase().includes("odwoł")
+}
+
 export function mainRoster(match: Match): Player[] {
   const playersList = match.players || match.registrations || []
   return playersList.slice(0, match.capacity)
