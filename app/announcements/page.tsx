@@ -19,7 +19,8 @@ import {
   Coffee,
   ChevronDown,
   MessageCircle,
-  ShieldCheck
+  ShieldCheck,
+  Pencil
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sidebar } from "@/components/dashboard/sidebar"
@@ -119,6 +120,7 @@ export default function AnnouncementsPage() {
   const isAdmin = user?.role === "admin" || user?.is_admin || user?.email === "admin@admin.pl" || user?.name === "Mateusz Podzorski" || user?.full_name === "Mateusz Podzorski"
 
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editingAnnouncementId, setEditingAnnouncementId] = useState<string | null>(null)
   const [newTitle, setNewTitle] = useState("")
   const [newContent, setNewContent] = useState("")
   const [newCategoryId, setNewCategoryId] = useState<number>(2)
@@ -243,9 +245,84 @@ export default function AnnouncementsPage() {
     window.location.href = "/login"
   }
 
-  async function handleCreateAnnouncement(e: React.FormEvent) {
+  function openCreateAnnouncement() {
+    setEditingAnnouncementId(null)
+    setNewTitle("")
+    setNewContent("")
+    setNewCategoryId(categories.length > 0 ? categories[0].id : 2)
+    setNewIsPinned(false)
+    setNewMatchId("")
+    setIsModalOpen(true)
+  }
+
+  // Wcześniej jedynym sposobem poprawienia literówki we własnym ogłoszeniu było usunięcie
+  // go i dodanie od nowa (i to tylko dla admina — zwykły autor nie miał nawet tej opcji).
+  function openEditAnnouncement(item: Announcement) {
+    setEditingAnnouncementId(item.id)
+    setNewTitle(item.title)
+    setNewContent(item.content)
+    setNewCategoryId(item.category_id)
+    setNewIsPinned(item.is_pinned)
+    setNewMatchId(item.match_id || "")
+    setIsModalOpen(true)
+  }
+
+  function closeAnnouncementModal() {
+    setIsModalOpen(false)
+    setEditingAnnouncementId(null)
+  }
+
+  async function handleSubmitAnnouncement(e: React.FormEvent) {
     e.preventDefault()
     if (!newTitle.trim() || !newContent.trim()) return
+
+    const selectClause = `
+        *,
+        players:author_id (
+          full_name,
+          role_id,
+          email
+        ),
+        matches:match_id (
+          date,
+          location,
+          time_start
+        )
+      `
+
+    if (editingAnnouncementId) {
+      const updatePayload: Record<string, any> = {
+        title: newTitle,
+        content: newContent,
+        category_id: Number(newCategoryId),
+        match_id: newMatchId || null,
+      }
+      // Przypinanie edytuje wyłącznie admin (patrz checkbox niżej w formularzu) — zwykły
+      // autor edytujący własny wpis nie powinien przypadkiem zdjąć przypięcia, którego
+      // sam nigdy nie widzi ani nie kontroluje.
+      if (isAdmin) updatePayload.is_pinned = newIsPinned
+
+      const { data, error } = await supabase
+        .from('announcements')
+        .update(updatePayload)
+        .eq('id', editingAnnouncementId)
+        .select(selectClause)
+        .single()
+
+      if (error) {
+        notify("Błąd: nie udało się zapisać zmian")
+        console.error(error)
+        return
+      }
+
+      if (data) {
+        setAnnouncements((prev) => prev.map((a) => (a.id === editingAnnouncementId ? (data as any) : a)))
+        notify("Ogłoszenie zaktualizowane")
+      }
+
+      closeAnnouncementModal()
+      return
+    }
 
     const authorId = user?.id || "be8a8e80-0601-4ce9-a944-5cd750b842db"
 
@@ -261,19 +338,7 @@ export default function AnnouncementsPage() {
     const { data, error } = await supabase
       .from('announcements')
       .insert([newAnnouncementPayload])
-      .select(`
-        *,
-        players:author_id (
-          full_name,
-          role_id,
-          email
-        ),
-        matches:match_id (
-          date,
-          location,
-          time_start
-        )
-      `)
+      .select(selectClause)
       .single()
 
     if (error) {
@@ -283,7 +348,7 @@ export default function AnnouncementsPage() {
     }
 
     if (data) {
-      setAnnouncements((prev) => [data, ...prev])
+      setAnnouncements((prev) => [data as any, ...prev])
       notifyPush({
         title: "Nowe ogłoszenie",
         body: newTitle,
@@ -293,12 +358,7 @@ export default function AnnouncementsPage() {
       notify("Ogłoszenie zostało pomyślnie opublikowane")
     }
 
-    setIsModalOpen(false)
-    setNewTitle("")
-    setNewContent("")
-    setNewCategoryId(categories.length > 0 ? categories[0].id : 2)
-    setNewIsPinned(false)
-    setNewMatchId("")
+    closeAnnouncementModal()
   }
 
   function handleDelete(id: string, title: string) {
@@ -541,7 +601,7 @@ export default function AnnouncementsPage() {
 
             {user && (
               <button
-                onClick={() => setIsModalOpen(true)}
+                onClick={openCreateAnnouncement}
                 className="h-10 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 text-white cursor-pointer active:scale-[0.97] shadow-md transition-all shrink-0"
                 style={{ background: COBALT, boxShadow: `0 4px 14px -4px ${COBALT}80` }}
               >
@@ -657,6 +717,9 @@ export default function AnnouncementsPage() {
 
                 const authorName = item.players?.full_name
                 const authorIsAdmin = isAuthorAdmin(item.players)
+                // Ten sam warunek dla edycji i usuwania — własny wpis albo admin (dla admina
+                // to oczywiście wszystkie ogłoszenia, nie tylko własne).
+                const canManage = isAdmin || item.author_id === user?.id
 
                 const badgeContent = isMatchCancelled ? (
                   <><Ban className="h-3 w-3" /> Spotkanie odwołane</>
@@ -706,14 +769,23 @@ export default function AnnouncementsPage() {
                           )}
                         </div>
 
-                        {isAdmin && (
+                        {canManage && (
                           <div className="flex items-center gap-1 shrink-0">
+                            {isAdmin && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); togglePin(item.id, item.is_pinned) }}
+                                className="p-2 rounded-xl text-[#FFD23F] bg-[#FFD23F]/10 hover:bg-[#FFD23F]/20 transition-colors cursor-pointer active:scale-90"
+                                title="Odepnij ogłoszenie"
+                              >
+                                <Pin className="h-4 w-4" />
+                              </button>
+                            )}
                             <button
-                              onClick={(e) => { e.stopPropagation(); togglePin(item.id, item.is_pinned) }}
-                              className="p-2 rounded-xl text-[#FFD23F] bg-[#FFD23F]/10 hover:bg-[#FFD23F]/20 transition-colors cursor-pointer active:scale-90"
-                              title="Odepnij ogłoszenie"
+                              onClick={(e) => { e.stopPropagation(); openEditAnnouncement(item) }}
+                              className="p-2 rounded-xl text-slate-300 hover:text-[#8FA1FF] hover:bg-[#2C4BFF]/10 transition-colors cursor-pointer active:scale-90"
+                              title="Edytuj ogłoszenie"
                             >
-                              <Pin className="h-4 w-4" />
+                              <Pencil className="h-4 w-4" />
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDelete(item.id, item.title) }}
@@ -746,8 +818,6 @@ export default function AnnouncementsPage() {
                     </div>
                   )
                 }
-
-                const canDelete = isAdmin || item.author_id === user?.id
 
                 // Ogłoszenie administracji dostaje kobaltowe obramowanie + lekki tint tła
                 // zamiast koloru kategorii — kolor kategorii i tak w pełni żyje w odznace
@@ -782,7 +852,7 @@ export default function AnnouncementsPage() {
                         )}
                       </div>
 
-                      {(isAdmin || canDelete) && (
+                      {canManage && (
                         <div className="flex items-center gap-1 shrink-0">
                           {isAdmin && (
                             <button
@@ -793,15 +863,20 @@ export default function AnnouncementsPage() {
                               <Pin className="h-4 w-4" />
                             </button>
                           )}
-                          {canDelete && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleDelete(item.id, item.title) }}
-                              className="p-2 rounded-xl text-slate-400 hover:text-[#FF5A5F] hover:bg-[#FF5A5F]/10 transition-colors cursor-pointer active:scale-90"
-                              title="Usuń ogłoszenie"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openEditAnnouncement(item) }}
+                            className="p-2 rounded-xl text-slate-400 hover:text-[#2C4BFF] hover:bg-[#2C4BFF]/10 transition-colors cursor-pointer active:scale-90"
+                            title="Edytuj ogłoszenie"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDelete(item.id, item.title) }}
+                            className="p-2 rounded-xl text-slate-400 hover:text-[#FF5A5F] hover:bg-[#FF5A5F]/10 transition-colors cursor-pointer active:scale-90"
+                            title="Usuń ogłoszenie"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
                       )}
                     </div>
@@ -843,20 +918,20 @@ export default function AnnouncementsPage() {
 
       <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
 
-      {/* MODAL NOWEGO OGŁOSZENIA */}
+      {/* MODAL NOWEGO / EDYTOWANEGO OGŁOSZENIA */}
       <Modal
         open={isModalOpen && !!user}
-        onClose={() => setIsModalOpen(false)}
+        onClose={closeAnnouncementModal}
         overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
         cardClassName="w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl space-y-4 text-slate-900"
       >
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <h2 className={cn(display.className, "text-base font-bold text-slate-900")}>Nowe Ogłoszenie</h2>
-          <button onClick={() => setIsModalOpen(false)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer active:scale-90 transition-transform">
+          <h2 className={cn(display.className, "text-base font-bold text-slate-900")}>{editingAnnouncementId ? "Edytuj Ogłoszenie" : "Nowe Ogłoszenie"}</h2>
+          <button onClick={closeAnnouncementModal} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer active:scale-90 transition-transform">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <form onSubmit={handleCreateAnnouncement} className="space-y-4 text-xs">
+        <form onSubmit={handleSubmitAnnouncement} className="space-y-4 text-xs">
           <div>
             <label className="block font-bold text-slate-700 mb-1">Tytuł</label>
             <input type="text" required value={newTitle} onChange={(e) => setNewTitle(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 outline-none focus:border-[#2C4BFF] focus:bg-white font-semibold" />
@@ -895,8 +970,10 @@ export default function AnnouncementsPage() {
             </div>
           )}
           <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} className="rounded-xl cursor-pointer">Anuluj</Button>
-            <Button type="submit" className="bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white rounded-xl gap-1.5 font-bold cursor-pointer shadow-md shadow-[#2C4BFF]/20"><Send className="h-3.5 w-3.5" /> Opublikuj</Button>
+            <Button type="button" variant="ghost" onClick={closeAnnouncementModal} className="rounded-xl cursor-pointer">Anuluj</Button>
+            <Button type="submit" className="bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white rounded-xl gap-1.5 font-bold cursor-pointer shadow-md shadow-[#2C4BFF]/20">
+              <Send className="h-3.5 w-3.5" /> {editingAnnouncementId ? "Zapisz zmiany" : "Opublikuj"}
+            </Button>
           </div>
         </form>
       </Modal>
