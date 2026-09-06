@@ -16,7 +16,11 @@ import {
   AlertCircle,
   Bell,
   BellOff,
-  Coffee
+  Coffee,
+  Trophy,
+  Calendar,
+  Shield,
+  IdCard
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
@@ -30,8 +34,20 @@ import { isPushSupported, getExistingPushSubscription, subscribeToPush, unsubscr
 // Te same tokeny co reszta dashboardu ("Under the Lights")
 // ────────────────────────────────────────────────────────────────
 const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "600", "700"] })
+const score = Oswald({ subsets: ["latin"], weight: ["500", "600", "700"] })
 
+const INK = "#0B1120"
+const INK_SOFT = "#121B33"
 const COBALT = "#2C4BFF"
+
+const netPattern: React.CSSProperties = {
+  backgroundImage:
+    "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
+}
+
+// Nominatiw, nie dopełniacz ("Sierpień 2026", nie "Sierpnia 2026") — miesiąc tu stoi sam,
+// bez dnia przed sobą, więc gramatycznie to inny przypadek niż w hero na stronie głównej.
+const MONTHS_NOMINATIVE_PL = ["Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"]
 
 export default function SettingsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -80,6 +96,13 @@ export default function SettingsPage() {
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
 
+  // Karta profilowa (dawniej osobna strona /profile, teraz połączona z Ustawieniami w jedną
+  // zakładkę). "Bilans rozliczeń" celowo nie wraca — rozliczenia finansowe są wstrzymane
+  // (patrz sekcja "Rozliczenia i Wpisowe" niżej), więc pokazywanie kwoty byłoby mylące.
+  const [joinedAt, setJoinedAt] = useState<string | null>(null)
+  const [playerStatusId, setPlayerStatusId] = useState<number | null>(null)
+  const [playedMatchesCount, setPlayedMatchesCount] = useState<number | null>(null)
+
   // Stany bezpieczeństwa
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -113,12 +136,31 @@ export default function SettingsPage() {
         // localStorage trzyma to, co było w chwili logowania — jeśli admin zmienił numer
         // od tego czasu wprost w bazie, pobieramy świeższą wartość zamiast bazować na cache'u.
         if (activeUser.id) {
-          const { data: playerRow } = await supabase
-            .from("players")
-            .select("phone")
-            .eq("id", activeUser.id)
-            .maybeSingle()
+          const [{ data: playerRow }, { data: regs }, { data: matches }] = await Promise.all([
+            supabase.from("players").select("phone, created_at, player_status_id").eq("id", activeUser.id).maybeSingle(),
+            supabase.from("match_registrations").select("match_id").eq("player_id", activeUser.id),
+            supabase.from("matches").select("id, date, status_id, is_settled")
+          ])
+
           setPhone(playerRow?.phone ?? activeUser.phone ?? "")
+          setJoinedAt(playerRow?.created_at ?? null)
+          setPlayerStatusId(playerRow?.player_status_id ?? null)
+
+          // Ta sama definicja "faktycznie rozegrany" co na Statystykach (app/stats/page.tsx) —
+          // odwołany mecz nigdy się nie liczy, reszta liczy się jeśli minęła data albo admin
+          // ręcznie oznaczył go jako rozliczony/zakończony.
+          const todayStr = new Date().toISOString().split("T")[0]
+          const matchMap: Record<string, any> = {}
+          matches?.forEach((m: any) => { matchMap[m.id] = m })
+
+          const playedCount = (regs || []).filter((reg: any) => {
+            const m = matchMap[reg.match_id]
+            if (!m) return false
+            if (m.status_id === 4) return false
+            return m.date < todayStr || m.status_id === 3 || m.is_settled === true
+          }).length
+
+          setPlayedMatchesCount(playedCount)
         } else {
           setPhone(activeUser.phone || "")
         }
@@ -228,6 +270,19 @@ export default function SettingsPage() {
 
   const isAdmin = user?.email === "admin@admin.pl" || user?.role === "admin" || user?.is_admin || user?.role_id === 1
 
+  const displayName = user?.full_name || user?.name || (user?.email === "admin@admin.pl" ? "Mateusz Podzorski" : user?.email) || "Użytkownik"
+  const initials = displayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) || "MP"
+
+  // player_status_id bywa puste dla starszych/importowanych kont — tak samo jak w bazie
+  // zawodników (app/players/page.tsx), brak wartości traktujemy jako "aktywny", nie "nieaktywny".
+  const isActivePlayer = playerStatusId === 1 || playerStatusId === null
+  const joinedLabel = (() => {
+    if (!joinedAt) return "—"
+    const d = new Date(joinedAt)
+    if (Number.isNaN(d.getTime())) return "—"
+    return `${MONTHS_NOMINATIVE_PL[d.getMonth()]} ${d.getFullYear()}`
+  })()
+
   if (!user) return null
 
   return (
@@ -271,7 +326,74 @@ export default function SettingsPage() {
             </div>
             <div>
               <h1 className={cn(display.className, "text-xl font-bold text-slate-900 tracking-tight")}>Ustawienia i Preferencje</h1>
-              <p className="text-xs font-medium text-slate-500">Zarządzaj swoimi danymi zawodnika, powiadomieniami oraz kontem.</p>
+              <p className="text-xs font-medium text-slate-500">Twój profil, dane zawodnika, powiadomienia oraz konto — wszystko w jednym miejscu.</p>
+            </div>
+          </div>
+
+          {/* KARTA PROFILOWA — dawniej osobna strona /profile, teraz połączona tutaj na
+              wyraźną prośbę: jedna zakładka zamiast dwóch pokrywających się stron. Bilet
+              w stylistyce "Under the Lights", bez przycisku "Edytuj konto" (byłby bez sensu —
+              formularz edycji jest tuż niżej, na tej samej stronie). */}
+          <div
+            className="relative overflow-hidden rounded-[28px] text-white shadow-[0_24px_60px_-24px_rgba(11,17,32,0.55)] border border-white/10 animate-in fade-in slide-in-from-top-3 duration-500 fill-mode-both"
+            style={{ background: `linear-gradient(135deg, ${INK} 0%, ${INK_SOFT} 55%, #16204a 100%)` }}
+          >
+            <div className="absolute inset-0 pointer-events-none" style={netPattern} />
+            <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-[#2C4BFF]/20 blur-3xl pointer-events-none" />
+            <div className="absolute -left-20 -bottom-20 h-72 w-72 rounded-full bg-[#FFD23F]/10 blur-3xl pointer-events-none" />
+
+            <div className="relative z-10 flex items-center gap-5 p-6 sm:p-8">
+              <div className={cn(score.className, "flex h-16 w-16 sm:h-20 sm:w-20 shrink-0 items-center justify-center rounded-2xl bg-white/10 border border-white/15 text-white font-semibold text-2xl")}>
+                {initials}
+              </div>
+              <div className="min-w-0">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#2C4BFF]/20 border border-[#2C4BFF]/40 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-[#8FA1FF]">
+                  <IdCard className="h-3 w-3 text-[#FFD23F]" />
+                  {isAdmin ? "Administrator" : "Zawodnik ESCO"}
+                </span>
+                <h2 className={cn(display.className, "text-2xl sm:text-3xl font-bold tracking-tight text-white mt-1.5 truncate")}>{displayName}</h2>
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 mt-2">
+                  <Mail className="h-3.5 w-3.5 text-[#FFD23F]" />
+                  {user?.email || "brak-emaila@esco.pl"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* KAFELKI SZYBKICH STATYSTYK — liczone z bazy, nie wpisane na sztywno. "Bilans
+              rozliczeń" celowo nie wraca — rozliczenia finansowe są wstrzymane (patrz sekcja
+              "Rozliczenia i Wpisowe" niżej), więc kwota tutaj byłaby myląca. */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
+              <div className={cn("flex h-11 w-11 items-center justify-center rounded-2xl border", isActivePlayer ? "bg-[#00C48C]/10 text-[#00875F] border-[#00C48C]/20" : "bg-slate-100 text-slate-400 border-slate-200")}>
+                <Trophy className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Status w zespole</p>
+                <p className="text-sm font-bold text-slate-900 mt-0.5">{isActivePlayer ? "Aktywny Gracz" : "Nieaktywny"}</p>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#2C4BFF]/10 text-[#2C4BFF] border border-[#2C4BFF]/20">
+                <Trophy className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Rozegrane mecze</p>
+                <p className={cn(score.className, "text-sm font-semibold text-slate-900 mt-0.5")}>
+                  {playedMatchesCount === null ? "…" : playedMatchesCount} w tym sezonie
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#7A5CFF]/10 text-[#7A5CFF] border border-[#7A5CFF]/20">
+                <Calendar className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Dołączono</p>
+                <p className="text-sm font-bold text-slate-900 mt-0.5">{joinedLabel}</p>
+              </div>
             </div>
           </div>
 
@@ -495,6 +617,27 @@ export default function SettingsPage() {
             </form>
           </div>
 
+          {/* Informacje systemowe */}
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-4 sm:p-6 shadow-xs space-y-4">
+            <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-3">
+              <Shield className="h-3.5 w-3.5 text-slate-300" />
+              Informacje systemowe
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              {/* Surowy UUID to czysty szum na telefonie — nikt go tam nie odczytuje ani nie
+                  kopiuje z małego ekranu. Zostaje widoczny od sm: wzwyż, gdzie i tak jest miejsce. */}
+              <div className="hidden sm:block p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+                <span className="text-slate-400 font-bold block mb-0.5">Identyfikator użytkownika</span>
+                <span className="font-mono text-slate-900 font-bold block truncate">{user?.id || "local-user-id"}</span>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+                <span className="text-slate-400 font-bold block mb-0.5">Rola w systemie ESCO VolleyManager</span>
+                <span className="font-bold text-slate-900 block">{isAdmin ? "Pełne uprawnienia (Administrator)" : "Standardowe (Zawodnik)"}</span>
+              </div>
+            </div>
+          </div>
 
           {/* Sekcja 5: Eksport Własnych Danych */}
           <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-300 fill-mode-both">

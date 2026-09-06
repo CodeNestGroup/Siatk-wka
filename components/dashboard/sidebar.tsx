@@ -13,8 +13,7 @@ import {
   LogOut,
   X,
   ChevronDown,
-  Menu,
-  User
+  Menu
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
@@ -205,8 +204,9 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
     { href: "/finances", label: "Finanse", shortLabel: "Finanse", icon: Wallet, hasDot: unreadFinances, color: "#00C48C" },
     { href: "/stats", label: "Statystyki", shortLabel: "Statystyki", icon: BarChart3, hasDot: false, color: YELLOW },
     { href: "/announcements", label: "Ogłoszenia", shortLabel: "Ogłoszenia", icon: Megaphone, hasDot: unreadAnnouncements, color: "#FF5A5F" },
-    { href: "/settings", label: "Ustawienia", shortLabel: "Ustawienia", icon: Settings, hasDot: false, color: "#94A3B8" },
-    { href: "/profile", label: "Mój profil", shortLabel: "Profil", icon: User, hasDot: false, color: "#94A3B8" },
+    // Profil dołączony tutaj (dawniej osobna zakładka "/profile") na wyraźną prośbę — jedna
+    // strona zamiast dwóch pokrywających się ze sobą.
+    { href: "/settings", label: "Ustawienia i Profil", shortLabel: "Ustawienia", icon: Settings, hasDot: false, color: "#94A3B8" },
   ]
 
   // Te 4 lądują na stałym pasku na dole (mobile) — reszta pod "Więcej", żeby nie stłoczyć
