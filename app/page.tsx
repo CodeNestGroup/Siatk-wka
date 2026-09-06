@@ -15,7 +15,6 @@ import {
   Crown,
   Trophy,
   Trash2,
-  Check,
   Ban,
   Timer,
   Repeat,
@@ -41,7 +40,7 @@ import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/ui/modal"
 import { SupportModal } from "@/components/dashboard/support-modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
-import { type Match, mainRoster, waitlist } from "@/lib/data"
+import { type Match, mainRoster } from "@/lib/data"
 import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch, addMatchToCalendar } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import { notifyPush } from "@/lib/push"
@@ -228,7 +227,6 @@ export default function DashboardPage() {
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [readMatchIds, setReadMatchIds] = useState<string[]>([])
-  const [selectedMatchRosterPreview, setSelectedMatchRosterPreview] = useState<Match | null>(null)
   const [pinnedAnnouncement, setPinnedAnnouncement] = useState<any>(null)
 
   // Modal wsparcia. Na desktopie baner "Postaw kawę" zostaje na stałe (celowo NIE do
@@ -487,11 +485,6 @@ export default function DashboardPage() {
       setReadMatchIds(updated)
       localStorage.setItem("volley_read_notifications", JSON.stringify(updated))
     }
-  }
-
-  function handleOpenRosterPreview(match: Match, e: React.MouseEvent) {
-    e.stopPropagation()
-    setSelectedMatchRosterPreview(match)
   }
 
   function handleCancelMatch(matchId: string, matchDate: string, e: React.MouseEvent) {
@@ -1597,11 +1590,15 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="flex items-center justify-between sm:justify-end gap-2 border-t sm:border-t-0 border-slate-100 pt-3 sm:pt-0">
+                      {/* Sam wskaźnik zapełnienia — NIE przycisk. Osobny "Zobacz skład" otwierał
+                          modal będący dosłownym duplikatem tego, co i tak pokazuje kliknięcie
+                          w cały wiersz (pełne szczegóły meczu ze składem). Klik tutaj po prostu
+                          przebąbla się do onClick wiersza zamiast otwierać drugi, uboższy widok. */}
                       {!isCancelled && !isSelectionMode && (
-                        <button onClick={(e) => handleOpenRosterPreview(match, e)} className="flex items-center gap-2 rounded-xl bg-[#2C4BFF]/[0.06] hover:bg-[#2C4BFF]/[0.12] px-3 py-1.5 border border-[#2C4BFF]/20 text-xs font-bold text-[#1D3AE8] transition-all active:scale-[0.97] shadow-xs cursor-pointer">
+                        <div className="flex items-center gap-2 rounded-xl bg-[#2C4BFF]/[0.06] px-3 py-1.5 border border-[#2C4BFF]/20 text-xs font-bold text-[#1D3AE8] shadow-xs">
                           <Users className="h-4 w-4 text-[#2C4BFF]" />
                           <span>Skład: <strong className="tabular-nums">{roster.length}/{match.capacity || match.max_players || 12}</strong></span>
-                        </button>
+                        </div>
                       )}
 
                       {isAdmin && !isSelectionMode && (
@@ -1838,98 +1835,6 @@ export default function DashboardPage() {
                   : `Zatwierdź nieobecność (${selectedMatchesToLeave.length} meczów)`}
               </Button>
             </div>
-      </Modal>
-
-      <Modal
-        open={!!selectedMatchRosterPreview}
-        onClose={() => setSelectedMatchRosterPreview(null)}
-        overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
-        cardClassName="relative w-full sm:max-w-lg lg:max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl border border-slate-200 space-y-4 text-slate-900"
-      >
-        {selectedMatchRosterPreview && (
-          <>
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h2 className={cn(display.className, "text-sm font-bold text-slate-900 flex items-center gap-2")}>
-                  <Users className="h-5 w-5 text-[#2C4BFF]" />
-                  Skład na mecz ({formatDatePL(selectedMatchRosterPreview.date)})
-                </h2>
-                <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{selectedMatchRosterPreview.location}</p>
-              </div>
-              <button onClick={() => setSelectedMatchRosterPreview(null)} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2C4BFF]">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-1.5">
-                <div className="flex justify-between items-baseline text-[11px] font-bold">
-                  <span className="text-slate-500 uppercase tracking-wide">Powołani gracze</span>
-                  <span className={cn(score.className, "text-slate-900 text-base tabular-nums")}>
-                    {mainRoster(selectedMatchRosterPreview).length} / {selectedMatchRosterPreview.capacity || selectedMatchRosterPreview.max_players || 12}
-                  </span>
-                </div>
-                <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{
-                      width: `${Math.min(100, (mainRoster(selectedMatchRosterPreview).length / Number(selectedMatchRosterPreview.capacity || selectedMatchRosterPreview.max_players || 12)) * 100)}%`,
-                      background: `linear-gradient(90deg, ${COBALT}, ${YELLOW})`
-                    }}
-                  />
-                </div>
-                <p className="text-[11px] font-bold text-[#00875F]">
-                  {/* Tylko realnie opłacone miejsca — wcześniej liczyło cały skład razy cena,
-                      więc pokazywało "zebrano" pieniądze, których część graczy nigdy nie wpłaciła. */}
-                  Zebrano: {mainRoster(selectedMatchRosterPreview).filter((p: any) => p.paid || p.is_paid).length * Number(selectedMatchRosterPreview.price_per_player || 25)} PLN
-                </p>
-              </div>
-
-              <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
-                {mainRoster(selectedMatchRosterPreview).length === 0 ? (
-                  <p className="py-6 text-center text-xs font-semibold text-slate-400">Brak zapisanych graczy w głównym składzie.</p>
-                ) : (
-                  mainRoster(selectedMatchRosterPreview).map((p: any, i: number) => {
-                    const isCurrentUser = user?.id === p.id || user?.email === p.email || user?.name === p.full_name || user?.full_name === p.name
-
-                    return (
-                      <div key={i} className={cn("flex items-center justify-between p-2.5 rounded-2xl border text-xs font-bold", isCurrentUser ? "bg-[#2C4BFF]/[0.06] border-[#2C4BFF]/25 text-[#1D3AE8]" : "bg-slate-50 border-slate-100")}>
-                        <div className="flex items-center gap-2.5">
-                          <span className={cn(score.className, "flex h-7 w-7 items-center justify-center rounded-xl font-semibold text-[11px] tabular-nums", isCurrentUser ? "bg-[#2C4BFF] text-white" : "bg-[#2C4BFF]/10 text-[#2C4BFF]")}>
-                            {i + 1}
-                          </span>
-                          <span>{p.name || p.full_name} {isCurrentUser && <span className="ml-1 text-[10px] uppercase text-[#2C4BFF] font-extrabold">(Ty)</span>}</span>
-                        </div>
-
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black border bg-[#00C48C]/10 text-[#00875F] border-[#00C48C]/25">
-                          <Check className="h-3 w-3" /> Opłacono
-                        </span>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-
-              {waitlist(selectedMatchRosterPreview).length > 0 && (
-                <div className="pt-2 border-t border-slate-100 space-y-2">
-                  <p className="text-xs font-bold text-[#7A5CFF]">Lista rezerwowa ({waitlist(selectedMatchRosterPreview).length})</p>
-                  <div className="space-y-1">
-                    {waitlist(selectedMatchRosterPreview).map((p: any, i: number) => {
-                      const isCurrentUser = user?.id === p.id || user?.email === p.email || user?.name === p.full_name || user?.full_name === p.name
-                      return (
-                        <div key={i} className={cn("p-2 rounded-xl border text-xs font-bold flex justify-between", isCurrentUser ? "bg-[#7A5CFF]/10 border-[#7A5CFF]/30 text-[#4B2FB0]" : "bg-[#7A5CFF]/[0.04] border-[#7A5CFF]/15 text-[#4B2FB0]")}>
-                          <span>{p.name || p.full_name} {isCurrentUser && <span className="ml-1 text-[10px] uppercase text-[#7A5CFF] font-extrabold">(Ty)</span>}</span>
-                          <span className="text-[10px] uppercase text-[#7A5CFF] font-extrabold">Rezerwa #{i + 1}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-          </>
-        )}
       </Modal>
 
       {/* MODAL TWORZENIA MECZU */}

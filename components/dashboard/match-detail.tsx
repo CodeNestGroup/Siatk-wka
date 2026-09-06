@@ -284,7 +284,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   }
 
   return (
-    <div className="w-full overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl relative my-8 text-slate-900">
+    <div className="w-full overflow-hidden rounded-[28px] bg-white shadow-2xl relative my-8 text-slate-900">
 
       {/* NAGŁÓWEK — ciemny pasek w stylu hero, spina modal z resztą identyfikacji "pod światłami hali" */}
       <div
@@ -397,30 +397,34 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
           </div>
         )}
 
-        {/* Lista Zawodników */}
-        <div className="space-y-4 max-h-72 overflow-y-auto pr-1">
-          {/* SKŁAD GŁÓWNY */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-              <span>Powołani Zawodnicy ({rawRoster.length}/{capacity}):</span>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleCopyRoster}
-                  className="text-[11px] font-bold text-[#2C4BFF] hover:text-[#1D3AE8] flex items-center gap-1 cursor-pointer"
-                >
-                  {copied ? <Check className="h-3.5 w-3.5 text-[#00875F]" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? "Skopiowano!" : "Kopiuj"}
-                </button>
-                <button
-                  onClick={handleShareWhatsApp}
-                  className="text-[11px] font-bold text-[#00875F] hover:text-[#00693F] flex items-center gap-1 cursor-pointer"
-                >
-                  <MessageCircle className="h-3.5 w-3.5" />
-                  WhatsApp
-                </button>
-              </div>
+        {/* Lista Zawodników — nagłówek z akcjami (Kopiuj/WhatsApp) zostaje NA STAŁE widoczny nad
+            listą, poza jej scrollowanym kontenerem. Wcześniej był wewnątrz `overflow-y-auto`,
+            więc przy przewijaniu składu znikał razem z resztą, a pasek scrolla wizualnie nachodził
+            na napis "WhatsApp" po prawej stronie. */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+            <span>Powołani Zawodnicy ({rawRoster.length}/{capacity}):</span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleCopyRoster}
+                className="text-[11px] font-bold text-[#2C4BFF] hover:text-[#1D3AE8] flex items-center gap-1 cursor-pointer"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-[#00875F]" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? "Skopiowano!" : "Kopiuj"}
+              </button>
+              <button
+                onClick={handleShareWhatsApp}
+                className="text-[11px] font-bold text-[#00875F] hover:text-[#00693F] flex items-center gap-1 cursor-pointer"
+              >
+                <MessageCircle className="h-3.5 w-3.5" />
+                WhatsApp
+              </button>
             </div>
+          </div>
 
+          <div className="space-y-4 max-h-72 overflow-y-auto pr-1">
+            {/* SKŁAD GŁÓWNY */}
+            <div className="space-y-2">
             {rawRoster.length === 0 ? (
               <div className="py-6 text-center text-xs font-semibold text-slate-400 border border-dashed border-slate-200 rounded-2xl">
                 Brak zapisanych graczy w składzie.
@@ -555,6 +559,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
               </div>
             </div>
           )}
+          </div>
         </div>
 
         {/* Dolne przyciski — samo zamknięcie robi już X w nagłówku (plus klik w tło / Escape),
