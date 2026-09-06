@@ -1589,11 +1589,13 @@ export default function DashboardPage() {
                       {/* Sam wskaźnik zapełnienia — NIE przycisk. Osobny "Zobacz skład" otwierał
                           modal będący dosłownym duplikatem tego, co i tak pokazuje kliknięcie
                           w cały wiersz (pełne szczegóły meczu ze składem). Klik tutaj po prostu
-                          przebąbla się do onClick wiersza zamiast otwierać drugi, uboższy widok. */}
+                          przebąbla się do onClick wiersza zamiast otwierać drugi, uboższy widok.
+                          Celowo bez tła/obramowania — samo usunięcie onClick nie wystarczyło,
+                          bo wygląd pigułki (tło + border) nadal kusił do kliknięcia jak przycisk. */}
                       {!isCancelled && !isSelectionMode && (
-                        <div className="flex items-center gap-2 rounded-xl bg-[#2C4BFF]/[0.06] px-3 py-1.5 border border-[#2C4BFF]/20 text-xs font-bold text-[#1D3AE8] shadow-xs">
-                          <Users className="h-4 w-4 text-[#2C4BFF]" />
-                          <span>Skład: <strong className="tabular-nums">{roster.length}/{match.capacity || match.max_players || 12}</strong></span>
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+                          <Users className="h-4 w-4 text-slate-400" />
+                          <span className="tabular-nums">{roster.length}/{match.capacity || match.max_players || 12}</span>
                         </div>
                       )}
 
