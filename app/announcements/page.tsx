@@ -100,6 +100,24 @@ function matchDateTimeLabel(date: string, timeStart?: string | null): string {
   return timeStart ? `${formatDatePL(date)} • ${timeStart.slice(0, 5)}` : formatDatePL(date)
 }
 
+// Data ogłoszenia/komentarza z godziną — ten sam format "DD.MM.RRRR • GG:MM" co przy meczach,
+// żeby wszędzie w appce data+godzina wyglądały tak samo. `created_at` z Supabase to pełny UTC
+// timestamp, więc godzinę liczymy przez Date (przelicza na strefę przeglądarki użytkownika),
+// zamiast ciąć string — inaczej dla graczy spoza UTC godzina byłaby po prostu błędna.
+function formatCreatedAtPL(createdAt: string | null | undefined): string {
+  if (!createdAt) return ""
+  const datePart = formatDatePL(createdAt.split("T")[0])
+  const timePart = new Date(createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  return `${datePart} • ${timePart}`
+}
+
+// Inicjały z imienia i nazwiska do awatara w dymku komentarza — ten sam sposób liczenia co
+// karta profilowa w Ustawieniach.
+function getInitials(fullName: string | null | undefined): string {
+  if (!fullName) return "?"
+  return fullName.split(" ").map((n) => n[0]).filter(Boolean).join("").toUpperCase().slice(0, 2) || "?"
+}
+
 export default function AnnouncementsPage() {
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -484,27 +502,56 @@ export default function AnnouncementsPage() {
         </button>
 
         {isExpanded && (
-          <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+          <div className="space-y-2.5" onClick={(e) => e.stopPropagation()}>
+            {/* Dymki jak w czacie grupowym: WŁASNE komentarze wyrównane do prawej (niebieski
+                dymek, bez awatara — to i tak "Ty"), CUDZE do lewej z awatarem-inicjałem i
+                imieniem, bo autorów może tu być wielu (to tablica ogłoszeń, nie rozmowa 1:1). */}
             {items.map((c) => {
               const commentIsAdmin = isAuthorAdmin(c.players)
-              return (
-                <div key={c.id} className={cn("rounded-xl p-2.5 text-xs", isDark ? "bg-white/5" : "bg-slate-50")}>
-                  <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                    <span className={cn("font-bold", isDark ? "text-white" : "text-slate-800")}>
-                      {c.players?.full_name || "Zawodnik"}
-                    </span>
-                    {commentIsAdmin && (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-[#2C4BFF]/15 px-1.5 py-0.5 text-[9px] font-black uppercase text-[#2C4BFF]">
-                        <ShieldCheck className="h-2.5 w-2.5" /> Administracja
-                      </span>
-                    )}
-                    <span className={cn("text-[10px] ml-auto", isDark ? "text-slate-500" : "text-slate-400")}>
-                      {formatDatePL(c.created_at?.split("T")[0])}
-                    </span>
+              const isMine = !!user?.id && c.author_id === user.id
+              const authorName = c.players?.full_name || "Zawodnik"
+
+              if (isMine) {
+                return (
+                  <div key={c.id} className="flex justify-end">
+                    <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-[#2C4BFF] px-3 py-2 text-xs text-white shadow-sm">
+                      <p className="leading-relaxed whitespace-pre-line">{c.content}</p>
+                      <p className="mt-1 text-right text-[9px] text-white/70">
+                        {formatCreatedAtPL(c.created_at)}
+                      </p>
+                    </div>
                   </div>
-                  <p className={cn("leading-relaxed whitespace-pre-line", isDark ? "text-slate-300" : "text-slate-600")}>
-                    {c.content}
-                  </p>
+                )
+              }
+
+              return (
+                <div key={c.id} className="flex items-end gap-2">
+                  <span
+                    className={cn(
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-black",
+                      isDark ? "bg-white/10 text-slate-200" : "bg-slate-200 text-slate-600"
+                    )}
+                  >
+                    {getInitials(authorName)}
+                  </span>
+                  <div className={cn("max-w-[85%] rounded-2xl rounded-tl-sm px-3 py-2 text-xs shadow-sm", isDark ? "bg-white/5" : "bg-slate-100")}>
+                    <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                      <span className={cn("font-bold", isDark ? "text-white" : "text-slate-800")}>
+                        {authorName}
+                      </span>
+                      {commentIsAdmin && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-[#2C4BFF]/15 px-1.5 py-0.5 text-[9px] font-black uppercase text-[#2C4BFF]">
+                          <ShieldCheck className="h-2.5 w-2.5" /> Administracja
+                        </span>
+                      )}
+                    </div>
+                    <p className={cn("leading-relaxed whitespace-pre-line", isDark ? "text-slate-300" : "text-slate-600")}>
+                      {c.content}
+                    </p>
+                    <p className={cn("mt-1 text-[9px]", isDark ? "text-slate-500" : "text-slate-400")}>
+                      {formatCreatedAtPL(c.created_at)}
+                    </p>
+                  </div>
                 </div>
               )
             })}
@@ -811,7 +858,7 @@ export default function AnnouncementsPage() {
                           )}
                           {authorName || "Organizator"}
                         </span>
-                        <span>{formatDatePL(item.created_at?.split("T")[0]) || new Date(item.created_at).toLocaleDateString("pl-PL")}</span>
+                        <span>{formatCreatedAtPL(item.created_at)}</span>
                       </div>
 
                       {renderCommentSection(item, true)}
@@ -894,7 +941,7 @@ export default function AnnouncementsPage() {
                         )}
                         {authorName || "Organizator"}
                       </span>
-                      <span>{formatDatePL(item.created_at?.split("T")[0]) || new Date(item.created_at).toLocaleDateString("pl-PL")}</span>
+                      <span>{formatCreatedAtPL(item.created_at)}</span>
                     </div>
 
                     {renderCommentSection(item, false)}
