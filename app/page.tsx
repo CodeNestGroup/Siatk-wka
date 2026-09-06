@@ -1330,32 +1330,44 @@ export default function DashboardPage() {
                   <Trophy className="h-5 w-5 text-[#2C4BFF] shrink-0 mt-0.5" />
                 </button>
 
-                <div className="p-4 sm:p-6 flex items-start justify-between gap-3">
+                <Link
+                  href="/stats"
+                  title="Zobacz statystyki zespołu"
+                  className="p-4 sm:p-6 flex items-start justify-between gap-3 cursor-pointer transition-all hover:bg-white/[0.04] active:scale-[0.99] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+                >
                   <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Król frekwencji</p>
                     <h3 className={cn(display.className, "text-lg font-bold text-white mt-1.5 truncate")}>{attendanceKing.name}</h3>
                     <p className="text-[11px] text-slate-500 font-medium mt-0.5">{attendanceKing.count} meczów</p>
                   </div>
                   <Crown className="h-5 w-5 text-[#FFD23F] shrink-0 mt-0.5" />
-                </div>
+                </Link>
 
-                <div className="p-4 sm:p-6 flex items-start justify-between gap-3">
+                <Link
+                  href="/stats"
+                  title="Zobacz statystyki zespołu"
+                  className="p-4 sm:p-6 flex items-start justify-between gap-3 cursor-pointer transition-all hover:bg-white/[0.04] active:scale-[0.99] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+                >
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Śr. frekwencja</p>
                     <h3 className={cn(score.className, "text-3xl font-semibold text-white mt-1.5 tabular-nums")}><CountUp value={Number(avgAttendance)} decimals={1} /> <span className="text-sm text-slate-500">/ 12</span></h3>
                     <p className="text-[11px] text-slate-500 font-medium mt-0.5">Graczy na mecz</p>
                   </div>
                   <Users className="h-5 w-5 text-[#B79CFF] shrink-0 mt-0.5" />
-                </div>
+                </Link>
 
-                <div className="p-4 sm:p-6 flex items-start justify-between gap-3">
+                <Link
+                  href="/finances"
+                  title="Zobacz finanse zespołu"
+                  className="p-4 sm:p-6 flex items-start justify-between gap-3 cursor-pointer transition-all hover:bg-white/[0.04] active:scale-[0.99] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+                >
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Budżet sezonu</p>
                     <h3 className={cn(score.className, "text-3xl font-semibold text-white mt-1.5 tabular-nums")}><CountUp value={totalSeasonCollected} /> <span className="text-sm text-slate-500">PLN</span></h3>
                     <p className="text-[11px] text-slate-500 font-medium mt-0.5">Suma składek</p>
                   </div>
                   <Wallet className="h-5 w-5 text-[#00E0A2] shrink-0 mt-0.5" />
-                </div>
+                </Link>
               </div>
             </div>
           )}

@@ -449,16 +449,16 @@ export default function LoginPage() {
         {/* Apka na Androida (nativna, robi ją ziomek — połączona z tą samą bazą). Plik jest
             za duży dla gita (>100MB, GitHub odrzuca), więc leci z publicznego GitHub Release
             zamiast z public/ — patrz public/downloads/README.md.
-            Link celowo wskazuje na stronę /releases/latest, a NIE na konkretny tag+nazwę pliku
-            (było: .../releases/download/v1.0.0-app/app-release.apk) — ten link zestarzał się
-            przy pierwszej kolejnej wersji appki (v1.0.1-app zmieniło i tag, i nazwę pliku na
-            ESCO-VolleyManager.apk), więc strona pobierała starą wersję mimo nowszych wydań na
-            GitHubie. /releases/latest zawsze pokazuje faktycznie najnowsze wydanie, niezależnie
-            od tego, jak następnym razem będzie się nazywał tag czy plik .apk. */}
+            Link wskazuje na /releases/latest/download/<nazwa-pliku> — ten specjalny endpoint
+            GitHuba zawsze serwuje NAJNOWSZE wydanie pod danym tagiem "latest", więc nie trzeba
+            aktualizować linku przy każdym nowym .apk. Jedyny warunek: nazwa pliku musi zostać
+            "ESCO-VolleyManager.apk" na stałe (Bartosz potwierdził, że już jej nie zmieni) —
+            inaczej wracamy do tego samego problemu co przy v1.0.0→v1.0.1 (zmiana tagu I nazwy
+            pliku naraz sprawiła, że strona serwowała starą wersję). Wcześniej link prowadził na
+            samą stronę /releases/latest zamiast bezpośrednio do pliku — bezpieczniejsze, ale
+            wymagało dodatkowego kliknięcia na GitHubie; wracamy do jednoklikowego pobierania. */}
         <a
-          href="https://github.com/CodeNestGroup/Siatk-wka/releases/latest"
-          target="_blank"
-          rel="noopener noreferrer"
+          href="https://github.com/CodeNestGroup/Siatk-wka/releases/latest/download/ESCO-VolleyManager.apk"
           className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs hover:shadow-sm hover:border-[#2C4BFF]/30 transition-all cursor-pointer active:scale-[0.99] group"
         >
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#00C48C]/10 text-[#00875F] border border-[#00C48C]/20">
