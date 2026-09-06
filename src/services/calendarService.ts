@@ -58,12 +58,41 @@ async function resolveLocalSource(): Promise<Calendar.Source> {
     return defaultCalendar.source;
   }
   // Android: konto "lokalne" telefonu — nie wymaga istniejącego konta Google/Exchange.
+  // Używane tylko jako rezerwa, gdy na telefonie nie ma zapisanego konta Google (patrz niżej).
   return { isLocalAccount: true, name: CALENDAR_TITLE, type: Calendar.SourceType.LOCAL };
 }
 
-/** Znajduje dedykowany kalendarz aplikacji albo tworzy go przy pierwszym użyciu. */
+/**
+ * Android: konto Google w systemowym menedżerze kont ma typ "com.google" — jeśli użytkownik ma
+ * takie konto podpięte do telefonu, jego kalendarze faktycznie synchronizują się z serwerami
+ * Google (w przeciwieństwie do kalendarza czysto lokalnego, który nigdy nie opuszcza urządzenia).
+ * Zwraca id kalendarza głównego tego konta, żeby mecz był widoczny też w aplikacji Google Kalendarz.
+ */
+async function findGoogleCalendarId(): Promise<string | null> {
+  try {
+    const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+    const googleCalendars = calendars.filter(
+      (c) => c.allowsModifications && c.source?.type === 'com.google'
+    );
+    if (googleCalendars.length === 0) return null;
+    return (googleCalendars.find((c) => c.isPrimary) ?? googleCalendars[0]).id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Znajduje kalendarz, do którego dodać mecz: na Androidzie najpierw kalendarz Google użytkownika
+ * (żeby wydarzenie zsynchronizowało się do jego prawdziwego Google Kalendarza), a dopiero gdy nie
+ * ma podpiętego konta Google — dedykowany kalendarz aplikacji, tworzony przy pierwszym użyciu.
+ */
 async function getOrCreateCalendarId(): Promise<string | null> {
   try {
+    if (Platform.OS === 'android') {
+      const googleId = await findGoogleCalendarId();
+      if (googleId) return googleId;
+    }
+
     const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
     const existing = calendars.find((c) => c.title === CALENDAR_TITLE && c.allowsModifications);
     if (existing) return existing.id;
