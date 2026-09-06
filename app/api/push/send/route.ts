@@ -1,3 +1,16 @@
+/**
+ * POST /api/push/send — wysyłka powiadomienia push do zapisanych urządzeń
+ *
+ * Co to jest: endpoint API (Next.js Route Handler) wysyłający prawdziwe powiadomienie systemowe
+ * (Web Push, VAPID) do wszystkich zapisanych subskrypcji w tabeli `push_subscriptions`.
+ * Eksportuje / robi: POST — czyta `title`/`body`/`url`/`excludePlayerId` z body, wysyła
+ * powiadomienie przez `webpush.sendNotification` do każdej subskrypcji (poza subskrypcjami
+ * wykluczonego gracza), a wygasłe/nieaktualne subskrypcje (404/410) czyści z bazy.
+ * Używany przez: `lib/push.ts` (`notifyPush`) — wywoływane fire-and-forget po utworzeniu
+ * meczu/ogłoszenia/wpłaty.
+ * Uwagi: klucze VAPID (prywatny) muszą być ustawione w zmiennych środowiskowych; to jedyne
+ * miejsce w apce, gdzie faktycznie wysyła się powiadomienie do przeglądarki/systemu użytkownika.
+ */
 import { NextResponse } from "next/server"
 import webpush from "web-push"
 import { supabase } from "@/lib/supabase"

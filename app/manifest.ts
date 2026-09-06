@@ -1,3 +1,16 @@
+/**
+ * Manifest PWA
+ *
+ * Co to jest: manifest aplikacji webowej (Web App Manifest), serwowany przez Next.js pod
+ * /manifest.webmanifest.
+ * Eksportuje / robi: domyślną funkcję `manifest()` zwracającą nazwę, ikony, kolory motywu i
+ * tryb wyświetlania (`standalone`) apki.
+ * Używany przez: Next.js automatycznie (link w <head> dopisywany na podstawie tego, co
+ * eksportuje app/layout.tsx) oraz przeglądarkę/system przy instalacji PWA (głównie
+ * Android/Chrome).
+ * Uwagi: to jedyny plik potrzebny, żeby Chrome na Androidzie uznał stronę za "instalowalną" —
+ * patrz komentarz niżej.
+ */
 import type { MetadataRoute } from "next"
 
 // Next.js sam serwuje to pod /manifest.webmanifest i dopisuje <link rel="manifest">

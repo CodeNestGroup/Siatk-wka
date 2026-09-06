@@ -1,5 +1,37 @@
 "use client"
 
+/**
+ * Modal szczegółów meczu — skład, płatności, rozliczenie
+ *
+ * Co to jest: Pełny widok pojedynczego meczu, otwierany w modalu po kliknięciu w kartę
+ * meczu na stronie głównej. Pokazuje status składu (ile zapisanych / ilu opłaciło / ile
+ * zebrano), pozwala dołączyć/wypisać się z meczu, zarządzać płatnościami i składem
+ * (admin), rozliczyć zebraną kasę w Finansach oraz wyeksportować skład na WhatsApp lub
+ * dodać mecz do kalendarza.
+ * Renderuje: ciemny nagłówek "bilet meczowy" z datą/lokalizacją i przyciskiem "Dodaj do
+ * kalendarza" -> karta statusu (skład/opłacono/zebrano) -> blok blokady dla meczu
+ * odwołanego lub rozliczonego, albo przycisk "Zatwierdź i rozlicz w Finansach" dla admina
+ * -> lista głównego składu (numer, status płatności, usuwanie) -> lista rezerwowa ->
+ * przycisk dołącz/wypisz się -> toast + ConfirmDialog na potwierdzenia.
+ * Props / kluczowe zależności: `match` (typ `Match` z `lib/data.ts`, rozszerzony o
+ * `is_settled`), `onChange` (aktualizuje mecz w widoku nadrzędnym — `app/page.tsx`),
+ * `onClose`, `currentUser` (obiekt sesji z localStorage). Współpracuje z `mainRoster`/
+ * `waitlist`/`isMatchCancelled` (`lib/data.ts` — dzielą graczy na skład/rezerwę wg
+ * `capacity` i sprawdzają status odwołania meczu), `addMatchToCalendar`/`formatDatePL`
+ * (`lib/utils.ts`), `notifyPush` (`lib/push.ts` — powiadomienie po rozliczeniu meczu),
+ * `ConfirmDialog` (potwierdzenia przed wypisaniem gracza).
+ * Dane z Supabase: `matches` (update `is_settled`), `match_registrations` (`is_paid`
+ * toggle, insert przy dołączeniu, delete przy wypisaniu — klucz `match_id` + `player_id`),
+ * `transactions` (insert wpisu przychodu przy rozliczeniu meczu).
+ * Uwagi: Renderowany przez `app/page.tsx` wewnątrz komponentu `Modal` po kliknięciu w
+ * mecz — to NIE jest samodzielna trasa. `isAdmin` liczony lokalnie, tymi samymi regułami
+ * co wszędzie indziej (`role === "admin" || is_admin || role_id === 1 || email ===
+ * "admin@admin.pl"`). Zatwierdzenie w Finansach księguje TYLKO realnie opłaconą kwotę
+ * (na podstawie `is_paid`), nie pełną wartość składu — patrz komentarz przy
+ * `handleSettleAndSave`. Wypisanie samego siebie jest zablokowane <2h przed startem meczu
+ * (admin może wypisać kogoś innego zawsze).
+ */
+
 import { useState } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
 import {
@@ -25,8 +57,10 @@ import { cn, formatDatePL, addMatchToCalendar } from "@/lib/utils"
 import { notifyPush } from "@/lib/push"
 import { supabase } from "@/lib/supabase"
 
-// Te same tokeny co w dashboardzie / sidebarze ("Under the Lights").
-// Docelowo warto wynieść display/score do wspólnego /lib/fonts.ts.
+// ────────────────────────────────────────────────────────────────
+// TOKENY WIZUALNE — fonty i kolory "Under the Lights", te same co w dashboardzie /
+// sidebarze. Docelowo warto wynieść display/score do wspólnego /lib/fonts.ts.
+// ────────────────────────────────────────────────────────────────
 const display = Space_Grotesk({ subsets: ["latin"], weight: ["600", "700"] })
 const score = Oswald({ subsets: ["latin"], weight: ["500", "600"] })
 
@@ -40,6 +74,10 @@ const netPattern: React.CSSProperties = {
     "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
 }
 
+// ────────────────────────────────────────────────────────────────
+// TYP PROPS — kontrakt z rodzicem (app/page.tsx): mecz do wyświetlenia, callbacki
+// aktualizacji/zamknięcia oraz sesja zalogowanego użytkownika
+// ────────────────────────────────────────────────────────────────
 type MatchDetailProps = {
   match: Match & { is_settled?: boolean }
   onChange: (updated: Match) => void
@@ -48,6 +86,10 @@ type MatchDetailProps = {
 }
 
 export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDetailProps) {
+  // ────────────────────────────────────────────────────────────────
+  // UPRAWNIENIA I DANE WYPROWADZONE Z PROPS — rola usera, podział skład/rezerwy,
+  // liczniki płatności, status odwołania/rozliczenia i blokada czasowa wypisania
+  // ────────────────────────────────────────────────────────────────
   const isAdmin =
     currentUser?.role === "admin" ||
     currentUser?.is_admin ||
@@ -97,6 +139,9 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   const msUntilMatch = matchStartAt.getTime() - Date.now()
   const canLeaveMatch = msUntilMatch >= TWO_HOURS_MS
 
+  // ────────────────────────────────────────────────────────────────
+  // STAN KOMPONENTU — toast, flagi zapisu/dołączania w toku oraz stan modala potwierdzenia
+  // ────────────────────────────────────────────────────────────────
   const [toast, setToast] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
@@ -111,6 +156,10 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     setTimeout(() => setToast(null), 3000)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // POMOCNICZE: EKSPORT SKŁADU I KALENDARZ — budowanie treści wiadomości na WhatsApp
+  // oraz dodawanie meczu do kalendarza użytkownika (Google Calendar / .ics)
+  // ────────────────────────────────────────────────────────────────
   function buildRosterMessage(): string {
     const listText = rawRoster
       .map((p: any, idx: number) => `${idx + 1}. ${p.full_name || p.name}`)
@@ -137,6 +186,10 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     addMatchToCalendar({ id: match.id, title: match.title, date: match.date, timeStart: match.time_start, timeEnd: match.time_end, location: match.location, price })
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // AKCJA ADMINA: ROZLICZENIE MECZU W FINANSACH — blokuje mecz do edycji i księguje
+  // realnie zebraną kwotę jako przychód w tabeli `transactions`
+  // ────────────────────────────────────────────────────────────────
   async function handleSettleAndSave() {
     if (isSettled || isCancelled || rawRoster.length === 0) return
     setIsSaving(true)
@@ -201,6 +254,10 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     setIsSaving(false)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // AKCJE: PŁATNOŚCI I ZARZĄDZANIE SKŁADEM — toggle statusu opłacenia (admin), wypisanie
+  // gracza (admin lub on sam) oraz dołączenie do meczu (zapis do `match_registrations`)
+  // ────────────────────────────────────────────────────────────────
   async function handleTogglePaid(playerId: string, currentlyPaid: boolean) {
     if (isSettled || isCancelled || !isAdmin) return
 
@@ -341,10 +398,11 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
         </div>
       </div>
 
-      {/* TREŚĆ */}
+      {/* TREŚĆ — karta statusu składu, blokada/przycisk rozliczenia, listy zawodników
+          (główny skład + rezerwa) i dolne przyciski dołącz/wypisz się */}
       <div className="p-4 sm:p-7 space-y-5">
 
-        {/* Jedna karta statusu zamiast trzech osobnych widgetów — wcześniej liczba "X/Y w składzie"
+        {/* KARTA STATUSU MECZU — jedna karta statusu zamiast trzech osobnych widgetów — wcześniej liczba "X/Y w składzie"
             powtarzała się aż trzy razy (tu, w kafelku "Opłacono" i w nagłówku listy niżej), a
             "Opłacono X/Y" i "Zebrana kasa" to i tak ta sama informacja podana dwoma sposobami.
             Tu wszystko w jednym miejscu: ile w składzie, ile opłaciło, ile zebrano. */}
@@ -370,8 +428,10 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
           </div>
         </div>
 
-        {/* Odwołany mecz zamraża skład — bez tego dało się dalej dopisywać/wypisywać graczy
-            i przełączać płatności na spotkaniu, które i tak się nie odbędzie. */}
+        {/* BLOKADA MECZU / PRZYCISK ROZLICZENIA — odwołany mecz zamraża skład (bez tego dało
+            się dalej dopisywać/wypisywać graczy i przełączać płatności na spotkaniu, które i
+            tak się nie odbędzie), rozliczony pokazuje kłódkę, w pozostałych przypadkach admin
+            dostaje przycisk "Zatwierdź i rozlicz w Finansach" */}
         {isCancelled ? (
           <div className="w-full rounded-2xl py-3 font-bold flex items-center justify-center gap-2 bg-[#FF5A5F]/10 text-[#E0454A] border border-[#FF5A5F]/25 text-xs">
             <Ban className="h-4 w-4" />
@@ -393,7 +453,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
           </Button>
         )}
 
-        {/* Lista Zawodników — nagłówek z akcją WhatsApp zostaje NA STAŁE widoczny nad listą,
+        {/* LISTA ZAWODNIKÓW — nagłówek z akcją WhatsApp zostaje NA STAŁE widoczny nad listą,
             poza jej scrollowanym kontenerem. Wcześniej był wewnątrz `overflow-y-auto`, więc przy
             przewijaniu składu znikał razem z resztą, a pasek scrolla wizualnie nachodził na napis
             "WhatsApp" po prawej stronie. */}
@@ -420,7 +480,8 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
           )}
 
           <div className="space-y-4 max-h-72 overflow-y-auto pr-1">
-            {/* SKŁAD GŁÓWNY */}
+            {/* SKŁAD GŁÓWNY — numer jak na koszulce, odznaka "Ty", toggle płatności (admin)
+                i usuwanie gracza (admin lub on sam) */}
             <div className="space-y-2">
             {rawRoster.length === 0 ? (
               <div className="py-6 text-center text-xs font-semibold text-slate-400 border border-dashed border-slate-200 rounded-2xl">
@@ -507,7 +568,8 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
             )}
           </div>
 
-          {/* LISTA REZERWOWA */}
+          {/* LISTA REZERWOWA — kolejność DOSŁOWNIE odzwierciedla kto wejdzie następny, gdy
+              zwolni się miejsce w składzie głównym (patrz komentarz przy `rawReserves` wyżej) */}
           {rawReserves.length > 0 && (
             <div className="space-y-2 pt-2 border-t border-slate-100">
               <div className="flex items-center justify-between text-xs font-bold text-[#4B2FB0]">
@@ -559,8 +621,9 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
           </div>
         </div>
 
-        {/* Dolne przyciski — samo zamknięcie robi już X w nagłówku (plus klik w tło / Escape),
-            więc tu zostaje tylko realna akcja (dołącz/wypisz), gdy jest dostępna */}
+        {/* DOLNE PRZYCISKI: DOŁĄCZ / WYPISZ SIĘ — samo zamknięcie robi już X w nagłówku
+            (plus klik w tło / Escape), więc tu zostaje tylko realna akcja (dołącz/wypisz),
+            gdy jest dostępna; poniżej też toast i ConfirmDialog na potwierdzenia */}
         {!isSettled && !isCancelled && (
         <div className="pt-3 border-t border-slate-100 flex items-center gap-3">
           {(

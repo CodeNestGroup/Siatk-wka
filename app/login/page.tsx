@@ -1,5 +1,33 @@
 "use client"
 
+/**
+ * Logowanie i Rejestracja (/login)
+ *
+ * Co to jest: Ekran wejściowy do aplikacji — jedna karta z przełącznikiem między formularzem
+ * logowania a formularzem rejestracji nowego zawodnika, plus zachęty do instalacji aplikacji
+ * (natywna appka na Androida z GitHub Releases oraz PWA "dodaj do ekranu głównego" na iOS).
+ * Renderuje: karta-bilet (ciemny nagłówek z logo + perforacja + biały formularz) -> zakładki
+ * Logowanie/Rejestracja -> baner błędu/sukcesu (wspólny dla obu trybów) -> formularz logowania
+ * (e-mail, hasło, link "Zapomniałeś hasła?") ALBO formularz rejestracji (imię i nazwisko,
+ * e-mail, telefon opcjonalny, hasło + powtórz hasło, captcha Cloudflare Turnstile) -> pod
+ * kartą: link do pobrania apki na Androida (GitHub Releases) i `InstallAppPrompt` (PWA).
+ * Kluczowe zależności: RPC Supabase `verify_login` (cała logika logowania po stronie bazy),
+ * `Turnstile` z @marsidev/react-turnstile (captcha wymagana tylko przy rejestracji),
+ * `InstallAppPrompt` z components/pwa (baner instalacji PWA na urządzeniach bez wsparcia .apk).
+ * Dane z Supabase: RPC `verify_login(p_email, p_password)` — zwraca albo dane gracza, albo
+ * obiekt `{ error: "not_found" | "wrong_password" | "pending" }` (konto czeka na zatwierdzenie
+ * admina ma `role_id` wskazujący status "pending" w tabeli `players_role`); tabela `players`
+ * (insert przy rejestracji: `full_name`, `email`, `phone`, `password` — hashowane automatycznie
+ * triggerem w bazie, `role_id: 3` = pending, patrz supabase/password-hashing-migration.sql).
+ * Uwagi: Autoryzacja jest CAŁKOWICIE własna (bez Supabase Auth) — po udanym logowaniu sesja
+ * to zwykły obiekt zapisany w localStorage pod kluczem `volley_user`, żadnych tokenów/cookies.
+ * `isMateusz`/`role_id === 1` decydują o fladze `is_admin` zapisywanej w tej sesji. Appka nie
+ * ma backendu do wysyłki maili, więc nie ma prawdziwego "resetu hasła" — link "Zapomniałeś
+ * hasła?" tylko tłumaczy, że nowe hasło startowe nadaje ręcznie administrator (patrz
+ * app/players/page.tsx). Rejestracja odrzuca duplikat po e-mailu ORAZ po pełnym imieniu i
+ * nazwisku (żeby nie powstały dwa konta tej samej osoby).
+ */
+
 import { useState } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
 import { Lock, Mail, ArrowRight, Shield, AlertCircle, UserPlus, User, Phone, CheckCircle2, Smartphone, Download } from "lucide-react"
@@ -30,6 +58,11 @@ function perforationH(color: string): React.CSSProperties {
 }
 
 export default function LoginPage() {
+  // ────────────────────────────────────────────────────────────────
+  // STAN FORMULARZY — wspólne pola dla logowania i rejestracji (część, jak `fullName`/`phone`/
+  // `confirmPassword`/`captchaToken`, dotyczy tylko rejestracji) oraz stan UI (ładowanie,
+  // komunikaty błędu/sukcesu, widoczność pomocy "Zapomniałeś hasła?").
+  // ────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<"login" | "register">("login")
 
   const [email, setEmail] = useState("")
@@ -51,7 +84,11 @@ export default function LoginPage() {
 
   const passwordRegex = /^(?=.*[A-Z])(?=.*[!@#$&*]).{6,}$/
 
-  // LOGOWANIE
+  // ────────────────────────────────────────────────────────────────
+  // LOGOWANIE — cała weryfikacja hasła dzieje się w RPC `verify_login` w Postgresie; ta
+  // funkcja tylko interpretuje wynik (`not_found`/`wrong_password`/`pending`/dane gracza),
+  // buduje obiekt sesji i zapisuje go do localStorage pod kluczem `volley_user`.
+  // ────────────────────────────────────────────────────────────────
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setErrorMessage(null)
@@ -112,7 +149,11 @@ export default function LoginPage() {
     window.location.href = "/"
   }
 
-  // REJESTRACJA Z TURNSTILE
+  // ────────────────────────────────────────────────────────────────
+  // REJESTRACJA Z TURNSTILE — walidacja captcha + hasła po stronie klienta, sprawdzenie
+  // duplikatu po e-mailu LUB pełnym imieniu i nazwisku, a na końcu zwykły `insert` do
+  // `players` z `role_id: 3` (pending) — nowe konto czeka na ręczne zatwierdzenie admina.
+  // ────────────────────────────────────────────────────────────────
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault()
     setErrorMessage(null)
@@ -217,6 +258,7 @@ export default function LoginPage() {
           </div>
 
           <div className="p-6 sm:p-7 space-y-5">
+            {/* Przełącznik trybu Logowanie / Rejestracja — czyści błąd/sukces przy zmianie zakładki */}
             <div className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-2xl text-xs font-bold">
               <button
                 onClick={() => { setMode("login"); setErrorMessage(null); setSuccessMessage(null); }}
@@ -238,6 +280,7 @@ export default function LoginPage() {
               </button>
             </div>
 
+            {/* Baner błędu/sukcesu — wspólny dla obu trybów (logowanie i rejestracja) */}
             {errorMessage && (
               <div className="flex items-center gap-2 rounded-2xl bg-[#FF5A5F]/10 p-3 text-xs font-bold text-[#E0454A] border border-[#FF5A5F]/25 animate-in fade-in slide-in-from-top-1">
                 <AlertCircle className="h-4 w-4 shrink-0" />
@@ -252,6 +295,8 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* FORMULARZE — logowanie (RPC verify_login) albo rejestracja (insert do `players`
+                z role_id=3, czeka na zatwierdzenie admina), przełączane przez `mode` wyżej */}
             {mode === "login" ? (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-1.5">

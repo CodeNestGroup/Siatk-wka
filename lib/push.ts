@@ -1,3 +1,20 @@
+/**
+ * Wysyłanie i obsługa powiadomień Web Push
+ *
+ * Co to jest: moduł do obsługi Web Push API po stronie przeglądarki (subskrypcja, sprawdzanie
+ * wsparcia) oraz do wywoływania wysyłki powiadomień z poziomu klienta.
+ * Eksportuje / robi: isPushSupported, getPushPermission, getExistingPushSubscription,
+ * subscribeToPush (prosi o zgodę i zapisuje subskrypcję w bazie przez /api/push/subscribe),
+ * unsubscribeFromPush, notifyPush (fire-and-forget POST do /api/push/send, wywoływane po
+ * utworzeniu meczu/ogłoszenia/wpłaty).
+ * Używany przez: ustawienia powiadomień gracza (włącz/wyłącz push) oraz każde miejsce w apce,
+ * które tworzy mecz/ogłoszenie/wpłatę i chce o tym kogoś powiadomić.
+ * Uwagi: iOS (Safari) wymaga wcześniejszego dodania appki do ekranu głównego, inaczej
+ * `PushManager` nie istnieje — patrz komentarz niżej. Faktyczna wysyłka
+ * (webpush.sendNotification) dzieje się po stronie serwera w app/api/push/send/route.ts,
+ * nie tutaj.
+ */
+
 // Web Push — obsługa po stronie przeglądarki: sprawdzenie wsparcia, poproszenie o
 // zgodę systemową, zapisanie subskrypcji w bazie. Android/Chrome działa wprost;
 // iOS (Safari) wymaga NAJPIERW dodania appki do ekranu głównego ("Udostępnij" ->

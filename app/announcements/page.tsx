@@ -1,5 +1,33 @@
 "use client"
 
+/**
+ * Tablica Ogłoszeń (/announcements)
+ *
+ * Co to jest: Strona z listą ogłoszeń klubowych — komunikaty od administracji i graczy,
+ * z kategoriami, przypinaniem najważniejszych na górze i komentarzami w formie dymków czatu
+ * pod każdym wpisem. Odpowiednik "tablicy korkowej" klubu, tylko cyfrowej.
+ * Renderuje: header z dzwoneczkiem powiadomień i przyciskiem "Postaw kawę", pasek
+ * wyszukiwarki + zakładki kategorii, listę ogłoszeń (przypięte jako ciemne "hero" karty,
+ * reszta jako jasne karty z kolorowym obramowaniem wg autora), sekcję komentarzy rozwijaną
+ * pod każdą kartą, modal dodawania/edycji ogłoszenia oraz dialog potwierdzenia usunięcia.
+ * Kluczowe zależności: `Sidebar`, `NotificationsBell` (dzwonek + licznik nieprzeczytanych),
+ * `SupportModal` ("Postaw kawę"), `Modal`/`ConfirmDialog` (współdzielone komponenty UI),
+ * `notifyPush` z lib/push (powiadomienia push przy nowym ogłoszeniu), `fuzzySearchMatch`/
+ * `normalizeSearchText` z lib/utils (wyszukiwarka odporna na literówki/polskie znaki).
+ * Dane z Supabase: tabela `announcements` (title, content, category_id, is_pinned,
+ * created_at, match_id, author_id) z dociąganymi relacjami `players:author_id` (autor)
+ * i `matches:match_id` (opcjonalne powiązanie z konkretnym meczem); tabela
+ * `announcements_category` (id, name) do zakładek/kolorów; tabela `announcement_comments`
+ * (announcement_id, author_id, content, created_at) z relacją `players:author_id`.
+ * Uwagi: logowanie jest własne (localStorage["volley_user"], BEZ Supabase Auth) — `isAdmin`
+ * i `isAuthorAdmin` to dwie osobne, ale identyczne w logice funkcje sprawdzające rolę
+ * (zalogowanego usera vs. autora konkretnego wpisu/komentarza). Przypinanie ogłoszeń i
+ * checkbox "Przypnij" w formularzu są dostępne WYŁĄCZNIE dla admina; edycja/usuwanie
+ * ogłoszenia — dla admina lub autora własnego wpisu (`canManage`). Brak własnego autora
+ * przy dodawaniu wpisu (np. usera niezalogowanego przez UI) spada na twardo wpisany
+ * fallback `author_id` — patrz `handleSubmitAnnouncement`/`handleAddComment`.
+ */
+
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Space_Grotesk, Oswald } from "next/font/google"
@@ -49,6 +77,9 @@ const netPattern: React.CSSProperties = {
     "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
 }
 
+// ────────────────────────────────────────────────────────────────
+// TYPY DANYCH — kształt rekordów z Supabase (ogłoszenie, kategoria, komentarz)
+// ────────────────────────────────────────────────────────────────
 type AuthorInfo = {
   full_name: string | null
   role_id?: number | null
@@ -86,6 +117,9 @@ type AnnouncementComment = {
   players?: AuthorInfo | null
 }
 
+// ────────────────────────────────────────────────────────────────
+// FUNKCJE POMOCNICZE — sprawdzanie roli autora, formatowanie dat i inicjałów
+// ────────────────────────────────────────────────────────────────
 // Ten sam zestaw warunkow co `isAdmin` dla zalogowanego uzytkownika, ale liczony
 // dla AUTORA konkretnego wpisu (ogloszenia albo komentarza) — zeby dalo sie
 // wizualnie odroznic tresc od administracji od tresci od zwyklego gracza.
@@ -120,6 +154,10 @@ function getInitials(fullName: string | null | undefined): string {
 
 export default function AnnouncementsPage() {
   const router = useRouter()
+
+  // ────────────────────────────────────────────────────────────────
+  // STAN — lista ogłoszeń/kategorii, filtrowanie, sesja usera, UI (modal, toast, dialog)
+  // ────────────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -137,6 +175,7 @@ export default function AnnouncementsPage() {
 
   const isAdmin = user?.role === "admin" || user?.is_admin || user?.email === "admin@admin.pl" || user?.name === "Mateusz Podzorski" || user?.full_name === "Mateusz Podzorski"
 
+  // Stan formularza modala dodawania/edycji ogłoszenia
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingAnnouncementId, setEditingAnnouncementId] = useState<string | null>(null)
   const [newTitle, setNewTitle] = useState("")
@@ -146,11 +185,17 @@ export default function AnnouncementsPage() {
   const [newMatchId, setNewMatchId] = useState<string>("")
   const [matchOptions, setMatchOptions] = useState<{ id: string; date: string; location: string | null; time_start: string | null }[]>([])
 
+  // Stan sekcji komentarzy: treść pogrupowana po ogłoszeniu, które karty są rozwinięte,
+  // szkice wpisywanych komentarzy per ogłoszenie i id ogłoszenia w trakcie wysyłki
   const [commentsByAnnouncement, setCommentsByAnnouncement] = useState<Record<string, AnnouncementComment[]>>({})
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set())
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({})
   const [postingCommentId, setPostingCommentId] = useState<string | null>(null)
 
+  // ────────────────────────────────────────────────────────────────
+  // INICJALIZACJA — odczyt sesji z localStorage (WŁASNA autoryzacja, bez Supabase Auth)
+  // i pierwsze pobranie wszystkich danych strony
+  // ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
     if (localUser) {
@@ -165,6 +210,9 @@ export default function AnnouncementsPage() {
     fetchComments()
   }, [])
 
+  // ────────────────────────────────────────────────────────────────
+  // POBIERANIE DANYCH Z SUPABASE — mecze (do powiązania), ogłoszenia, komentarze, kategorie
+  // ────────────────────────────────────────────────────────────────
   // Lista meczów do opcjonalnego powiązania — pole `match_id` istniało w typie i już
   // wyświetlało datę meczu na odznace ogłoszenia, ale formularz nigdy go nie ustawiał,
   // więc realnie dało się je wpisać tylko ręcznie w bazie danych.
@@ -263,6 +311,9 @@ export default function AnnouncementsPage() {
     window.location.href = "/login"
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // MODAL DODAWANIA / EDYCJI OGŁOSZENIA — otwieranie, wypełnianie formularza, zapis (insert/update)
+  // ────────────────────────────────────────────────────────────────
   function openCreateAnnouncement() {
     setEditingAnnouncementId(null)
     setNewTitle("")
@@ -379,6 +430,9 @@ export default function AnnouncementsPage() {
     closeAnnouncementModal()
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // USUWANIE I PRZYPINANIE OGŁOSZENIA — usunięcie z potwierdzeniem, toggle is_pinned (tylko admin)
+  // ────────────────────────────────────────────────────────────────
   function handleDelete(id: string, title: string) {
     setConfirmDialog({
       title: "Usunąć ogłoszenie?",
@@ -413,6 +467,9 @@ export default function AnnouncementsPage() {
       .eq('id', id)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // KOMENTARZE — rozwijanie/zwijanie sekcji pod ogłoszeniem oraz dodawanie nowego komentarza
+  // ────────────────────────────────────────────────────────────────
   function toggleComments(announcementId: string) {
     setExpandedComments((prev) => {
       const next = new Set(prev)
@@ -456,6 +513,10 @@ export default function AnnouncementsPage() {
     setPostingCommentId(null)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // FILTROWANIE, SORTOWANIE I SKRACANIE LISTY — wyszukiwarka fuzzy, filtr kategorii,
+  // przypięte zawsze na górze, reszta ucięta do podglądu z przyciskiem "Pokaż wszystkie"
+  // ────────────────────────────────────────────────────────────────
   function buildAnnouncementTokens(a: Announcement): string[] {
     return normalizeSearchText(`${a.title || ""} ${a.content || ""}`).split(/[^a-z0-9]+/).filter(Boolean)
   }
@@ -480,6 +541,10 @@ export default function AnnouncementsPage() {
   const isAnnouncementListTruncated = !search && sorted.length > ANNOUNCEMENT_PREVIEW_LIMIT
   const visibleAnnouncements = isAnnouncementListTruncated && !showAllAnnouncements ? sorted.slice(0, ANNOUNCEMENT_PREVIEW_LIMIT) : sorted
 
+  // ────────────────────────────────────────────────────────────────
+  // RENDEROWANIE SEKCJI KOMENTARZY — dymki czatu (własne po prawej na niebiesko,
+  // cudze po lewej z awatarem-inicjałem), pole do wpisania nowego komentarza
+  // ────────────────────────────────────────────────────────────────
   // Wspólna sekcja komentarzy pod ogłoszeniem — jedna implementacja dla ciemnej karty
   // (przypięte) i jasnej karty (reszta), żeby nie duplikować tej samej logiki dwa razy.
   function renderCommentSection(item: Announcement, isDark: boolean) {
@@ -585,6 +650,10 @@ export default function AnnouncementsPage() {
     )
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // KOLOR AKCENTU KATEGORII — mapowanie nazwy kategorii na paletę "Under the Lights"
+  // (używane zarówno w zakładkach filtra, jak i na odznakach kart ogłoszeń)
+  // ────────────────────────────────────────────────────────────────
   // Kolor akcentu w zależności od kategorii — te same tokeny marki co reszta appki
   function getCategoryAccent(catName: string): { color: string; bg: string; border: string; text: string } {
     const name = catName.toLowerCase()
@@ -594,6 +663,10 @@ export default function AnnouncementsPage() {
     return { color: "#94A3B8", bg: "bg-slate-100", border: "border-slate-200", text: "text-slate-600" }
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // JSX — layout strony: sidebar, header z dzwonkiem, nagłówek sekcji + przycisk
+  // "Dodaj ogłoszenie", wyszukiwarka z zakładkami kategorii, lista ogłoszeń, modale
+  // ────────────────────────────────────────────────────────────────
   return (
     <div className="flex min-h-screen bg-[#F5F6FA] text-[#14181F]">
       <Sidebar
@@ -635,6 +708,7 @@ export default function AnnouncementsPage() {
         </header>
 
         <main className="relative z-10 mx-auto w-full max-w-5xl flex-1 space-y-6 px-6 py-8 pb-24 lg:pb-8">
+          {/* NAGŁÓWEK STRONY — tytuł + przycisk "Dodaj ogłoszenie" (widoczny tylko dla zalogowanego usera) */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-[#2C4BFF] border border-slate-200 shadow-xs">

@@ -41,6 +41,67 @@ import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
 
+/**
+ * Baza Zawodników — zarządzanie stałym składem i kartoteką wszystkich graczy klubu
+ *
+ * Co to jest: Strona admina (z ograniczonym wglądem dla zwykłych zalogowanych) do
+ * zarządzania pełną bazą zawodników klubu — ręczne ustawianie kolejności powołań do
+ * stałego składu (pozycje 1-12) i stałej listy rezerwowej (13+), zatwierdzanie/odrzucanie
+ * nowych rejestracji graczy, aktywacja/dezaktywacja i trwałe usuwanie kont (pojedynczo i
+ * masowo), podgląd historii meczów pojedynczego gracza, reset hasła oraz eksport całej
+ * bazy do CSV.
+ *
+ * Renderuje: nagłówek z paskiem "Postaw kawę" i dzwoneczkiem powiadomień, wyszukiwarkę
+ * (fuzzy, tolerancyjną na literówki) oraz zakładki Stały skład / Aktywni / Nieaktywni /
+ * Wszyscy w bazie, kafel "Konta oczekujące na zatwierdzenie" (widoczny tylko dla admina),
+ * w zakładce "Stały skład" trzy listy (Skład Główny 1-12, Stała Lista Rezerwowa 13+,
+ * Pozostali aktywni gracze) z obsługą przeciągania myszką (drag&drop) i strzałek ↑/↓ do
+ * zmiany kolejności, w pozostałych zakładkach standardową tabelę (desktop) / karty
+ * (mobile) z trybem zaznaczania i masowymi akcjami, pływający pasek masowych akcji, modal
+ * dodawania zawodnika (z generowanym hasłem startowym), modal historii meczów gracza
+ * (z resetem hasła dla admina), toast i ConfirmDialog do potwierdzeń.
+ *
+ * Kluczowe zależności:
+ * - `@/lib/supabase` — klient Supabase (PostgREST, klucz anon, bez Supabase Auth)
+ * - `@/lib/utils` — `cn`, `formatDatePL`, `normalizeSearchText` i `fuzzySearchMatch`
+ *   (silnik wyszukiwarki tolerancyjnej na literówki, użyty też np. w app/page.tsx)
+ * - `@/components/dashboard/sidebar`, `notifications-bell`, `support-modal` — wspólne
+ *   elementy layoutu dashboardu (te same co na innych stronach appki)
+ * - `@/components/ui/modal`, `confirm-dialog`, `button` — generyczne komponenty UI
+ * - lokalny `CountUp` — animowane podliczanie liczb w kartach podsumowania (kopia
+ *   komponentu ze strony głównej, app/page.tsx)
+ *
+ * Dane z Supabase (dostęp bez RLS blokującego odczyt, przez klucz anon):
+ * - `players` — read/write. Kolumny: id, full_name, email, phone, created_at,
+ *   notif_announcements, notif_match_reminders, role_id, player_status_id,
+ *   is_core_roster, core_order, core_added_at. Celowo NIE pobiera się kolumny `password`
+ *   (nawet zahashowanej) — patrz supabase/harden-anon-access.sql. role_id === 3 lub
+ *   player_status_id === 3 oznacza konto oczekujące na zatwierdzenie (rejestracja gracza
+ *   wymaga akcji admina, zanim będzie mógł się zapisywać na mecze).
+ * - `player_status` — read. Słownik statusów (aktywny/nieaktywny), dopasowywany po
+ *   fragmencie nazwy (`.includes("aktyw")` itp.), nie po stałym ID.
+ * - `match_registrations` — read. Zapisy na mecze, do policzenia `matches_count` i
+ *   `total_paid` per gracz oraz do historii meczów pojedynczego gracza.
+ * - `matches` — read. Do ceny za mecz (`price_per_player`) i pojemności składu
+ *   (`capacity`/`max_players`).
+ * - RPC `set_player_password(p_player_id, p_new_password)` — reset hasła gracza przez
+ *   admina (hasło hashowane triggerem w bazie, ta sama mechanika co przy zmianie hasła
+ *   w Ustawieniach).
+ *
+ * Uwagi:
+ * - Autoryzacja jest własna, NIE korzysta z Supabase Auth — sesja to zwykły obiekt w
+ *   localStorage pod kluczem `volley_user`, `isAdmin` sprawdzane po polach
+ *   `role`/`is_admin`/`role_id`/`email`.
+ * - "Stały skład" (`is_core_roster` + `core_order`) to INNY mechanizm niż zwykły status
+ *   aktywny/nieaktywny (`player_status_id`) — gracz może być aktywny, ale nie być w stałym
+ *   składzie, i odwrotnie (dezaktywowany gracz nie znika automatycznie ze stałego składu).
+ * - Pozycje #1-#12 w posortowanej liście `allCorePlayersSorted` to "Skład Główny", #13+ to
+ *   "Stała Lista Rezerwowa" — sama numeracja i etykiety (np. "R1") liczone są w JSX z
+ *   indeksu w posortowanej liście, nie z osobnej kolumny w bazie.
+ * - Kolejność zapisu w `match_registrations` decyduje, kto trafia do składu głównego
+ *   danego meczu, a kto na rezerwę — ta sama reguła co w lib/data.ts (mainRoster/waitlist).
+ */
+
 // ────────────────────────────────────────────────────────────────
 // Te same tokeny co reszta dashboardu ("Under the Lights")
 // ────────────────────────────────────────────────────────────────
@@ -60,7 +121,10 @@ const netPattern: React.CSSProperties = {
     "repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 16px)"
 }
 
-// Płynne podliczanie liczb — ten sam komponent co na stronie głównej
+// ────────────────────────────────────────────────────────────────
+// KOMPONENT POMOCNICZY — CountUp: płynne podliczanie liczb w kartach
+// podsumowania. Ten sam komponent co na stronie głównej (app/page.tsx).
+// ────────────────────────────────────────────────────────────────
 function CountUp({ value, decimals = 0 }: { value: number; decimals?: number }) {
   const [displayValue, setDisplayValue] = useState(value)
   const prevValue = useRef(value)
@@ -98,6 +162,13 @@ function CountUp({ value, decimals = 0 }: { value: number; decimals?: number }) 
   return <>{displayValue.toFixed(decimals)}</>
 }
 
+// ────────────────────────────────────────────────────────────────
+// TYPY DANYCH I POMOCNICZA FUNKCJA WYSZUKIWARKI
+// GlobalPlayer odpowiada wierszowi z tabeli `players` (plus dane doliczone po stronie
+// klienta: matches_count, total_paid). PlayerHistory to pojedynczy wiersz w historii
+// meczów gracza, budowany z `match_registrations` + `matches` w openPlayerHistory().
+// buildPlayerSearchTokens() rozbija imię+email na tokeny pod fuzzySearchMatch (@/lib/utils).
+// ────────────────────────────────────────────────────────────────
 type GlobalPlayer = {
   id: string
   full_name: string
@@ -125,6 +196,11 @@ function buildPlayerSearchTokens(p: GlobalPlayer): string[] {
 }
 
 export default function PlayersPage() {
+  // ────────────────────────────────────────────────────────────────
+  // STAN KOMPONENTU — dane graczy, filtry/wyszukiwarka, UI zakładek, drag&drop kolejności
+  // powołań, tryb zaznaczania masowego, formularz dodawania gracza (z hasłem startowym),
+  // modal historii gracza i reset hasła. Poszczególne grupy mają własne komentarze niżej.
+  // ────────────────────────────────────────────────────────────────
   const [players, setPlayers] = useState<GlobalPlayer[]>([])
   const [pendingPlayers, setPendingPlayers] = useState<GlobalPlayer[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -218,6 +294,11 @@ export default function PlayersPage() {
     user?.role_id === 1 ||
     user?.email === "admin@admin.pl"
 
+  // ────────────────────────────────────────────────────────────────
+  // EFEKTY INICJALIZUJĄCE — wczytanie sesji usera i stanu bannera z localStorage,
+  // pierwsze pobranie graczy z Supabase (fetchPlayers), oraz pozycjonowanie suwaka
+  // pod aktywną zakładką filtra (ten sam mechanizm co na stronie głównej).
+  // ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
     if (localUser) {
@@ -240,6 +321,9 @@ export default function PlayersPage() {
     }
   }, [statusFilter, isLoading])
 
+  // ────────────────────────────────────────────────────────────────
+  // DROBNE FUNKCJE POMOCNICZE UI — toast, wylogowanie, zamknięcie bannera "Postaw kawę"
+  // ────────────────────────────────────────────────────────────────
   function notify(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
@@ -258,6 +342,13 @@ export default function PlayersPage() {
     localStorage.setItem("volley_coffee_banner_dismissed", "true")
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // POBIERANIE DANYCH — fetchPlayers() to główne źródło danych całej strony. Ciągnie
+  // `players` + `match_registrations` + `matches`, doliczaj liczbę meczów i sumę wpłat
+  // per gracz po stronie klienta, i dzieli graczy na zwykłą listę (players) oraz konta
+  // oczekujące na zatwierdzenie (pendingPlayers, role_id/player_status_id === 3).
+  // Wywoływana przy starcie strony i po każdej akcji admina zmieniającej dane w bazie.
+  // ────────────────────────────────────────────────────────────────
   async function fetchPlayers() {
     setIsLoading(true)
 
@@ -341,6 +432,15 @@ export default function PlayersPage() {
 
     setIsLoading(false)
   }
+
+  // ────────────────────────────────────────────────────────────────
+  // STAŁY SKŁAD — ZARZĄDZANIE KOLEJNOŚCIĄ POWOŁAŃ
+  // Grupa funkcji obsługujących dodawanie/usuwanie gracza ze stałego składu oraz zmianę
+  // jego pozycji w kolejce powołań — strzałkami ↑/↓ (moveCoreOrder, sąsiednia zamiana) albo
+  // przeciągnięciem myszką na dowolną pozycję (handleDragStart/handleDragOverRow/
+  // handleDropOnRow → moveCoreOrderTo, renumeracja całej listy 1..N). Wszystko trzyma się
+  // kolumn `is_core_roster`/`core_order`/`core_added_at` w tabeli `players`.
+  // ────────────────────────────────────────────────────────────────
 
   // Dodawanie/usuwanie ze stałego składu z zachowaniem kolejności
   async function toggleCoreRoster(player: GlobalPlayer, e?: React.MouseEvent) {
@@ -480,6 +580,14 @@ export default function PlayersPage() {
     }
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // STATUS KONTA — AKTYWACJA / DEZAKTYWACJA (pojedynczo i masowo)
+  // Status aktywny/nieaktywny (`player_status_id`, dopasowywany po nazwie w `player_status`)
+  // decyduje, czy gracz może się zapisywać na mecze — to NIE to samo co stały skład
+  // (is_core_roster). Wersja pojedyncza pyta o potwierdzenie przez ConfirmDialog
+  // (performStatusToggleConfirm → applyStatusChange), wersja masowa działa na
+  // selectedBulkIds z trybu zaznaczania (handleBulkSetStatus → performBulkStatus).
+  // ────────────────────────────────────────────────────────────────
   function togglePlayerStatus(player: GlobalPlayer, e: React.MouseEvent) {
     e.stopPropagation()
     performStatusToggleConfirm([player])
@@ -562,6 +670,12 @@ export default function PlayersPage() {
     setIsBulkProcessing(false)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // MASOWE ZAZNACZANIE I TRWAŁE USUWANIE — tryb zaznaczania (isSelectionMode) włączany
+  // przyciskiem "Zarządzaj / Zaznacz" w widoku tabeli; toggleBulkSelect trzyma listę
+  // zaznaczonych ID (selectedBulkIds), handleBulkDelete/performBulkDelete usuwają je
+  // trwale z tabeli `players` po potwierdzeniu w ConfirmDialog.
+  // ────────────────────────────────────────────────────────────────
   function handleBulkDelete() {
     if (selectedBulkIds.length === 0) return
     setConfirmDialog({
@@ -593,6 +707,13 @@ export default function PlayersPage() {
     setSelectedBulkIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // ZATWIERDZANIE / ODRZUCANIE ZGŁOSZEŃ REJESTRACYJNYCH — konto nowo zarejestrowanego
+  // gracza dostaje role_id === 3 (oczekujące) i trafia do pendingPlayers zamiast players
+  // (patrz fetchPlayers). Zatwierdzenie (approvePlayer/performApprove) zmienia role_id
+  // na 2 i ustawia status aktywny; odrzucenie (rejectPlayer/performReject) trwale usuwa
+  // wiersz z `players` po potwierdzeniu w ConfirmDialog.
+  // ────────────────────────────────────────────────────────────────
   function approvePlayer(id: string) {
     performApprove(id)
   }
@@ -639,6 +760,13 @@ export default function PlayersPage() {
     }
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // DODAWANIE NOWEGO ZAWODNIKA — obsługa formularza z modala "Dodaj zawodnika". Generuje
+  // e-mail zastępczy gdy niepodany, hasło startowe (podane ręcznie lub wylosowane przez
+  // generateTempPassword), zapisuje wiersz w `players` z role_id: 2 i, opcjonalnie, od
+  // razu w stałym składzie (is_core_roster + core_order na koniec kolejki). Po zapisie
+  // modal NIE zamyka się od razu — pokazuje hasło startowe do przekazania graczowi.
+  // ────────────────────────────────────────────────────────────────
   async function handleAddPlayer(e: React.FormEvent) {
     e.preventDefault()
     if (!newFullName.trim()) return
@@ -694,6 +822,13 @@ export default function PlayersPage() {
     setIsSubmitting(false)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // ZARZĄDZANIE KONTEM ZAWODNIKA — TRWAŁE USUWANIE I RESET HASŁA
+  // deletePlayer/performDeletePlayer usuwają wiersz z `players` (nieodwracalne, znika też
+  // historia meczów) po potwierdzeniu w ConfirmDialog. handleResetPassword niżej to jedyna
+  // droga "odzyskania dostępu" bez wysyłki maili — patrz komentarz przy stanie
+  // resetPasswordValue wyżej.
+  // ────────────────────────────────────────────────────────────────
   function deletePlayer(player: GlobalPlayer, e: React.MouseEvent) {
     e.stopPropagation()
     setConfirmDialog({
@@ -738,6 +873,12 @@ export default function PlayersPage() {
     setIsResettingPassword(false)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // HISTORIA MECZÓW GRACZA — otwiera modal po kliknięciu wiersza gracza (o ile nie jest
+  // aktywny tryb zaznaczania — wtedy klik zaznacza zamiast otwierać). Buduje historię z
+  // `match_registrations` + `matches`: kolejność zapisu na dany mecz decyduje, czy gracz
+  // trafił do "Głównego składu" czy na "Rezerwę" (ta sama reguła co w lib/data.ts).
+  // ────────────────────────────────────────────────────────────────
   async function openPlayerHistory(player: GlobalPlayer) {
     if (isSelectionMode) {
       toggleBulkSelect(player.id)
@@ -794,6 +935,11 @@ export default function PlayersPage() {
     setIsLoadingHistory(false)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // EKSPORT CSV — generuje plik CSV (średnik jako separator, BOM na początku dla Excela)
+  // z pełną, nieprzefiltrowaną listą `players` i pobiera go w przeglądarce przez tymczasowy
+  // link `<a download>` + URL.createObjectURL. Dostępny tylko dla admina.
+  // ────────────────────────────────────────────────────────────────
   function exportPlayersCsv() {
     const header = ["Imię i nazwisko", "E-mail", "Status konta", "Stały skład", "Rozegrane mecze", "Suma wpłat (PLN)"]
     const rows = players.map((p) => {
@@ -822,6 +968,16 @@ export default function PlayersPage() {
     notify("Wyeksportowano listę zawodników.")
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // PRZYGOTOWANIE LIST DO WYŚWIETLENIA — sortowanie, podział i filtrowanie (liczone przy
+  // każdym renderze, bez useMemo). Kolejność: activePlayers → allCorePlayersSorted (wg
+  // core_order/core_added_at) → podział na primaryCorePlayers (1-12) / reserveCorePlayers
+  // (13+) → nonCoreActivePlayers. matchesSearch() filtruje fuzzy-wyszukiwarką, ale numeracja
+  // pozycji (#idx / actualIdx) zawsze liczona jest z listy SPRZED filtrowania, żeby
+  // wyszukiwanie nie zaburzało numeracji kolejności powołań. Na końcu: filteredPlayers dla
+  // widoku tabeli (zakładki Aktywni/Nieaktywni/Wszyscy) i skrócone listy na mobile
+  // (LIST_PREVIEW_LIMIT, patrz komentarz przy stanie showAllPlayers/showAllNonCore wyżej).
+  // ────────────────────────────────────────────────────────────────
   const activePlayers = players.filter((p) => p.player_status_id === 1 || !p.player_status_id)
 
   // Dokładne sortowanie stałego składu wg kolejności dodania / ręcznego ustawienia
@@ -873,6 +1029,11 @@ export default function PlayersPage() {
   const isNonCoreListTruncated = !isSelectionMode && !searchQuery && filteredNonCoreActive.length > LIST_PREVIEW_LIMIT
   const visibleNonCoreActive = isNonCoreListTruncated && !showAllNonCore ? filteredNonCoreActive.slice(0, LIST_PREVIEW_LIMIT) : filteredNonCoreActive
 
+  // ────────────────────────────────────────────────────────────────
+  // RENDER — od tego miejsca w dół to już czysty JSX. Główne bloki oznaczone są
+  // komentarzami {/* ... */} przy poszczególnych sekcjach (nagłówek, zakładki, widok
+  // stałego składu, standardowa tabela, modale).
+  // ────────────────────────────────────────────────────────────────
   return (
     <div className="flex min-h-screen bg-[#F5F6FA] text-[#14181F]">
       <Sidebar
@@ -1037,7 +1198,9 @@ export default function PlayersPage() {
             </div>
           </div>
 
-          {/* KAFEL ZGŁOSZEŃ OCZEKUJĄCYCH */}
+          {/* KAFEL ZGŁOSZEŃ OCZEKUJĄCYCH — konta ze świeżej rejestracji (role_id/
+              player_status_id === 3) czekające na akcję admina: Zatwierdź (approvePlayer)
+              albo Odrzuć/trwale usuń (rejectPlayer). Widoczne tylko dla admina. */}
           {isAdmin && pendingPlayers.length > 0 && (
             <div className="rounded-[28px] border border-[#FFD23F]/40 bg-[#FFD23F]/[0.08] p-4 sm:p-5 space-y-3 shadow-xs animate-in fade-in slide-in-from-top-2 duration-400">
               <div className="flex items-center justify-between">
@@ -1079,7 +1242,10 @@ export default function PlayersPage() {
             </div>
           )}
 
-          {/* WIDOK STAŁEGO SKŁADU */}
+          {/* WIDOK STAŁEGO SKŁADU (zakładka "core") — trzy listy: Skład Główny (1-12),
+              Stała Lista Rezerwowa (13+) i Pozostali aktywni gracze do dodania. Wiersze w
+              pierwszych dwóch listach są przeciągalne (drag&drop, handleDragStart/
+              handleDragOverRow/handleDropOnRow) i mają strzałki ↑/↓ (moveCoreOrder). */}
           {statusFilter === "core" ? (
             <div className="space-y-7">
               {/* Podsumowanie — ciemna karta w stylu hero */}
@@ -1352,7 +1518,9 @@ export default function PlayersPage() {
               )}
             </div>
           ) : (
-            /* STANDARDOWA TABELA */
+            /* STANDARDOWA TABELA (zakładki Aktywni/Nieaktywni/Wszyscy w bazie) — tabela na
+               desktopie (od md:), karty na mobile. Obsługuje tryb zaznaczania
+               (isSelectionMode) z pływającym paskiem masowych akcji niżej w drzewie. */
             <div className="space-y-3">
               {isAdmin && (
                 <div className="flex items-center justify-between">
@@ -1750,7 +1918,8 @@ export default function PlayersPage() {
 
       <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
 
-      {/* MODAL DODAWANIA GRACZA */}
+      {/* MODAL DODAWANIA GRACZA — formularz (handleAddPlayer) + ekran sukcesu z hasłem
+          startowym do skopiowania (addedPlayerInfo), patrz komentarz przy handleAddPlayer. */}
       <Modal
         open={isAdding}
         onClose={closeAddPlayerModal}
@@ -1899,7 +2068,8 @@ export default function PlayersPage() {
         )}
       </Modal>
 
-      {/* MODAL HISTORII GRACZA */}
+      {/* MODAL HISTORII GRACZA — otwierany klikiem wiersza (openPlayerHistory). Dla admina
+          dodatkowo przycisk resetu hasła (handleResetPassword) na górze modala. */}
       <Modal
         open={!!selectedPlayer}
         onClose={() => setSelectedPlayer(null)}

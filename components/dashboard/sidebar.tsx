@@ -1,5 +1,34 @@
 "use client"
 
+/**
+ * Sidebar (nawigacja główna) — desktop + dolny pasek mobile
+ *
+ * Co to jest: Główna nawigacja aplikacji, wspólna dla wszystkich stron pod app/.../page.tsx.
+ * Na desktopie to stały pasek boczny po lewej; na telefonie zamienia się w stały dolny pasek
+ * zakładek (jak w Instagramie/appce bankowej) plus szufladę "Więcej" na pozycje, które się
+ * nie zmieściły. Pilnuje też liczenia "nieprzeczytanych" (czerwone kropki przy zakładkach).
+ * Renderuje: (desktop) pasek boczny z logo, listą zakładek z kolorowymi ikonami i kropkami
+ * powiadomień, oraz stopką profilu z rozwijanym menu wylogowania -> (mobile) ciemne tło
+ * nakładki gdy szuflada otwarta, ta sama zawartość paska bocznego jako wysuwana szuflada,
+ * plus stały dolny pasek 4 najważniejszych zakładek + przycisk "Więcej" otwierający szufladę.
+ * Props / kluczowe zależności: `open`/`onClose` (sterowanie szufladą z rodzica, opcjonalne —
+ * patrz uwaga niżej), `user` (sesja z localStorage, potrzebna do liczenia nieprzeczytanych
+ * i wylogowania), `onLogout`. Współpracuje z `lib/notifications.ts` (`fetchReadKeys`/
+ * `markKeysRead` — "przeczytane" trzymane w bazie), `ConfirmDialog` (potwierdzenie
+ * wylogowania), Next.js `useRouter`/`usePathname` (routing i podświetlanie aktywnej zakładki).
+ * Dane z Supabase: `notification_reads` (pośrednio, przez `lib/notifications.ts`),
+ * `matches`/`players`/`transactions`/`announcements` (tylko `id` + `created_at`, do
+ * porównania z kluczami przeczytanych i wykrycia nieprzeczytanych rekordów), Realtime
+ * subskrypcja na te 4 tabele do odświeżania kropek na żywo.
+ * Uwagi: Renderowany na każdej stronie z osobna (nie jest częścią wspólnego layoutu) —
+ * stąd lokalny stan `mobileOpen`, bo żadna z podłączonych stron faktycznie nie sterowała
+ * otwieraniem przez `open`/`onClose`. Kolejność/kolory/kropki `navItems` zasilają zarówno
+ * dolny pasek mobile, jak i szufladę "Więcej" i pełną listę desktopową, więc są zawsze
+ * spójne. Bez włączonej Supabase Realtime Replication dla tabel matches/transactions/
+ * players/announcements kropki nadal się aktualizują, tylko nie "na żywo" (dopiero przy
+ * nawigacji / odświeżeniu).
+ */
+
 import { useState, useEffect, useCallback } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { Space_Grotesk, Oswald } from "next/font/google"
@@ -38,6 +67,9 @@ const netPattern: React.CSSProperties = {
     "repeating-linear-gradient(45deg, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(-45deg, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, transparent 1px, transparent 16px)"
 }
 
+// ────────────────────────────────────────────────────────────────
+// TYP PROPS — sterowanie szufladą mobile z rodzica (opcjonalne), sesja usera i wylogowanie
+// ────────────────────────────────────────────────────────────────
 type SidebarProps = {
   open?: boolean
   onClose?: () => void
@@ -46,6 +78,10 @@ type SidebarProps = {
 }
 
 export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProps) {
+  // ────────────────────────────────────────────────────────────────
+  // STAN KOMPONENTU — routing, rozwinięte menu profilu, modal potwierdzenia, otwarcie
+  // szuflady mobile oraz cztery flagi "nieprzeczytane" (po jednej na zakładkę z odznaką)
+  // ────────────────────────────────────────────────────────────────
   const router = useRouter()
   const pathname = usePathname()
   const [profileOpen, setProfileOpen] = useState(false)
@@ -68,6 +104,10 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
     onClose?.()
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // LICZENIE NIEPRZECZYTANYCH — dla każdej zakładki (poza tą aktywną) sprawdza czy w bazie
+  // jest rekord, którego klucza nie ma jeszcze w `notification_reads`
+  // ────────────────────────────────────────────────────────────────
   // "Przeczytane" żyje w bazie (notification_reads), nie w localStorage — patrz
   // lib/notifications.ts. Wcześniej te same klucze co dzwoneczek trzymał osobno tu
   // (volley_read_matches itp.), więc telefon i komputer miały niezsynchronizowane
@@ -117,6 +157,10 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
     }
   }, [checkUnreadBadges])
 
+  // ────────────────────────────────────────────────────────────────
+  // REALTIME — nasłuch na żywo (Supabase Realtime) na zmiany w 4 tabelach zasilających
+  // odznaki, żeby kropki aktualizowały się bez przeładowania strony
+  // ────────────────────────────────────────────────────────────────
   // Nasłuch na żywo (Supabase Realtime) — gdy ktoś inny doda mecz, wpłatę, ogłoszenie albo
   // zgłosi się jako nowy zawodnik, wszyscy podłączeni klienci od razu przeliczają kropki/
   // dzwonek, bez przeładowania strony. Wymaga włączonej Replication dla tabel matches/
@@ -144,6 +188,10 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
     }
   }, [])
 
+  // ────────────────────────────────────────────────────────────────
+  // NAWIGACJA I WYLOGOWANIE — klik w zakładkę (routing + oznaczanie jako przeczytane)
+  // oraz wylogowanie z potwierdzeniem
+  // ────────────────────────────────────────────────────────────────
   // Gdy wchodzisz w zakładkę, natychmiast oznacza jej WSZYSTKIE rekordy jako odczytane
   // Nawigacja MUSI ruszyć natychmiast — wcześniej `router.push` czekał (await) na dwa
   // kolejne zapytania do Supabase (odczyt ID + zapis "przeczytane"), więc każde kliknięcie
@@ -197,6 +245,10 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
     router.push("/login")
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // KONFIGURACJA POZYCJI MENU — lista zakładek (ikona, kolor, odznaka), podział na dolny
+  // pasek mobile vs szufladę "Więcej" oraz dane profilu do wyświetlenia w stopce
+  // ────────────────────────────────────────────────────────────────
   // Każda sekcja ma swój kolor akcentu — ożywia listę i przyspiesza rozpoznawanie zakładek
   const navItems = [
     { href: "/", label: "Mecze", shortLabel: "Mecze", icon: Calendar, hasDot: unreadMatches, color: COBALT },
@@ -225,6 +277,7 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
 
   return (
     <>
+      {/* NAKŁADKA MOBILE — przyciemnia tło pod wysuniętą szufladą, klik zamyka sidebar */}
       {isOpen && (
         <div
           className="fixed inset-0 z-40 bg-[#0B1120]/70 backdrop-blur-sm lg:hidden animate-in fade-in duration-200"
@@ -232,6 +285,9 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
         />
       )}
 
+      {/* SIDEBAR DESKTOP / SZUFLADA MOBILE — na desktopie stały pasek boczny (lg:sticky),
+          na telefonie wysuwana szuflada sterowana `isOpen` (translate-x). Zawiera logo,
+          listę zakładek (nav) i stopkę z profilem/wylogowaniem. */}
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex h-screen w-64 flex-col justify-between border-r border-white/10 text-slate-100 transition-transform duration-300 overflow-hidden lg:sticky lg:top-0 lg:translate-x-0",
@@ -243,6 +299,7 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
         <div className="absolute inset-0 pointer-events-none opacity-60" style={netPattern} />
 
         <div className="relative flex flex-col min-h-0">
+          {/* Logo i nazwa appki + przycisk zamknięcia szuflady (widoczny tylko na mobile) */}
           <div className="flex h-16 items-center justify-between px-6 border-b border-white/10 shrink-0">
             <div className="flex items-center gap-3 group min-w-0">
               <img src="/logo.png" alt="ESCO VolleyManager" className="h-9 w-9 shrink-0 rounded-xl shadow-md shadow-[#2C4BFF]/30" />
@@ -259,6 +316,8 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
             </button>
           </div>
 
+          {/* LISTA ZAKŁADEK — pełna lista z navItems; na mobile pozycje z dolnego paska są
+              ukryte tutaj (duplikat), na desktopie widoczne są wszystkie */}
           <nav className="space-y-1.5 p-4 overflow-y-auto">
             {navItems.map((item, idx) => {
               const isActive = pathname === item.href
@@ -298,6 +357,7 @@ export function Sidebar({ open: openProp, onClose, user, onLogout }: SidebarProp
           </nav>
         </div>
 
+        {/* STOPKA PROFILU — awatar (inicjał), imię/rola i rozwijane menu z wylogowaniem */}
         <div className="relative p-3 border-t border-white/10 bg-black/10 shrink-0">
           {profileOpen && (
             <div className="mb-2 space-y-1 rounded-2xl border border-white/10 bg-[#121B33] p-2 shadow-xl animate-in fade-in slide-in-from-bottom-1 duration-150">

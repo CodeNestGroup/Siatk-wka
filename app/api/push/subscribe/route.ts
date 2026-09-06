@@ -1,3 +1,14 @@
+/**
+ * POST/DELETE /api/push/subscribe — zapisywanie i usuwanie subskrypcji push
+ *
+ * Co to jest: endpoint API zarządzający subskrypcjami Web Push w tabeli `push_subscriptions`
+ * (jeden rekord = jedno urządzenie/przeglądarka jednego gracza).
+ * Eksportuje / robi: POST — zapisuje/aktualizuje subskrypcję (upsert po `endpoint`) dla danego
+ * `playerId`; DELETE — usuwa subskrypcję po `endpoint` (np. przy wyłączeniu powiadomień).
+ * Używany przez: `lib/push.ts` (`subscribeToPush`/`unsubscribeFromPush`), wywoływane z ustawień
+ * powiadomień gracza w przeglądarce.
+ * Uwagi: `endpoint` jest unikalny per przeglądarka, stąd upsert po nim — patrz komentarz niżej.
+ */
 import { NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
 

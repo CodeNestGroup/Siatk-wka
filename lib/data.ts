@@ -1,3 +1,18 @@
+/**
+ * Dane meczów i graczy — typy + pobieranie z Supabase + funkcje pomocnicze
+ *
+ * Co to jest: centralny moduł danych domenowych apki — definiuje typy Match/Player i dostarcza
+ * zarówno pobieranie danych z bazy (mecze, transakcje, salda graczy), jak i czyste funkcje
+ * pomocnicze liczące roster/listę rezerwową/płatności na podstawie tych typów.
+ * Eksportuje / robi: getMatches (pobiera mecze wraz z zapisami i graczami z Supabase i mapuje je
+ * na typ Match), getTransactions, getPlayerBalances oraz funkcje pomocnicze: isMatchCancelled,
+ * mainRoster, waitlist, paidCount, collected, expected, formatDate, formatWeekday.
+ * Używany przez: praktycznie wszystkie widoki związane z meczami, składem, płatnościami i
+ * finansami (dashboard, lista meczów, szczegóły meczu, panel admina).
+ * Uwagi: funkcje pomocnicze są napisane defensywnie (obsługują zarówno `match.players`, jak i
+ * starsze `match.registrations`, oraz zarówno `p.paid`, jak i `p.is_paid`) — patrz komentarze
+ * przy poszczególnych funkcjach.
+ */
 import { supabase } from './supabase'
 
 export type PlayerStatus = "main" | "waitlist"
@@ -29,6 +44,9 @@ export type Match = {
 // ------------------------------------------------------------------
 // POBIERANIE DANYCH Z BAZY SUPABASE
 // ------------------------------------------------------------------
+// Pobiera wszystkie mecze wraz z zapisami i danymi graczy, mapuje surowy wynik Supabase na typ
+// Match (dolicza status upcoming/past, sortuje graczy wg kolejności zapisu). Zwraca pustą
+// tablicę przy błędzie zapytania.
 export async function getMatches(): Promise<Match[]> {
   const { data: supabaseMatches, error } = await supabase
     .from('matches')
@@ -111,30 +129,37 @@ export function isMatchCancelled(m: any): boolean {
   return m.status_id === 4 || !!m.matches_status?.name?.toLowerCase().includes("odwoł")
 }
 
+// Pierwszych `capacity` zapisanych graczy — właściwy skład meczu.
 export function mainRoster(match: Match): Player[] {
   const playersList = match.players || match.registrations || []
   return playersList.slice(0, match.capacity)
 }
 
+// Gracze zapisani po wyczerpaniu miejsc (powyżej `capacity`) — lista rezerwowa.
 export function waitlist(match: Match): Player[] {
   const playersList = match.players || match.registrations || []
   return playersList.slice(match.capacity)
 }
 
+// Liczba graczy z głównego składu, którzy już zapłacili.
 export function paidCount(match: Match): number {
   return mainRoster(match).filter((p: any) => p.paid || p.is_paid).length
 }
 
+// Suma wpłat już zebranych od graczy z głównego składu (per gracz liczy jego `fee`,
+// z fallbackiem na stawkę meczu, gdy gracz nie ma własnej).
 export function collected(match: Match): number {
   return mainRoster(match)
     .filter((p: any) => p.paid || p.is_paid)
     .reduce((sum, p: any) => sum + (p.fee || match.fee || 0), 0)
 }
 
+// Suma wpłat oczekiwanych od CAŁEGO głównego składu (niezależnie od tego, czy już zapłacili).
 export function expected(match: Match): number {
   return mainRoster(match).reduce((sum, p: any) => sum + (p.fee || match.fee || 0), 0)
 }
 
+// Formatuje datę ISO (rrrr-mm-dd) na czytelny format "dd Mon rrrr" (np. "05 Sep 2026").
 export function formatDate(iso: string): string {
   if (!iso) return ""
   const d = new Date(iso + "T00:00:00")
@@ -145,6 +170,7 @@ export function formatDate(iso: string): string {
   })
 }
 
+// Zwraca nazwę dnia tygodnia (pełną, po angielsku) dla podanej daty ISO.
 export function formatWeekday(iso: string): string {
   if (!iso) return ""
   const d = new Date(iso + "T00:00:00")
@@ -153,6 +179,7 @@ export function formatWeekday(iso: string): string {
 
 // Dodaj te funkcje na końcu pliku lib/data.ts
 
+// Pobiera wszystkie transakcje z bazy (najnowsze pierwsze). Zwraca pustą tablicę przy błędzie.
 export async function getTransactions() {
   const { data, error } = await supabase
     .from('transactions')
@@ -166,6 +193,8 @@ export async function getTransactions() {
   return data || []
 }
 
+// Pobiera salda/nadpłaty graczy z widoku `player_balances`, posortowane alfabetycznie
+// po imieniu. Zwraca pustą tablicę przy błędzie.
 export async function getPlayerBalances() {
   const { data, error } = await supabase
     .from('player_balances')

@@ -1,5 +1,37 @@
 "use client"
 
+/**
+ * Ustawienia i Preferencje (/settings)
+ *
+ * Co to jest: Strona łącząca profil zawodnika (dawniej osobna strona /profile) z ustawieniami
+ * konta w jedną zakładkę — edycja danych osobowych, zgody na powiadomienia push, zmiana hasła,
+ * eksport własnych statystyk do CSV oraz (tylko dla admina) zablokowana na razie sekcja
+ * rozliczeń/wpisowego.
+ * Renderuje: header z dzwoneczkiem powiadomień i (na desktopie) przyciskiem "Postaw kawę" ->
+ * karta profilowa w stylu "biletu" (inicjały, rola, e-mail) -> trzy kafelki szybkich statystyk
+ * (status w zespole, rozegrane mecze, data dołączenia) -> formularz danych profilowych ->
+ * sekcja powiadomień push -> (tylko admin) wyszarzona sekcja "Rozliczenia i Wpisowe" (Wkrótce)
+ * -> formularz zmiany hasła -> informacje systemowe (UUID, rola) -> eksport CSV -> toast
+ * potwierdzeń.
+ * Kluczowe zależności: `Sidebar`, `NotificationsBell`, `SupportModal` ("Postaw kawę"),
+ * `lib/push` (`isPushSupported`, `getExistingPushSubscription`, `subscribeToPush`,
+ * `unsubscribeFromPush` — rejestracja urządzenia w Web Push), `lib/supabase` (RPC
+ * `set_player_password`, tabele `players`/`match_registrations`/`matches`).
+ * Dane z Supabase: tabela `players` (`phone`, `created_at`, `player_status_id`, `full_name`,
+ * `email` — odczyt i zapis przy edycji profilu), `match_registrations` (`match_id`,
+ * `player_id`, `is_paid` — do liczenia rozegranych meczów i eksportu CSV), `matches` (`id`,
+ * `date`, `status_id`, `is_settled`, `price_per_player` — do wyznaczenia, które mecze są
+ * "rozegrane" i ile kosztowały), RPC `set_player_password(player_id, new_password)` (hasło
+ * hashowane automatycznie triggerem w bazie, patrz supabase/password-hashing-migration.sql).
+ * Uwagi: Autoryzacja jest własna (bez Supabase Auth) — sesja to obiekt w localStorage pod
+ * kluczem `volley_user`. `isAdmin` sprawdza `email === "admin@admin.pl" || role === "admin" ||
+ * is_admin || role_id === 1`. Dane do wpłat BLIK/konto bankowe w sekcji admina trzymane
+ * tymczasowo w localStorage (`volley_blik_display`, `volley_bank_account`) — świadomie
+ * prowizoryczne rozwiązanie do czasu decyzji o realnym module rozliczeń, pola są `disabled`.
+ * Definicja "mecz rozegrany" musi być identyczna jak w app/stats/page.tsx (patrz komentarz
+ * przy `playedMatchesCount` niżej) — inaczej liczniki na obu stronach się rozjadą.
+ */
+
 import { useState, useEffect } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
 import {
@@ -55,6 +87,11 @@ export default function SettingsPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [showSupportModal, setShowSupportModal] = useState(false)
 
+  // ────────────────────────────────────────────────────────────────
+  // POWIADOMIENIA PUSH — stan zgody przeglądarki + handler włącz/wyłącz. Realna wersja
+  // dawnych martwych przełączników "Kanałów Powiadomień" — faktycznie rejestruje/wyrejestrowuje
+  // urządzenie w Web Push (lib/push.ts).
+  // ────────────────────────────────────────────────────────────────
   // Powiadomienia push — "checking" dopóki nie sprawdzimy realnego stanu przeglądarki,
   // żeby nie mrugnąć złym przyciskiem na ułamek sekundy przy pierwszym renderze.
   const [pushStatus, setPushStatus] = useState<"checking" | "unsupported" | "denied" | "enabled" | "disabled">("checking")
@@ -91,6 +128,10 @@ export default function SettingsPage() {
     setIsTogglingPush(false)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // STAN PROFILU I KARTY PROFILOWEJ — dane osobowe do formularza edycji oraz liczby
+  // wyświetlane na karcie-bilecie i kafelkach statystyk (dociągane z bazy w useEffect niżej).
+  // ────────────────────────────────────────────────────────────────
   // Stany profilowe
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
@@ -103,17 +144,31 @@ export default function SettingsPage() {
   const [playerStatusId, setPlayerStatusId] = useState<number | null>(null)
   const [playedMatchesCount, setPlayedMatchesCount] = useState<number | null>(null)
 
+  // ────────────────────────────────────────────────────────────────
+  // STAN BEZPIECZEŃSTWA — pola formularza zmiany hasła (handleChangePassword niżej).
+  // ────────────────────────────────────────────────────────────────
   // Stany bezpieczeństwa
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [passwordError, setPasswordError] = useState<string | null>(null)
 
+  // ────────────────────────────────────────────────────────────────
+  // STAN DANYCH DO WPŁAT (TYLKO ADMIN, TYMCZASOWE) — wartości domyślne, nadpisywane w
+  // useEffect niżej danymi z localStorage. Pola w JSX są `disabled` (sekcja "Wkrótce"),
+  // to jedynie dane zasilające modal "Postaw kawę", nie prawdziwy moduł rozliczeń.
+  // ────────────────────────────────────────────────────────────────
   // Stany płatności (dla admina)
   const [blikNumber, setBlikNumber] = useState("+48 600 000 000")
   const [bankAccount, setBankAccount] = useState("12 3456 7890 0000 1111 2222 3333")
 
   const passwordRegex = /^(?=.*[A-Z])(?=.*[!@#$&*]).{6,}$/
 
+  // ────────────────────────────────────────────────────────────────
+  // POBIERANIE DANYCH UŻYTKOWNIKA — sesja z localStorage (fallback: Supabase Auth, na wypadek
+  // starszych sesji), doczytanie świeższych danych zawodnika z `players` oraz wyliczenie
+  // liczby faktycznie rozegranych meczów na podstawie `match_registrations` + `matches`.
+  // Osobno wczytuje tymczasowe dane BLIK/konto z localStorage (sekcja admina).
+  // ────────────────────────────────────────────────────────────────
   useEffect(() => {
     async function loadUserData() {
       const localUser = localStorage.getItem("volley_user")
@@ -179,6 +234,10 @@ export default function SettingsPage() {
     if (savedBank) setBankAccount(savedBank)
   }, [])
 
+  // ────────────────────────────────────────────────────────────────
+  // FUNKCJE POMOCNICZE — toast z komunikatem (auto-znika po 3.5s) i wylogowanie (czyści
+  // localStorage/sessionStorage, wywołuje signOut dla porządku i przekierowuje na /login).
+  // ────────────────────────────────────────────────────────────────
   function showNotify(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(null), 3500)
@@ -192,6 +251,11 @@ export default function SettingsPage() {
     window.location.href = "/login"
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // ZAPIS PROFILU ZAWODNIKA — aktualizuje `full_name`/`email`/`phone` w tabeli `players` i
+  // odświeża lokalną kopię sesji (localStorage["volley_user"]), żeby zmiana była widoczna
+  // od razu w całej appce (np. w Sidebarze) bez przelogowania.
+  // ────────────────────────────────────────────────────────────────
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault()
     if (!user) return
@@ -210,6 +274,11 @@ export default function SettingsPage() {
     showNotify("Zapisano dane zawodnika!")
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // ZMIANA HASŁA — walidacja po stronie klienta (zgodność powtórzonego hasła + regex
+  // wymogów), a samo hashowanie i zapis idzie przez RPC `set_player_password` (hash liczony
+  // triggerem w bazie, przeglądarka nigdy nie widzi hasha).
+  // ────────────────────────────────────────────────────────────────
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault()
     setPasswordError(null)
@@ -239,6 +308,11 @@ export default function SettingsPage() {
     }
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // EKSPORT WŁASNYCH DANYCH DO CSV — liczy własne rozegrane mecze i sumę wpłat na podstawie
+  // `match_registrations` + cen z `matches`, generuje plik .csv w przeglądarce (Blob +
+  // link.download) i od razu go pobiera, bez zapisywania czegokolwiek po stronie serwera.
+  // ────────────────────────────────────────────────────────────────
   async function exportMyData() {
     if (!user) return
 
@@ -268,6 +342,10 @@ export default function SettingsPage() {
     showNotify("Pobrano plik z Twoimi statystykami!")
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // WYLICZENIA POCHODNE DO RENDERU — rola użytkownika, wyświetlana nazwa i inicjały na kartę
+  // profilową, status "aktywny gracz" oraz etykieta miesiąca/roku dołączenia do klubu.
+  // ────────────────────────────────────────────────────────────────
   const isAdmin = user?.email === "admin@admin.pl" || user?.role === "admin" || user?.is_admin || user?.role_id === 1
 
   const displayName = user?.full_name || user?.name || (user?.email === "admin@admin.pl" ? "Mateusz Podzorski" : user?.email) || "Użytkownik"

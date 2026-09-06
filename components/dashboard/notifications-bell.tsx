@@ -1,11 +1,40 @@
 "use client"
 
+/**
+ * Dzwoneczek powiadomień w nagłówku
+ *
+ * Co to jest: Przycisk-dzwonek w nagłówku strony z listą ostatnich wydarzeń w klubie
+ * (nowe/zmienione mecze, nowe wpłaty/wydatki, nowe ogłoszenia), które użytkownik jeszcze
+ * nie widział. Kliknięcie w pozycję oznacza ją jako przeczytaną i (opcjonalnie) przekazuje
+ * ją dalej przez `onNotificationClick` (np. do otwarcia szczegółów meczu).
+ * Renderuje: przycisk dzwonka z czerwoną odznaką liczby nieprzeczytanych -> po kliknięciu
+ * rozwijany panel z listą (ikona wg typu, tytuł, opis, godzina) i przyciskiem "Odczytaj
+ * wszystkie".
+ * Props / kluczowe zależności: `playerId` (id zalogowanego usera — bez niego komponent nic
+ * nie pobiera), `onNotificationClick` (callback do np. otwarcia modala szczegółów meczu ze
+ * strony głównej). Współpracuje z `lib/notifications.ts` (`fetchReadKeys`/`markKeysRead`)
+ * i nasłuchuje globalnego eventu `update-badges` (ten sam, którego używa `Sidebar`), żeby
+ * odświeżyć listę po akcji gdzie indziej w appce.
+ * Dane z Supabase: `matches`, `transactions`, `announcements` (po 20 najnowszych z każdej,
+ * sortowane po `created_at`) — każdy rekord dostaje klucz (`match-<id>`, `tx-<id>`,
+ * `announcement-<id>`) porównywany z zestawem przeczytanych z `notification_reads`.
+ * Uwagi: "Przeczytane" trzymane jest w bazie (tabela `notification_reads`), NIE w
+ * localStorage — dzięki temu licznik jest spójny między telefonem a komputerem tego
+ * samego użytkownika. `unreadCount` to po prostu długość listy `notifications`, bo lista
+ * i tak zawiera wyłącznie nieprzeczytane pozycje (przeczytane są odfiltrowane już przy
+ * pobieraniu).
+ */
+
 import { useState, useEffect } from "react"
 import { Bell, Calendar, Wallet, Megaphone, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { fetchReadKeys, markKeysRead } from "@/lib/notifications"
 import { formatDatePL } from "@/lib/utils"
 
+// ────────────────────────────────────────────────────────────────
+// TYP DANYCH — ujednolicony kształt pozycji na liście, niezależnie czy pochodzi z
+// meczów, transakcji czy ogłoszeń
+// ────────────────────────────────────────────────────────────────
 export type NotificationItem = {
   id: string
   dbId: string
@@ -17,6 +46,10 @@ export type NotificationItem = {
   created_at?: string
 }
 
+// ────────────────────────────────────────────────────────────────
+// KOMPONENT — stan (otwarcie panelu, lista) i pobranie danych przy montowaniu oraz na
+// żądanie odświeżenia (event "update-badges")
+// ────────────────────────────────────────────────────────────────
 // "Przeczytane" żyje teraz w bazie (tabela notification_reads), nie w localStorage —
 // patrz lib/notifications.ts po wyjaśnienie dlaczego to wcześniej dawało błędne liczniki
 // (np. "+40 znowu przy kolejnym logowaniu"), niezsynchronizowane między telefonem a komputerem.
@@ -39,6 +72,10 @@ export function NotificationsBell({
     return () => window.removeEventListener("update-badges", handleRefresh)
   }, [playerId])
 
+  // ────────────────────────────────────────────────────────────────
+  // POBIERANIE DANYCH — po 20 ostatnich rekordów z matches/transactions/announcements,
+  // odfiltrowanie tych już przeczytanych (fetchReadKeys) i posortowanie po dacie malejąco
+  // ────────────────────────────────────────────────────────────────
   async function fetchRecentNotifications() {
     if (!playerId) return
     const readKeys = await fetchReadKeys(playerId)
@@ -108,6 +145,9 @@ export function NotificationsBell({
     setNotifications(list)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // OZNACZANIE JAKO PRZECZYTANE — pojedyncza pozycja (klik) lub cała lista naraz
+  // ────────────────────────────────────────────────────────────────
   async function markAsRead(item: NotificationItem) {
     if (!playerId) return
     setNotifications((prev) => prev.filter((n) => n.id !== item.id))
@@ -127,6 +167,7 @@ export function NotificationsBell({
 
   return (
     <div className="relative">
+      {/* PRZYCISK DZWONKA — otwiera/zamyka panel, czerwona odznaka pokazuje liczbę nieprzeczytanych */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="relative rounded-2xl border border-slate-200 bg-white p-2.5 text-slate-500 hover:bg-slate-50 transition-colors shadow-sm cursor-pointer"
@@ -141,6 +182,7 @@ export function NotificationsBell({
         )}
       </button>
 
+      {/* PANEL ROZWIJANY — nagłówek z licznikiem i "Odczytaj wszystkie", niżej lista pozycji */}
       {isOpen && (
         <div className="absolute right-0 mt-3 w-80 rounded-3xl border border-slate-200 bg-white p-4 shadow-2xl z-50 space-y-3 text-slate-900">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
@@ -168,6 +210,8 @@ export function NotificationsBell({
             </div>
           </div>
 
+          {/* LISTA POWIADOMIEŃ — ikona wg typu (mecz/finanse/ogłoszenie), klik = oznacz jako
+              przeczytane + wywołaj onNotificationClick */}
           <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
             {unreadCount === 0 ? (
               <p className="py-6 text-center text-xs font-medium text-slate-400">Brak nowych powiadomień.</p>

@@ -1,3 +1,15 @@
+/**
+ * Stan "przeczytane" dla powiadomień (dzwonek + kropki w pasku bocznym)
+ *
+ * Co to jest: pomocnicze funkcje do systemu "przeczytanych" powiadomień, trzymanego w bazie
+ * per gracz.
+ * Eksportuje / robi: fetchReadKeys (pobiera zbiór kluczy już przeczytanych pozycji danego
+ * gracza), markKeysRead (oznacza podane klucze jako przeczytane — upsert).
+ * Używany przez: dzwoneczek powiadomień i kropki "nowe" w bocznym pasku nawigacji.
+ * Uwagi: wcześniej stan ten trzymano osobno w localStorage na urządzenie — patrz komentarz
+ * niżej, dlaczego to było problematyczne i dlaczego teraz jest to jedno wspólne źródło
+ * prawdy w bazie.
+ */
 import { supabase } from "@/lib/supabase"
 
 // Wspólne "co już widziałem" dla dzwoneczka i kropek w bocznym pasku — wcześniej każdy

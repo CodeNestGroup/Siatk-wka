@@ -1,5 +1,35 @@
 "use client"
 
+/**
+ * Statystyki Zespołu (/stats)
+ *
+ * Co to jest: Strona z podsumowaniem sezonu — frekwencją, terminowością wpłat i rankingiem
+ * aktywności zawodników, wyliczanym w całości po stronie klienta na podstawie surowych danych
+ * z Supabase (bez osobnego widoku/RPC agregującego w bazie).
+ * Renderuje: pasek sponsorów z marquee + dzwoneczek powiadomień -> hero "Lider Frekwencji
+ * Sezonu" z podium TOP 3 (placeholder, jeśli sezon jeszcze się nie zaczął) -> karta "Twoja
+ * frekwencja" (tylko gdy zalogowany zawodnik ma już jakieś statystyki) -> trzy kafelki
+ * podsumowania (rozegrane sesje, średnia frekwencja, wpłacalność składek) -> tabela rankingu
+ * (widok tabelaryczny od md w górę, karty na mobile z opcją "Pokaż cały ranking") z
+ * wyszukiwarką odporną na literówki/polskie znaki.
+ * Kluczowe zależności: `Sidebar`, `NotificationsBell`, `SupportModal` ("Postaw kawę"),
+ * `fuzzySearchMatch`/`normalizeSearchText` z lib/utils (wyszukiwarka w tabeli graczy),
+ * lokalny komponent `CountUp` (płynna animacja liczników liczb na kafelkach).
+ * Dane z Supabase: `matches` (`*` — w tym `date`, `status_id`, `is_settled`, potrzebne do
+ * ustalenia, czy mecz się już odbył), `players` (jawna lista kolumn bez `password` — patrz
+ * supabase/harden-anon-access.sql), `match_registrations` (`match_id`, `player_id`,
+ * `is_paid`/`paid` — kto grał i czy zapłacił za konkretny mecz). Zapis meczu z listą graczy
+ * budowany jest ręcznie przez złączenie tych trzech zapytań w `loadStatsData` — tabela
+ * `matches` sama w sobie nie ma kolumny `players`.
+ * Uwagi: Definicja "mecz rozegrany" (`completedMatches`) MUSI być identyczna jak na stronie
+ * głównej (app/page.tsx: `isMatchPast`) i w app/settings/page.tsx (`playedMatchesCount`) —
+ * to nie `status_id === 3`/`is_settled`, tylko data w przeszłości LUB jedna z tych dwóch flag
+ * (a mecz odwołany, `status_id === 4`, nigdy się nie liczy). Rozjazd tej definicji między
+ * stronami objawiał się kiedyś jako "sezon się nie zaczął" mimo realnie odbytych meczów.
+ * Autoryzacja jest własna (bez Supabase Auth) — sesja w localStorage pod kluczem
+ * `volley_user`; strona nie ma trybu dla niezalogowanych (`if (!user) return null`).
+ */
+
 import { useState, useEffect, useMemo, useRef } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
 import {
@@ -50,6 +80,10 @@ const sponsors: { code: string; name: string; color: string; logo?: string }[] =
   { code: "+", name: "Zostań Sponsorem", color: YELLOW },
 ]
 
+// ────────────────────────────────────────────────────────────────
+// KOMPONENT POMOCNICZY CountUp — animowane "dobijanie" liczby do wartości docelowej na
+// kafelkach statystyk (ease-out, ~700ms), zamiast sztywnego przeskoku liczby po załadowaniu.
+// ────────────────────────────────────────────────────────────────
 // Płynne podliczanie liczb — ten sam komponent co na pozostałych stronach
 function CountUp({ value, decimals = 0 }: { value: number; decimals?: number }) {
   const [displayValue, setDisplayValue] = useState(value)
@@ -89,6 +123,11 @@ function CountUp({ value, decimals = 0 }: { value: number; decimals?: number }) 
 }
 
 export default function StatsPage() {
+  // ────────────────────────────────────────────────────────────────
+  // STAN PODSTAWOWY — sidebar, sesja użytkownika, wyszukiwarka rankingu, rozwinięcie pełnej
+  // listy na mobile, stan ładowania oraz surowe dane z Supabase (matches/players) do dalszych
+  // wyliczeń statystyk niżej.
+  // ────────────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [searchTerm, setSearchTerm] = useState("")
@@ -102,6 +141,10 @@ export default function StatsPage() {
   const [matches, setMatches] = useState<any[]>([])
   const [players, setPlayers] = useState<any[]>([])
 
+  // ────────────────────────────────────────────────────────────────
+  // INICJALIZACJA — odczyt sesji z localStorage (bez tego brak `user` blokuje render na
+  // końcu komponentu) i start pobierania danych statystycznych z Supabase.
+  // ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
     if (localUser) {
@@ -113,6 +156,11 @@ export default function StatsPage() {
     loadStatsData()
   }, [])
 
+  // ────────────────────────────────────────────────────────────────
+  // POBIERANIE DANYCH Z SUPABASE — trzy równoległe zapytania (matches/players/
+  // match_registrations), ręcznie złączone w JS, bo tabela `matches` nie ma kolumny
+  // `players` — skład każdego meczu doklejany jest z osobnej tabeli rejestracji.
+  // ────────────────────────────────────────────────────────────────
   // Poprawione pobieranie z bazy uwzględniające relacje w Supabase (match_registrations)
   async function loadStatsData() {
     setIsLoading(true)
@@ -148,6 +196,10 @@ export default function StatsPage() {
     setIsLoading(false)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // WYLOGOWANIE — czyści lokalną sesję i przekierowuje na /login (ten sam wzorzec co w
+  // pozostałych stronach dashboardu, np. app/settings/page.tsx).
+  // ────────────────────────────────────────────────────────────────
   async function handleLogout() {
     localStorage.removeItem("volley_user")
     sessionStorage.clear()
@@ -156,6 +208,10 @@ export default function StatsPage() {
     window.location.href = "/login"
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // DEFINICJA MECZU ROZEGRANEGO — filtr `completedMatches` to fundament wszystkich statystyk
+  // na tej stronie (frekwencja, ranking, wpłacalność liczą się TYLKO z tego zbioru).
+  // ────────────────────────────────────────────────────────────────
   // Zliczanie statystyk z meczów rozegranych — ta sama definicja "rozegrany" co na stronie
   // głównej (app/page.tsx: isMatchPast). Samo `status_id === 3`/`is_settled` nie wystarczało:
   // admin rzadko ręcznie oznacza mecz jako rozegrany/rozliczony, więc realnie o tym decyduje
@@ -171,6 +227,12 @@ export default function StatsPage() {
 
   const totalMatches = completedMatches.length
 
+  // ────────────────────────────────────────────────────────────────
+  // AGREGACJA STATYSTYK GRACZY — buduje ranking (liczba meczów, opłacone/nieopłacone) na
+  // podstawie składów z `completedMatches`. Gracze bez żadnego rozegranego meczu i tak
+  // trafiają do mapy (zainicjowani z listy `players`), żeby istnieli w rankingu z zerem.
+  // "Główny Admin" jest świadomie wykluczony z rankingu (to nie prawdziwy zawodnik).
+  // ────────────────────────────────────────────────────────────────
   const playerStats = useMemo(() => {
     const statsMap: Record<string, { name: string; matches: number; paidCount: number; unpaidCount: number }> = {}
 
@@ -204,6 +266,10 @@ export default function StatsPage() {
     return Object.values(statsMap).sort((a, b) => b.matches - a.matches)
   }, [completedMatches, players])
 
+  // ────────────────────────────────────────────────────────────────
+  // LIDER, PODIUM I WŁASNA POZYCJA — dane pod hero na górze strony (lider + TOP 3) oraz pod
+  // kartę "Twoja frekwencja" (pozycja i procent udziału zalogowanego zawodnika w rankingu).
+  // ────────────────────────────────────────────────────────────────
   const topPlayer = playerStats[0] || { name: "Brak danych", matches: 0 }
   const podium = playerStats.slice(0, 3)
 
@@ -224,6 +290,11 @@ export default function StatsPage() {
   const myRank = myStats ? playerStats.findIndex((p) => p.name === myStats.name) + 1 : null
   const myParticipationRate = myStats && totalMatches > 0 ? Math.round((myStats.matches / totalMatches) * 100) : 0
 
+  // ────────────────────────────────────────────────────────────────
+  // WSKAŹNIKI ZBIORCZE — średnia liczba graczy na mecz i procent opłaconych wpisów, oba
+  // liczone ze wszystkich wpisów do składu w `completedMatches` (nie tylko z rankingu graczy).
+  // Zasilają kafelki "Średnia Frekwencja" i "Wpłacalność Składek".
+  // ────────────────────────────────────────────────────────────────
   const totalRosterEntries = completedMatches.reduce((acc, m) => acc + (Array.isArray(m.players) ? m.players.length : 0), 0)
   const avgAttendance = totalMatches > 0 ? (totalRosterEntries / totalMatches) : 0
 
@@ -235,6 +306,10 @@ export default function StatsPage() {
   }, 0)
   const paymentRate = totalRosterEntries > 0 ? Math.round((totalPaidEntries / totalRosterEntries) * 100) : 0
 
+  // ────────────────────────────────────────────────────────────────
+  // WYSZUKIWARKA I SKRÓCONA LISTA NA MOBILE — filtrowanie rankingu odporne na literówki/
+  // polskie znaki (fuzzySearchMatch) oraz obcięcie długiej listy na telefonie do czołówki.
+  // ────────────────────────────────────────────────────────────────
   const filteredPlayerStats = playerStats.filter((p) =>
     fuzzySearchMatch(normalizeSearchText(p.name).split(/[^a-z0-9]+/).filter(Boolean), searchTerm)
   )

@@ -1,5 +1,43 @@
 "use client"
 
+/**
+ * Strona główna (Dashboard) — harmonogram meczów
+ *
+ * Co to jest: Główny widok aplikacji, wyświetlany po zalogowaniu pod adresem "/". To tutaj
+ * gracz i admin spędzają najwięcej czasu — hero z najbliższym meczem, tablica wyników sezonu,
+ * pełny harmonogram meczów z wyszukiwarką/filtrami oraz wszystkie akcje administracyjne
+ * (tworzenie/odwoływanie/usuwanie meczów, zaznaczanie wsadowe) i gracza (zapis na urlop/
+ * nieobecność, podgląd szczegółów meczu).
+ * Renderuje: sidebar + nagłówek z dzwoneczkiem i banerem "Postaw kawę" -> baner sponsora ->
+ * hero "bilet na najbliższy mecz" połączony perforacją z tablicą wyników sezonu -> pasek
+ * przypiętego ogłoszenia -> pasek akcji (urlop / zarządzaj / nowy mecz) + wyszukiwarka i
+ * zakładki filtra -> lista meczów (karty-bilety) -> pływający pasek akcji wsadowych ->
+ * modale (urlop, tworzenie meczu, szczegóły meczu, potwierdzenie, wsparcie) + toast.
+ * Kluczowe zależności: `MatchDetail` (modal szczegółów/składu meczu, współdzieli z tym
+ * plikiem logikę `isMatchCancelled`), `Sidebar`, `NotificationsBell` (dzwoneczek, liczy
+ * nieprzeczytane na podstawie danych z bazy), `SupportModal`, `ConfirmDialog` (zastępuje
+ * natywny confirm()), `lib/data.ts` (typ `Match`, `mainRoster`/`waitlist` — podział składu
+ * głównego/rezerwy po `capacity`, `isMatchCancelled`), `lib/utils.ts` (`fuzzySearchMatch`,
+ * `normalizeSearchText`, `formatDatePL`, `addMatchToCalendar`), `lib/push.ts` (`notifyPush`
+ * — powiadomienia push przy tworzeniu nowych meczów), `lib/supabase.ts` (klient PostgREST).
+ * Dane z Supabase: `players` (jawna lista kolumn bez `password`; `is_core_roster`/`core_order`/
+ * `core_added_at` do sortowania stałego składu, `player_status_id` do filtrowania aktywnych),
+ * `matches` (`date`, `time_start`, `time_end`, `location`, `price_per_player`, `capacity`/
+ * `max_players`, `status_id`, `is_settled`, `title`) z joinem `matches_status(id, name)`,
+ * `match_registrations` (`match_id`, `player_id`, `is_paid`, `created_at` — kolejność zapisu
+ * decyduje kto trafia do składu głównego, a kto na rezerwę), `announcements` (przypięte/
+ * najnowsze ogłoszenie do baneru).
+ * Uwagi: Autoryzacja jest własna (bez Supabase Auth) — sesja to obiekt w localStorage pod
+ * kluczem `volley_user`, więc `if (!user) return null` na końcu funkcji to jedyny "guard"
+ * przed renderem; przekierowanie na `/login` dzieje się w efekcie przy braku sesji.
+ * `isAdmin` sprawdza `role === "admin" || is_admin || role_id === 1`. Kolory/fonty design
+ * systemu "Under the Lights" (INK/COBALT/YELLOW/CORAL, `display`/`score`) są zdefiniowane
+ * na górze tego pliku i powtarzają się z identycznymi wartościami w innych stronach — to
+ * nie jest wspólny plik z tokenami, każda strona ma własną kopię. Mobile/desktop mają
+ * osobne warianty JSX w wielu miejscach (`hidden sm:flex` / `flex sm:hidden`) — patrz np.
+ * baner "Postaw kawę" (trwały na desktopie, zamykalny do samego dzwoneczka na telefonie).
+ */
+
 import { useState, useEffect, useRef, useLayoutEffect } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
 import {
@@ -75,6 +113,12 @@ function perforationHorizontal(color: string): React.CSSProperties {
   return { backgroundImage: `repeating-linear-gradient(to right, ${color} 0 5px, transparent 5px 12px)` }
 }
 
+// ────────────────────────────────────────────────────────────────
+// FUNKCJE POMOCNICZE — DATY I WYSZUKIWANIE MECZÓW
+// Formatowanie dat po polsku (skrócone/pełne/dopełniacz), etykieta "Mecz dzisiaj!"/"jutro!",
+// budowanie tokenów do wyszukiwarki (buildMatchSearchTokens) oraz wspólne reguły
+// "czy mecz jest przeszły/nadchodzący" używane dalej przy filtrowaniu i sortowaniu listy.
+// ────────────────────────────────────────────────────────────────
 const MONTHS_PL = ["STY", "LUT", "MAR", "KWI", "MAJ", "CZE", "LIP", "SIE", "WRZ", "PAŹ", "LIS", "GRU"]
 const DAYS_PL = ["Niedziela", "Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota"]
 // Dopełniacz ("31 sierpnia", nie "31 Sierpień") — tylko do czytelnego zdania w hero, reszta
@@ -138,7 +182,10 @@ function isMatchUpcoming(m: any, todayStr: string): boolean {
   return m.date >= todayStr && !isMatchCancelled(m) && !m.is_settled
 }
 
+// ────────────────────────────────────────────────────────────────
+// KOMPONENT POMOCNICZY — CountUp
 // Płynne "podliczanie" wartości liczbowych na tablicy wyników — animuje się do nowej wartości za każdym razem, gdy dane się zmienią
+// ────────────────────────────────────────────────────────────────
 function CountUp({ value, decimals = 0 }: { value: number; decimals?: number }) {
   const [display, setDisplay] = useState(value)
   const prevValue = useRef(value)
@@ -177,6 +224,14 @@ function CountUp({ value, decimals = 0 }: { value: number; decimals?: number }) 
 }
 
 export default function DashboardPage() {
+  // ────────────────────────────────────────────────────────────────
+  // STAN KOMPONENTU
+  // Wszystkie useState tego widoku: dane z bazy (mecze, dostępni zawodnicy), zaznaczenie/
+  // modal szczegółów meczu, tryb zaznaczania wsadowego (Admin), własny dialog potwierdzenia,
+  // formularz zgłoszenia nieobecności/urlopu, filtr i wyszukiwarka listy meczów, animacje
+  // (pasek składu w hero, suwak pod zakładką filtra), sesja użytkownika i toast, baner
+  // wsparcia/"Postaw kawę" oraz cały formularz tworzenia nowego meczu (w tym powtarzalność).
+  // ────────────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [matches, setMatches] = useState<Match[]>([])
   const [availablePlayers, setAvailablePlayers] = useState<any[]>([])
@@ -250,6 +305,17 @@ export default function DashboardPage() {
   const [presetDurationMonths, setPresetDurationMonths] = useState<number>(2)
   const [repeatUntilDate, setRepeatUntilDate] = useState<string>("")
 
+  // ────────────────────────────────────────────────────────────────
+  // EFEKTY — inicjalizacja sesji, synchronizacja formularzy i animacje
+  // Kolejno: (1) wczytanie sesji z localStorage + przekierowanie na /login gdy jej brak,
+  // wczytanie przeczytanych powiadomień i stanu banera kawy, pierwsze pobranie danych;
+  // (2) auto-uzupełnianie składu w modalu tworzenia meczu stałym składem, gdy modal się
+  // otwiera; (3)-(4) wyliczanie daty końcowej i listy meczów do wypisania w modalu urlopu
+  // na podstawie presetu/zakresu dat; (5) opóźnione odpalenie animacji paska zapełnienia
+  // w hero (żeby zawsze animował się OD 0%, a nie startował od razu z docelową szerokością);
+  // (6) przeliczanie pozycji/rozmiaru suwaka pod aktywną zakładką filtra (useLayoutEffect,
+  // patrz komentarz przy zależnościach niżej po co akurat te, a nie same `statusFilter`).
+  // ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
     if (!localUser) {
@@ -347,6 +413,9 @@ export default function DashboardPage() {
     // można tu bezpośrednio odwołać się do wyliczonego niżej `filterCounts`.
   }, [statusFilter, user, searchTerm, matches.length])
 
+  // ────────────────────────────────────────────────────────────────
+  // FUNKCJE POMOCNICZE KOMPONENTU — toast i presety nieobecności
+  // ────────────────────────────────────────────────────────────────
   function notify(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
@@ -380,6 +449,14 @@ export default function DashboardPage() {
     setSelectedMatchesToLeave(matchesInRange)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // POBIERANIE DANYCH Z SUPABASE
+  // loadPinnedAnnouncement() — baner ogłoszenia na stronie głównej.
+  // loadData() — właściwe źródło stanu strony: zawodnicy (`players`), mecze (`matches` +
+  // join `matches_status`) i zapisy (`match_registrations`), które są tu łączone w jedną
+  // strukturę `Match.players` (z podziałem na skład/rezerwę liczonym dalej przez `mainRoster`/
+  // `waitlist` na podstawie kolejności `created_at`).
+  // ────────────────────────────────────────────────────────────────
   // Najważniejsze ogłoszenie do baneru na stronie głównej — przypięte ma pierwszeństwo,
   // w braku przypiętego pokazujemy po prostu najnowsze (sortowanie po `is_pinned` desc
   // stawia `true` przed `false` w Postgresie, więc jedno zapytanie załatwia oba przypadki).
@@ -468,6 +545,9 @@ export default function DashboardPage() {
     setIsLoading(false)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // HANDLERY — wybór meczu i oznaczanie powiadomienia jako przeczytane
+  // ────────────────────────────────────────────────────────────────
   function handleSelectMatch(match: Match) {
     if (isSelectionMode) {
       toggleSelectBatchMatch(match.id)
@@ -483,6 +563,11 @@ export default function DashboardPage() {
     }
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // HANDLERY — odwoływanie i usuwanie pojedynczego meczu (Admin)
+  // Odwołanie to update status_id (mecz zostaje w bazie, zawodnicy widzą go jako odwołany).
+  // Usunięcie jest trwałe i kasuje kaskadowo powiązane rejestracje i ogłoszenia.
+  // ────────────────────────────────────────────────────────────────
   function handleCancelMatch(matchId: string, matchDate: string, e: React.MouseEvent) {
     e.stopPropagation()
     setConfirmDialog({
@@ -546,6 +631,11 @@ export default function DashboardPage() {
     loadData()
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // HANDLERY — zaznaczanie wsadowe i masowe operacje na meczach (Admin)
+  // Zaznaczanie/odznaczanie pojedynczych i wszystkich widocznych meczów, a następnie masowe
+  // odwołanie lub trwałe usunięcie zaznaczonych — używane przez pływający pasek akcji.
+  // ────────────────────────────────────────────────────────────────
   function toggleSelectBatchMatch(id: string) {
     setSelectedBatchMatchIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
@@ -628,6 +718,11 @@ export default function DashboardPage() {
     }
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // HANDLERY — zgłaszanie nieobecności / urlopu
+  // Wypisuje bieżącego użytkownika (usuwa jego match_registrations) ze wszystkich meczów
+  // zaznaczonych w modalu urlopu.
+  // ────────────────────────────────────────────────────────────────
   async function handleSaveAbsence() {
     if (!user || selectedMatchesToLeave.length === 0) return
 
@@ -659,6 +754,14 @@ export default function DashboardPage() {
     )
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // HANDLERY — tworzenie meczu (w tym powtarzalność cykliczna)
+  // calculateGeneratedDates() wylicza wszystkie daty do wygenerowania na podstawie
+  // częstotliwości (co tydzień/2 tyg./miesiąc) i trybu zakończenia (okres w miesiącach albo
+  // konkretna data końcowa) — handleCreateMatch() wstawia jeden rekord do `matches` na każdą
+  // wyliczoną datę, a jeśli wybrano zawodników do powołania, dopisuje im od razu rejestracje
+  // do KAŻDEGO z nowo utworzonych meczów.
+  // ────────────────────────────────────────────────────────────────
   function togglePlayerSelection(playerId: string) {
     setSelectedPlayerIds((prev) =>
       prev.includes(playerId) ? prev.filter((id) => id !== playerId) : [...prev, playerId]
@@ -769,6 +872,9 @@ export default function DashboardPage() {
     setIsCreating(false)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // HANDLERY — pozostałe (zmiana z modalu szczegółów, wylogowanie, baner kawy)
+  // ────────────────────────────────────────────────────────────────
   function handleMatchChange(updatedMatch: Match) {
     setMatches((prev) => prev.map((m) => (m.id === updatedMatch.id ? updatedMatch : m)))
     if (selectedMatch?.id === updatedMatch.id) {
@@ -793,6 +899,16 @@ export default function DashboardPage() {
 
   if (!user) return null
 
+  // ────────────────────────────────────────────────────────────────
+  // WYLICZENIA POCHODNE — filtrowanie, wyszukiwanie i sortowanie listy meczów
+  // Liczone na nowo przy każdym renderze (nie w useMemo) na podstawie `matches` + aktualnego
+  // `searchTerm`/`statusFilter`: activeMatches (bez odwołanych) -> nearestMatch (do hero) ->
+  // searchMatchedMatches (fuzzy search po tokenach z buildMatchSearchTokens) -> filterCounts
+  // (liczby przy zakładkach, respektują wyszukiwanie) -> filteredMatches (po zakładce) ->
+  // sortedMatches (nadchodzące na górze, rozliczone na dole, odwołane pośrodku — patrz
+  // matchGroupOrder) -> visibleMatches (obcięte do MATCH_PREVIEW_LIMIT, chyba że trwa
+  // wyszukiwanie/zaznaczanie wsadowe albo user kliknął "Pokaż wszystkie").
+  // ────────────────────────────────────────────────────────────────
   const todayStr = new Date().toISOString().split("T")[0]
 
   const activeMatches = matches.filter((m: any) => !m.matches_status?.name?.toLowerCase().includes("odwoł") && m.status_id !== 4)
@@ -845,6 +961,13 @@ export default function DashboardPage() {
   // `activeMatches` (wszystkie niezanulowane, łącznie z przyszłymi). Wcześniej te kafelki
   // pokazywały np. "11 rozegranych meczów", mimo że żaden mecz jeszcze się nie odbył — po prostu
   // liczyły wszystko co zaplanowane i nieodwołane.
+  // ────────────────────────────────────────────────────────────────
+  // WYLICZENIA POCHODNE — statystyki sezonu (tablica wyników w hero)
+  // Rozegrane mecze, "Król frekwencji" (zawodnik z największą liczbą wystąpień w składzie
+  // głównym), średnia frekwencja i suma zebranych składek — wszystko liczone WYŁĄCZNIE z
+  // `playedMatches` (naprawdę zakończonych), a nie z `activeMatches`, żeby przyszłe mecze
+  // nie zawyżały statystyk.
+  // ────────────────────────────────────────────────────────────────
   const playedMatches = activeMatches.filter((m: any) => isMatchPast(m, todayStr))
   const totalSeasonMatches = playedMatches.length
   const playerMatchCounts: Record<string, { name: string; count: number }> = {}
@@ -875,6 +998,9 @@ export default function DashboardPage() {
     return acc + (paid * price)
   }, 0)
 
+  // ────────────────────────────────────────────────────────────────
+  // WYLICZENIA POCHODNE — najbliższy mecz (hero) i podsumowanie modalu tworzenia meczu
+  // ────────────────────────────────────────────────────────────────
   const nearestRoster = nearestMatch ? mainRoster(nearestMatch) : []
   const nearestCapacity = Number(nearestMatch?.capacity || nearestMatch?.max_players || 12)
   const nearestPrice = Number(nearestMatch?.price_per_player || 25)
@@ -891,7 +1017,10 @@ export default function DashboardPage() {
     return inRange && isSignedUp
   })
 
+  // ────────────────────────────────────────────────────────────────
+  // KOMPONENT POMOCNICZY — renderCreateModalPlayerRow
   // Jeden wiersz zawodnika w modalu tworzenia meczu — reużywany dla grupy "Stały skład" i "Pozostali"
+  // ────────────────────────────────────────────────────────────────
   function renderCreateModalPlayerRow(player: any) {
     const isSelected = selectedPlayerIds.includes(player.id)
     const playerName = player.name || player.full_name
@@ -945,6 +1074,10 @@ export default function DashboardPage() {
     )
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // RENDER — układ strony: sidebar na stałe + scrollowalna prawa kolumna (header, treść
+  // główna, pływające paski akcji, modale, toast)
+  // ────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#F5F6FA] text-[#14181F] selection:bg-[#2C4BFF] selection:text-white antialiased">
 
@@ -963,7 +1096,12 @@ export default function DashboardPage() {
           }}
         />
 
-        {/* HEADER — pasek utylitarny, świadomie wyciszony (bohaterem jest hero poniżej) */}
+        {/* ────────────────────────────────────────────────────────────────
+            HEADER — pasek utylitarny, świadomie wyciszony (bohaterem jest hero poniżej).
+            Zawiera baner "Postaw kawę" (desktop trwały / mobile zamykalny) i dzwoneczek
+            powiadomień (NotificationsBell) obsługujący kliknięcie w powiadomienie o meczu/
+            ogłoszeniu/finansach.
+            ──────────────────────────────────────────────────────────────── */}
         {/* iOS z paskiem statusu "black-translucent" (patrz app/layout.tsx) renderuje status bar
             JAKO przezroczystą nakładkę na treść, nie jako osobny pasek — bez paddingu na
             safe-area-inset-top zegar/bateria/wifi systemu nakładały się na ten nagłówek,
@@ -1034,7 +1172,11 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        {/* GŁÓWNA ZAWARTOŚĆ */}
+        {/* ────────────────────────────────────────────────────────────────
+            GŁÓWNA ZAWARTOŚĆ — kolejno: baner sponsora, hero z najbliższym meczem i tablicą
+            wyników sezonu, przypięte ogłoszenie, pasek akcji + wyszukiwarka + zakładki
+            filtra, lista meczów (sekcje ponumerowane komentarzami 1.-5. poniżej).
+            ──────────────────────────────────────────────────────────────── */}
         <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8 pb-36">
 
           {/* 1. BANER SPONSORA / MIEJSCE REKLAMOWE — na samej górze strony, pierwsze co widać po
@@ -1641,7 +1783,11 @@ export default function DashboardPage() {
         </main>
       </div>
 
-      {/* PŁYWAJĄCY PASEK AKCJI DLA ZAZNACZONYCH MECZÓW */}
+      {/* ────────────────────────────────────────────────────────────────
+          PŁYWAJĄCY PASEK AKCJI DLA ZAZNACZONYCH MECZÓW — widoczny tylko w trybie zaznaczania
+          (isSelectionMode) z co najmniej jednym zaznaczonym meczem; pozwala Adminowi odwołać
+          albo trwale usunąć wszystkie zaznaczone naraz (handleBatchCancel/handleBatchDelete).
+          ──────────────────────────────────────────────────────────────── */}
       {isSelectionMode && selectedBatchMatchIds.length > 0 && (
         <div className="fixed bottom-24 lg:bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-4 rounded-3xl bg-[#0B1120]/95 backdrop-blur-md px-6 py-3.5 text-white shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-5">
           <div className="flex items-center gap-2">
@@ -1684,7 +1830,11 @@ export default function DashboardPage() {
       )}
 
 
-      {/* MODAL URLOPU */}
+      {/* ────────────────────────────────────────────────────────────────
+          MODAL URLOPU — wybór okresu nieobecności (presety lub własne daty), lista meczów
+          usera w tym okresie z możliwością ręcznego zachowania pojedynczego meczu, zapis
+          przez handleSaveAbsence (usuwa match_registrations dla zaznaczonych meczów).
+          ──────────────────────────────────────────────────────────────── */}
       <Modal
         open={showAbsenceModal}
         onClose={() => setShowAbsenceModal(false)}
@@ -1843,7 +1993,12 @@ export default function DashboardPage() {
             </div>
       </Modal>
 
-      {/* MODAL TWORZENIA MECZU */}
+      {/* ────────────────────────────────────────────────────────────────
+          MODAL TWORZENIA MECZU (Admin) — formularz w 4 krokach: podstawowe informacje
+          (data/godziny/tytuł), częstotliwość powtarzania (calculateGeneratedDates), lokalizacja
+          i cennik, powołania ze stałego składu (renderCreateModalPlayerRow). Zapis przez
+          handleCreateMatch — wstawia po jednym rekordzie `matches` na każdą wygenerowaną datę.
+          ──────────────────────────────────────────────────────────────── */}
       <Modal
         open={showCreateModal && isAdmin}
         onClose={() => setShowCreateModal(false)}
@@ -2153,6 +2308,11 @@ export default function DashboardPage() {
             </form>
       </Modal>
 
+      {/* ────────────────────────────────────────────────────────────────
+          MODAL SZCZEGÓŁÓW MECZU — cała logika składu/zapisów/płatności/rozliczenia mieszka
+          w osobnym komponencie MatchDetail; ten plik tylko go osadza i przez onChange
+          (handleMatchChange) synchronizuje ewentualne zmiany z listą meczów na stronie.
+          ──────────────────────────────────────────────────────────────── */}
       <Modal
         open={!!selectedMatch}
         onClose={() => setSelectedMatch(null)}
@@ -2168,6 +2328,11 @@ export default function DashboardPage() {
         )}
       </Modal>
 
+      {/* ────────────────────────────────────────────────────────────────
+          POZOSTAŁE OVERLAYE — własny dialog potwierdzenia (zastępuje natywny confirm(),
+          sterowany stanem `confirmDialog` ustawianym przez handlery odwoływania/usuwania),
+          modal wsparcia/"Postaw kawę" oraz toast z potwierdzeniem ostatniej akcji.
+          ──────────────────────────────────────────────────────────────── */}
       <ConfirmDialog state={confirmDialog} onCancel={() => setConfirmDialog(null)} />
 
       <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />

@@ -1,3 +1,14 @@
+/**
+ * Button — generyczny przycisk z wariantami
+ *
+ * Co to jest: bazowy komponent przycisku używany w całej apce, zbudowany na prymitywie
+ * @base-ui/react/button i ostylowany przez class-variance-authority (warianty koloru/rozmiaru).
+ * Eksportuje / robi: `Button` (komponent) oraz `buttonVariants` (funkcja cva do generowania
+ * tych samych klas poza komponentem, np. na linkach stylizowanych jak przycisk).
+ * Używany przez: praktycznie każdy ekran i modal w apce, wszędzie tam gdzie potrzebny jest przycisk.
+ * Uwagi: warianty (`variant`, `size`) sterują wyglądem — domyślne to `default`/`default`; sprawdź
+ * `buttonVariants` po pełną listę dostępnych wartości.
+ */
 import { Button as ButtonPrimitive } from '@base-ui/react/button'
 import { cva, type VariantProps } from 'class-variance-authority'
 

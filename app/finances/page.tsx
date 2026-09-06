@@ -1,5 +1,36 @@
 "use client"
 
+/**
+ * Rozliczenie Kasy Zespołu (/finances)
+ *
+ * Co to jest: Strona księgi kasowej klubu — wszystkie wpłaty (mecze, sponsoring) i wydatki
+ * (sprzęt, hala, inne), aktualny stan kasy, rozbicie wydatków wg kategorii oraz nadpłaty
+ * (depozyty) zawodników. Widoczna dla każdego zalogowanego, ale dodawanie/edycja/usuwanie
+ * operacji jest zarezerwowane wyłącznie dla admina.
+ * Renderuje: header z przewijaną wstęgą sponsorów + dzwoneczkiem powiadomień, hero z
+ * aktualnym stanem kasy (animowany licznik) i przyciskiem eksportu CSV, trzy kafelki
+ * podsumowania (wpływy/wydatki/nadpłaty, klikalne jako filtry), wyszukiwarkę + zakładki
+ * typu operacji, tabelę transakcji (kartowy widok na mobile), panel boczny z wykresem
+ * wydatków wg kategorii i listą nadpłat graczy, modal dodawania/edycji operacji.
+ * Kluczowe zależności: `Sidebar`, `NotificationsBell`, `SupportModal`, `Modal`/
+ * `ConfirmDialog` (współdzielone komponenty UI), `getTransactions`/`getPlayerBalances`
+ * z lib/data (odczyt danych), `notifyPush` z lib/push (powiadomienie o nowej operacji),
+ * `fuzzySearchMatch`/`normalizeSearchText` z lib/utils (wyszukiwarka), lokalny komponent
+ * `CountUp` (animowane podliczanie kwot, ten sam wzorzec co na innych stronach).
+ * Dane z Supabase: tabela `transactions` (date, title, type: "income"|"expense", amount,
+ * collected_by, category) — czytana przez `getTransactions()`, zapisywana bezpośrednio
+ * przez `supabase.from('transactions')` (insert/update/delete); tabela/widok
+ * `player_balances` (id, name, balance) — czytana przez `getPlayerBalances()`, wyłącznie
+ * do odczytu (nadpłaty liczone są gdzie indziej, tu tylko prezentowane).
+ * Uwagi: logowanie jest własne (localStorage["volley_user"], BEZ Supabase Auth), `isAdmin`
+ * steruje widocznością przycisku dodawania i kolumny akcji w tabeli. Domyślnie lista
+ * transakcji pokazuje tylko ostatnie 30 dni (`showFullHistory` rozwija pełną historię),
+ * ale wyszukiwarka zawsze przeszukuje całą historię niezależnie od tego przełącznika.
+ * Eksport CSV (`exportFinancesToCSV`) działa na aktualnie przefiltrowanej liście, nie na
+ * całej bazie. Kategorie w `CATEGORIES` to stałe UI, nie tabela w bazie — kolumna
+ * `category` w `transactions` trzyma tylko jej `id` (string).
+ */
+
 import { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
 import {
@@ -44,6 +75,10 @@ const CORAL = "#FF5A5F"
 const MINT = "#00C48C"
 const VIOLET = "#7A5CFF"
 
+// ────────────────────────────────────────────────────────────────
+// STAŁE KONFIGURACYJNE — kategorie operacji i lista sponsorów (dane statyczne w kodzie,
+// nie w bazie danych)
+// ────────────────────────────────────────────────────────────────
 // Kategorie operacji — wcześniej pole istniało w bazie i na karcie transakcji, ale formularz
 // nigdy nie dawał wyboru (zawsze zapisywał "mecz"), więc KAŻDA operacja — nawet zakup piłek
 // czy opłata za halę — pokazywała się jako "MECZ". Teraz da się faktycznie wybrać.
@@ -72,6 +107,9 @@ const sponsors: { code: string; name: string; desc: string; color: string; logo?
   { code: "+", name: "Zostań Sponsorem", desc: "Wolne miejsce", color: YELLOW },
 ]
 
+// ────────────────────────────────────────────────────────────────
+// KOMPONENT CountUp — animowane podliczanie kwot (stanu kasy, sum wpływów/wydatków)
+// ────────────────────────────────────────────────────────────────
 // Płynne podliczanie liczb — ten sam komponent co na pozostałych stronach
 function CountUp({ value, decimals = 2 }: { value: number; decimals?: number }) {
   const [displayValue, setDisplayValue] = useState(value)
@@ -110,6 +148,10 @@ function CountUp({ value, decimals = 2 }: { value: number; decimals?: number }) 
   return <>{displayValue.toFixed(decimals)}</>
 }
 
+// ────────────────────────────────────────────────────────────────
+// TYPY I FUNKCJE POMOCNICZE — kształt transakcji/nadpłaty, budowanie tokenów wyszukiwania,
+// mapowanie id kategorii na czytelną etykietę
+// ────────────────────────────────────────────────────────────────
 type Transaction = {
   id: string
   date: string
@@ -135,6 +177,9 @@ function getCategoryLabel(categoryId: string): string {
 }
 
 export default function FinancesPage() {
+  // ────────────────────────────────────────────────────────────────
+  // STAN — dane transakcji/nadpłat, filtrowanie i wyszukiwanie, sesja usera, UI (modal, toast)
+  // ────────────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [searchTerm, setSearchTerm] = useState("")
@@ -154,6 +199,7 @@ export default function FinancesPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [playerBalances, setPlayerBalances] = useState<PlayerOverpayment[]>([])
 
+  // Stan formularza modala dodawania/edycji operacji (wpłaty lub wydatku)
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null)
   const [newTitle, setNewTitle] = useState("")
   const [newType, setNewType] = useState<"income" | "expense">("income")
@@ -174,6 +220,10 @@ export default function FinancesPage() {
     user?.name === "Mateusz Podzorski" ||
     user?.full_name === "Mateusz Podzorski"
 
+  // ────────────────────────────────────────────────────────────────
+  // INICJALIZACJA — odczyt sesji z localStorage (WŁASNA autoryzacja, bez Supabase Auth),
+  // pierwsze pobranie transakcji/nadpłat oraz przeliczenie pozycji suwaka zakładek filtra
+  // ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const localUser = localStorage.getItem("volley_user")
     if (localUser) {
@@ -194,6 +244,8 @@ export default function FinancesPage() {
     }
   }, [typeFilter, isLoading, user])
 
+  // Pobranie transakcji i nadpłat równolegle z lib/data — jedno wspólne miejsce ładowania,
+  // wywoływane zarówno przy starcie strony, jak i po nieudanym usunięciu (odświeżenie stanu)
   async function loadData() {
     setIsLoading(true)
     const [txData, balancesData] = await Promise.all([
@@ -219,6 +271,10 @@ export default function FinancesPage() {
     window.location.href = "/login"
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // EKSPORT CSV — generowanie pliku z aktualnie przefiltrowanej listy transakcji i pobranie
+  // go przez tymczasowy link (blob URL, bez zapytania do backendu)
+  // ────────────────────────────────────────────────────────────────
   function exportFinancesToCSV(itemsToExport: Transaction[], filename: string) {
     if (itemsToExport.length === 0) return
 
@@ -240,6 +296,10 @@ export default function FinancesPage() {
     notify("Pobrano plik CSV!")
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // USUWANIE TRANSAKCJI — potwierdzenie przez ConfirmDialog, optymistyczne usunięcie ze
+  // stanu, w razie błędu Supabase przywrócenie danych przez ponowne loadData()
+  // ────────────────────────────────────────────────────────────────
   function handleDeleteTransaction(id: string, title: string) {
     setConfirmDialog({
       title: "Usunąć wpis z kasy?",
@@ -263,6 +323,10 @@ export default function FinancesPage() {
     }
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // PODSUMOWANIA KASY — sumy wpływów/wydatków, aktualny stan kasy (przychody minus koszty)
+  // i suma nadpłat zawodników do kafelków oraz hero na górze strony
+  // ────────────────────────────────────────────────────────────────
   const incomeItems = useMemo(() => transactions.filter(t => t.type === "income"), [transactions])
   const expenseItems = useMemo(() => transactions.filter(t => t.type === "expense"), [transactions])
 
@@ -275,6 +339,10 @@ export default function FinancesPage() {
     return playerBalances.reduce((acc, p) => acc + (Number(p.balance) > 0 ? Number(p.balance) : 0), 0)
   }, [playerBalances])
 
+  // ────────────────────────────────────────────────────────────────
+  // MODAL DODAWANIA / EDYCJI OPERACJI — otwieranie, wypełnianie formularza, zapis
+  // (insert/update w tabeli `transactions`), powiadomienie push przy nowej operacji
+  // ────────────────────────────────────────────────────────────────
   function openAddTransaction() {
     setEditingTransactionId(null)
     setNewTitle("")
@@ -356,6 +424,10 @@ export default function FinancesPage() {
     setIsSubmitting(false)
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // ROZBICIE WYDATKÓW WG KATEGORII — dane do panelu bocznego (pasek postępu per kategoria),
+  // klikalne jako dodatkowy filtr listy transakcji
+  // ────────────────────────────────────────────────────────────────
   // Kategorie (Mecz/Sprzęt/Hala/Inne) zbierały się przy każdym dodaniu operacji, ale nigdzie
   // się ich realnie nie używało — ani do filtrowania, ani do podsumowania. Ten breakdown
   // pokazuje "na co realnie idą pieniądze" i jednocześnie służy jako klikalny filtr.
@@ -371,6 +443,10 @@ export default function FinancesPage() {
       .sort((a, b) => b.total - a.total)
   }, [expenseItems])
 
+  // ────────────────────────────────────────────────────────────────
+  // FILTROWANIE LISTY TRANSAKCJI — ograniczenie do 30 dni (chyba że wyszukujemy albo
+  // rozwinięto pełną historię), wyszukiwarka fuzzy, filtr kategorii i typu operacji
+  // ────────────────────────────────────────────────────────────────
   const isDateRestricted = !searchTerm && !showFullHistory
   const thirtyDaysAgoStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
 
@@ -394,6 +470,10 @@ export default function FinancesPage() {
 
   if (!user) return null
 
+  // ────────────────────────────────────────────────────────────────
+  // JSX — layout strony: sidebar, header z wstęgą sponsorów i dzwonkiem, hero stanu kasy
+  // + eksport CSV, kafelki podsumowania, lista transakcji z panelem bocznym, modal operacji
+  // ────────────────────────────────────────────────────────────────
   return (
     <div className="flex min-h-screen bg-[#F5F6FA] text-[#14181F]">
       <Sidebar
@@ -464,6 +544,7 @@ export default function FinancesPage() {
 
         <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 space-y-8 px-6 py-8 pb-24 lg:pb-8">
 
+          {/* NAGŁÓWEK STRONY — tytuł + przycisk "Dodaj wpłatę / wydatek" (tylko admin) */}
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-[#00875F] border border-slate-200 shadow-xs">
@@ -569,8 +650,11 @@ export default function FinancesPage() {
             </div>
           </div>
 
+          {/* GŁÓWNY UKŁAD: lista transakcji (2/3 szerokości na desktopie) + panel boczny
+              z wykresem wydatków wg kategorii i listą nadpłat zawodników (1/3) */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-8">
 
+            {/* LISTA TRANSAKCJI — wyszukiwarka, zakładki typu operacji, tabela/karty */}
             <div className="lg:col-span-2 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2 flex-1">
@@ -780,6 +864,7 @@ export default function FinancesPage() {
               </div>
             </div>
 
+            {/* PANEL BOCZNY — wykres wydatków wg kategorii (klikalny filtr) + lista nadpłat graczy */}
             <div className="space-y-4">
               <div className="bg-white p-4 rounded-[24px] border border-slate-200/80 shadow-xs">
                 <h2 className={cn(display.className, "text-sm font-bold text-slate-900 flex items-center gap-2")}>

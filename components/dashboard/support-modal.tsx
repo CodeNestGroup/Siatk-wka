@@ -1,5 +1,24 @@
 "use client"
 
+/**
+ * Modal "Postaw kawę drużynie" (wsparcie projektu)
+ *
+ * Co to jest: Prosty modal z prośbą o dobrowolną wpłatę na utrzymanie klubu (serwery,
+ * sprzęt), pokazujący numer telefonu BLIK i wygenerowany na jego podstawie kod QR do
+ * zeskanowania w aplikacji bankowej.
+ * Renderuje: przycisk zamknięcia -> ikonka kawy + tytuł + krótki opis -> kartę z kodem QR
+ * i numerem BLIK -> notkę z podziękowaniem.
+ * Props / kluczowe zależności: `open`/`onClose` (sterowanie widocznością z rodzica).
+ * Współpracuje z komponentem `Modal` (`components/ui/modal.tsx` — wspólny szkielet
+ * overlay/karta) oraz biblioteką `qrcode` (generowanie QR po stronie klienta).
+ * Uwagi: Wywoływany z banera "Postaw kawę" na górze stron (patrz np. `app/page.tsx`) — to
+ * jeden wspólny komponent zamiast osobnej kopii logiki na każdej stronie, dzięki czemu
+ * wygląd i dane zawsze są spójne. Numer BLIK NIE jest tu na sztywno — admin może go
+ * zmienić w Ustawieniach, skąd trafia do `localStorage` (`volley_blik_display` /
+ * `volley_blik_digits`); ten modal nasłuchuje customowego eventu `volley-blik-updated`,
+ * żeby złapać zmianę bez przeładowania strony.
+ */
+
 import { useEffect, useState } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
 import { Coffee, X } from "lucide-react"
@@ -7,6 +26,10 @@ import QRCode from "qrcode"
 import { Modal } from "@/components/ui/modal"
 import { cn } from "@/lib/utils"
 
+// ────────────────────────────────────────────────────────────────
+// TOKENY WIZUALNE I DOMYŚLNE DANE BLIK — fonty "Under the Lights" oraz wartości używane,
+// dopóki admin nie ustawi własnego numeru w Ustawieniach
+// ────────────────────────────────────────────────────────────────
 const display = Space_Grotesk({ subsets: ["latin"], weight: ["600", "700"] })
 const score = Oswald({ subsets: ["latin"], weight: ["500", "600"] })
 
@@ -16,6 +39,10 @@ const DEFAULT_BLIK_DISPLAY = "+48 500 000 000"
 const DEFAULT_BLIK_DIGITS = "500000000"
 
 export function SupportModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  // ────────────────────────────────────────────────────────────────
+  // STAN I SYNCHRONIZACJA Z USTAWIENIAMI — numer BLIK czytany z localStorage, z nasłuchem
+  // na zmianę zapisaną w panelu Ustawień (bez przeładowania strony)
+  // ────────────────────────────────────────────────────────────────
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [blikDisplay, setBlikDisplay] = useState(DEFAULT_BLIK_DISPLAY)
   const [blikDigits, setBlikDigits] = useState(DEFAULT_BLIK_DIGITS)
@@ -35,6 +62,10 @@ export function SupportModal({ open, onClose }: { open: boolean; onClose: () => 
     return () => window.removeEventListener("volley-blik-updated", loadFromStorage)
   }, [])
 
+  // ────────────────────────────────────────────────────────────────
+  // GENEROWANIE KODU QR — kod przeliczany po stronie klienta za każdym razem, gdy zmieni
+  // się numer BLIK (biblioteka `qrcode`, zwraca data URL do <img>)
+  // ────────────────────────────────────────────────────────────────
   useEffect(() => {
     QRCode.toDataURL(blikDigits, { margin: 1, width: 240, color: { dark: "#0B1120", light: "#FFFFFF" } })
       .then(setQrDataUrl)
@@ -54,6 +85,7 @@ export function SupportModal({ open, onClose }: { open: boolean; onClose: () => 
         </button>
       </div>
 
+      {/* NAGŁÓWEK — ikona kawy, tytuł i krótkie wyjaśnienie po co jest wpłata */}
       <div className="flex flex-col items-center space-y-2">
         <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-[#FFD23F]/15 text-[#B8860B] shadow-md shadow-[#FFD23F]/10">
           <Coffee className="h-8 w-8" />
@@ -64,6 +96,7 @@ export function SupportModal({ open, onClose }: { open: boolean; onClose: () => 
         </p>
       </div>
 
+      {/* DANE DO WPŁATY — kod QR wygenerowany z numeru BLIK + ten sam numer w formie tekstowej */}
       <div className="space-y-3 pt-2">
         <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center gap-4">
           {qrDataUrl && (

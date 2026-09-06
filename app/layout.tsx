@@ -1,3 +1,16 @@
+/**
+ * Root layout Next.js (App Router)
+ *
+ * Co to jest: główny layout całej apki — jedyne miejsce, które renderuje <html>/<body>;
+ * wszystkie podstrony (pliki page.tsx w katalogu app) trafiają tu jako `children`.
+ * Eksportuje / robi: `metadata`/`viewport` (meta tagi, w tym ustawienia PWA na iOS — pełny
+ * ekran, pasek statusu, safe-area) oraz domyślny komponent `RootLayout`, który montuje globalny
+ * CSS i `ServiceWorkerRegister`.
+ * Używany przez: Next.js automatycznie, dla każdej strony w app/.
+ * Uwagi: ustawienia `appleWebApp`/`other`/`viewportFit` są tu nieoczywiste i celowo dobrane
+ * pod PWA na iOS — patrz komentarze przy poszczególnych polach niżej, usunięcie ich cofnie
+ * appkę dodaną do ekranu głównego do zwykłej karty Safari.
+ */
 import type { Metadata, Viewport } from "next"
 import "./globals.css"
 import { ServiceWorkerRegister } from "@/components/pwa/service-worker-register"

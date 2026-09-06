@@ -1,5 +1,17 @@
 "use client"
 
+/**
+ * InstallAppPrompt — baner "Dodaj do ekranu głównego" na iOS
+ *
+ * Co to jest: baner instrukcyjny pokazywany WYŁĄCZNIE na iOS (Safari), zachęcający do dodania
+ * PWA do ekranu głównego telefonu.
+ * Eksportuje / robi: komponent `InstallAppPrompt` — sam wykrywa platformę i to, czy appka jest
+ * już uruchomiona jako standalone, i renderuje się tylko gdy ma to sens (iOS + nie-standalone).
+ * Używany przez: ekran logowania (app/login) — obok linku do pobrania natywnej appki na Androida.
+ * Uwagi: Android ma osobną natywną appkę, więc ten baner celowo jej nie dotyczy — patrz
+ * komentarz niżej po co to rozróżnienie.
+ */
+
 import { useEffect, useState } from "react"
 import { Share, SquarePlus } from "lucide-react"
 

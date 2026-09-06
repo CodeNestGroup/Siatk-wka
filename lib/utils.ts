@@ -1,6 +1,22 @@
+/**
+ * Narzędzia ogólne — classnames, format daty PL, fuzzy search, eksport do kalendarza
+ *
+ * Co to jest: zbiór niezależnych funkcji pomocniczych używanych w wielu miejscach UI, niezwiązanych
+ * z jedną konkretną domeną.
+ * Eksportuje / robi: cn (łączenie klas Tailwind z rozwiązywaniem konfliktów), formatDatePL
+ * (ISO -> dd.mm.rrrr), normalizeSearchText/levenshteinDistance/fuzzySearchMatch (wyszukiwanie
+ * tolerancyjne na literówki i polskie znaki diakrytyczne), buildGoogleCalendarUrl/downloadMatchIcs/
+ * addMatchToCalendar (dodawanie meczu do kalendarza — Google Calendar albo plik .ics dla Apple).
+ * Używany przez: komponenty UI (cn — wszędzie), wyszukiwarki graczy/meczów (fuzzy search),
+ * przyciski "dodaj do kalendarza" przy meczach.
+ * Uwagi: addMatchToCalendar sam wybiera metodę w zależności od platformy (patrz komentarz przy
+ * funkcji) — wywołujący nie musi nic sprawdzać.
+ */
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
+// Łączy klasy Tailwind (clsx) i rozwiązuje konflikty klas o tym samym przeznaczeniu
+// (tailwind-merge) — standardowy helper do warunkowego stylowania.
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
@@ -32,6 +48,8 @@ export function normalizeSearchText(value: string): string {
     .join("")
 }
 
+// Odległość edycyjna Levenshteina między dwoma stringami (liczba wstawień/usunięć/zamian
+// znaków) — używana do tolerancji na literówki w fuzzySearchMatch.
 export function levenshteinDistance(a: string, b: string): number {
   const m = a.length
   const n = b.length
@@ -62,6 +80,8 @@ function fuzzyTolerance(len: number): number {
   return 3
 }
 
+// Sprawdza, czy jedno słowo zapytania pasuje do któregoś ze znormalizowanych tokenów —
+// dokładnie (includes) albo w granicach tolerancji na literówki.
 function fuzzyWordMatch(haystackTokens: string[], queryWord: string): boolean {
   if (!queryWord) return true
   if (haystackTokens.some((t) => t.includes(queryWord))) return true
@@ -102,14 +122,19 @@ function matchDateRange(date: string, timeStart?: string | null, timeEnd?: strin
   return { start, end }
 }
 
+// Formatuje datę do formatu wymaganego przez plik .ics (UTC, np. 20260906T170000Z).
 function toIcsUtc(d: Date): string {
   return d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z"
 }
 
+// Tytuł wydarzenia w kalendarzu — własny tytuł meczu, jeśli jest ustawiony i różny od
+// samej daty, w przeciwnym razie domyślny "Mecz siatkówki (data)".
 function matchCalendarTitle(m: MatchCalendarInfo): string {
   return m.title && m.title !== m.date ? m.title : `Mecz siatkówki (${formatDatePL(m.date)})`
 }
 
+// Buduje link do Google Calendar z gotowym wydarzeniem (data, lokalizacja, opis ze
+// składką) — otwarcie linku od razu pokazuje formularz dodania wydarzenia.
 export function buildGoogleCalendarUrl(m: MatchCalendarInfo): string {
   const { start, end } = matchDateRange(m.date, m.timeStart, m.timeEnd)
   const params = new URLSearchParams({
@@ -122,6 +147,8 @@ export function buildGoogleCalendarUrl(m: MatchCalendarInfo): string {
   return `https://calendar.google.com/calendar/render?${params.toString()}`
 }
 
+// Generuje plik .ics dla danego meczu i od razu wywołuje jego pobranie w przeglądarce
+// (do otwarcia w Kalendarzu Apple/Outlook).
 export function downloadMatchIcs(m: MatchCalendarInfo) {
   const { start, end } = matchDateRange(m.date, m.timeStart, m.timeEnd)
 

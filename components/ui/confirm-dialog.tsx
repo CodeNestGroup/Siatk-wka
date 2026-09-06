@@ -1,5 +1,18 @@
 "use client"
 
+/**
+ * ConfirmDialog — generyczny dialog potwierdzenia
+ *
+ * Co to jest: gotowy do użycia dialog typu "na pewno?" (potwierdź/anuluj), zbudowany na
+ * komponencie Modal, z wariantem "danger" (czerwony, do akcji nieodwracalnych typu usuwanie).
+ * Eksportuje / robi: typ `ConfirmDialogState` (null gdy dialog zamknięty, obiekt z treścią i
+ * callbackiem `onConfirm` gdy otwarty) oraz komponent `ConfirmDialog`.
+ * Używany przez: każde miejsce w apce, które potrzebuje potwierdzenia akcji (np. usunięcie
+ * meczu, gracza, ogłoszenia) — zastępuje natywne `window.confirm()`.
+ * Uwagi: stan trzyma się po stronie rodzica (typowy wzorzec: `useState<ConfirmDialogState>(null)`),
+ * `ConfirmDialog` sam nic nie pamięta poza tym, co dostanie w `state`.
+ */
+
 import { Space_Grotesk } from "next/font/google"
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"

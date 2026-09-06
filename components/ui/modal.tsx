@@ -1,5 +1,20 @@
 "use client"
 
+/**
+ * Modal — generyczny wrapper modali z animacją wejścia/wyjścia
+ *
+ * Co to jest: generyczny kontener modala/bottom-sheet używany przez WSZYSTKIE modale w apce —
+ * sam obsługuje overlay, animację wjazdu/wyjazdu, zamykanie klawiszem Escape i kliknięciem w tło.
+ * Eksportuje / robi: komponent `Modal` — przyjmuje `open`/`children`/`onClose` i renderuje treść
+ * (children) wewnątrz animowanego overlaya; na telefonie wygląda jak bottom sheet, na desktopie
+ * jak wyśrodkowane okno.
+ * Używany przez: wszystkie pozostałe modale w apce (np. ConfirmDialog i inne), które owijają
+ * swój JSX w <Modal>.
+ * Uwagi: komponent celowo NIE znika natychmiast po `open=false` — najpierw odtwarza animację
+ * wyjścia (patrz komentarze niżej), więc rodzic może bezpiecznie zerować dane w tym samym
+ * momencie, w którym zamyka modal.
+ */
+
 import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 
