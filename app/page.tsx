@@ -40,7 +40,7 @@ import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/ui/modal"
 import { SupportModal } from "@/components/dashboard/support-modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
-import { type Match, mainRoster, isMatchCancelled } from "@/lib/data"
+import { type Match, mainRoster, waitlist, isMatchCancelled } from "@/lib/data"
 import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch, addMatchToCalendar } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import { notifyPush } from "@/lib/push"
@@ -1450,6 +1450,7 @@ export default function DashboardPage() {
             ) : (
               visibleMatches.map((match: any, idx) => {
                 const roster = mainRoster(match)
+                const reserveCount = waitlist(match).length
                 const price = Number(match.price_per_player || 25)
                 const isSettled = match.is_settled
                 const isCancelled = match.status_id === 4 || match.matches_status?.name?.toLowerCase().includes("odwoł")
@@ -1595,7 +1596,14 @@ export default function DashboardPage() {
                       {!isCancelled && !isSelectionMode && (
                         <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
                           <Users className="h-4 w-4 text-slate-400" />
-                          <span className="tabular-nums">{roster.length}/{match.capacity || match.max_players || 12}</span>
+                          <span className="tabular-nums">
+                            {roster.length}/{match.capacity || match.max_players || 12}
+                            {/* Skład główny sam w sobie nigdy nie przekracza pojemności (mainRoster
+                                jest przycięty do capacity), więc bez tego rezerwa była całkowicie
+                                niewidoczna na liście — mecz z 3 osobami w kolejce wyglądał
+                                identycznie jak taki bez nikogo w rezerwie. */}
+                            {reserveCount > 0 && <span className="text-[#7A5CFF]"> +{reserveCount}</span>}
+                          </span>
                         </div>
                       )}
 
