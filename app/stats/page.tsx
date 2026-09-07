@@ -142,8 +142,10 @@ function CountUp({ value, decimals = 0 }: { value: number; decimals?: number }) 
 // logiki w dwóch miejscach, które łatwo byłoby przypadkiem rozjechać przy przyszłej zmianie.
 // ────────────────────────────────────────────────────────────────
 type PlayerStat = { name: string; matches: number; paidCount: number; unpaidCount: number }
+type MvpVote = { match_id: string; voted_for_id: string }
+type MvpStanding = { playerId: string; name: string; count: number }
 
-function computeSeasonStats(seasonMatches: any[], allPlayers: any[]) {
+function computeSeasonStats(seasonMatches: any[], allPlayers: any[], allVotes: MvpVote[] = []) {
   const todayStr = new Date().toISOString().split("T")[0]
 
   // Ta sama definicja "mecz rozegrany" co na stronie głównej (isMatchPast) i w Ustawieniach
@@ -198,7 +200,26 @@ function computeSeasonStats(seasonMatches: any[], allPlayers: any[]) {
   }, 0)
   const paymentRate = totalRosterEntries > 0 ? Math.round((totalPaidEntries / totalRosterEntries) * 100) : 0
 
-  return { completedMatches, totalMatches, playerStats, topPlayer, podium, avgAttendance, paymentRate }
+  // "Zawodnik Sezonu" — kto zebrał najwięcej koron MVP (components/dashboard/match-detail.tsx)
+  // w meczach TEGO sezonu. Liczymy po `seasonMatches`, nie `completedMatches` — głosowanie na
+  // MVP i tak odblokowuje się dopiero po końcu meczu (patrz hasMatchEnded w match-detail.tsx),
+  // więc każdy głos z definicji dotyczy meczu, który już się odbył.
+  const seasonMatchIds = new Set(seasonMatches.map((m) => m.id))
+  const mvpCounts: Record<string, number> = {}
+  allVotes.forEach((v) => {
+    if (!seasonMatchIds.has(v.match_id)) return
+    mvpCounts[v.voted_for_id] = (mvpCounts[v.voted_for_id] || 0) + 1
+  })
+  const playerNameById: Record<string, string> = {}
+  allPlayers.forEach((p) => {
+    playerNameById[p.id] = p.full_name || p.name || "Zawodnik"
+  })
+  const mvpLeaderboard: MvpStanding[] = Object.entries(mvpCounts)
+    .map(([playerId, count]) => ({ playerId, name: playerNameById[playerId] || "Zawodnik", count }))
+    .sort((a, b) => b.count - a.count)
+  const seasonMvp: MvpStanding | null = mvpLeaderboard[0] || null
+
+  return { completedMatches, totalMatches, playerStats, topPlayer, podium, avgAttendance, paymentRate, mvpLeaderboard, seasonMvp }
 }
 
 export default function StatsPage() {
@@ -219,6 +240,7 @@ export default function StatsPage() {
 
   const [matches, setMatches] = useState<any[]>([])
   const [players, setPlayers] = useState<any[]>([])
+  const [mvpVotes, setMvpVotes] = useState<MvpVote[]>([])
 
   // ────────────────────────────────────────────────────────────────
   // SEZONY — `closed_at is null` oznacza sezon aktywny (patrz supabase/seasons-migration.sql).
@@ -257,13 +279,15 @@ export default function StatsPage() {
     setIsLoading(true)
 
     // Jawna lista kolumn dla graczy zamiast "*" — celowo pomija `password`. Patrz supabase/harden-anon-access.sql.
-    const [{ data: matchesData }, { data: playersData }, { data: registrationsData }, { data: seasonsData }] = await Promise.all([
+    const [{ data: matchesData }, { data: playersData }, { data: registrationsData }, { data: seasonsData }, { data: mvpVotesData }] = await Promise.all([
       supabase.from("matches").select("*"),
       supabase.from("players").select("id, full_name, email, phone, created_at, notif_announcements, notif_match_reminders, role_id, player_status_id, is_core_roster, core_order, core_added_at"),
       supabase.from("match_registrations").select("*"),
-      supabase.from("seasons").select("*").order("started_at", { ascending: false })
+      supabase.from("seasons").select("*").order("started_at", { ascending: false }),
+      supabase.from("match_mvp_votes").select("match_id, voted_for_id")
     ])
 
+    setMvpVotes(mvpVotesData || [])
     setSeasons(seasonsData || [])
     // Domyślnie pokazujemy aktywny sezon (bez `closed_at`) — jeśli z jakiegoś powodu go nie ma
     // (np. wszystkie zamknięte), wybieramy po prostu najnowszy. Funkcyjny update, żeby nie
@@ -327,13 +351,13 @@ export default function StatsPage() {
   // tej definicji między stronami jest bolesny do wyśledzenia. Liczenie samo w sobie żyje
   // teraz w `computeSeasonStats` (u góry pliku), żeby dało się wywołać drugi raz dla
   // sezonu porównywanego bez duplikowania logiki.
-  const primary = useMemo(() => computeSeasonStats(primarySeasonMatches, players), [primarySeasonMatches, players])
+  const primary = useMemo(() => computeSeasonStats(primarySeasonMatches, players, mvpVotes), [primarySeasonMatches, players, mvpVotes])
   const compare = useMemo(
-    () => (compareSeasonId ? computeSeasonStats(compareSeasonMatches, players) : null),
-    [compareSeasonMatches, players, compareSeasonId]
+    () => (compareSeasonId ? computeSeasonStats(compareSeasonMatches, players, mvpVotes) : null),
+    [compareSeasonMatches, players, mvpVotes, compareSeasonId]
   )
 
-  const { completedMatches, totalMatches, playerStats, topPlayer, podium, avgAttendance, paymentRate } = primary
+  const { completedMatches, totalMatches, playerStats, topPlayer, podium, avgAttendance, paymentRate, seasonMvp } = primary
 
   // Własna karta zawodnika nad tabelą — bez niej jedyny sposób sprawdzenia "jak sobie radzę"
   // to szukanie siebie wzrokiem w rankingu. Ta sama reguła dopasowania co podświetlenie
@@ -571,6 +595,12 @@ export default function StatsPage() {
                           {col.stats.totalMatches > 0 ? col.stats.topPlayer.name : "Brak danych"}
                         </span>
                       </div>
+                      <div className="flex items-center justify-between">
+                        <span>Zawodnik Sezonu</span>
+                        <span className="text-slate-900 font-bold truncate max-w-[9rem]" style={{ color: col.accent }}>
+                          {col.stats.seasonMvp ? col.stats.seasonMvp.name : "Brak głosów"}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -670,7 +700,7 @@ export default function StatsPage() {
           )}
 
           {/* Kafelki Podsumowania */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="rounded-[24px] border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#2C4BFF]">Rozegrane Sesje</p>
@@ -701,6 +731,23 @@ export default function StatsPage() {
               </div>
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#00C48C]/10 text-[#00875F] border border-[#00C48C]/20 shrink-0">
                 <Percent className="h-6 w-6" />
+              </div>
+            </div>
+
+            {/* Zawodnik Sezonu — kto zebrał najwięcej koron MVP (patrz karta "MVP Meczu" w
+                szczegółach meczu, components/dashboard/match-detail.tsx) w tym sezonie. */}
+            <div className="rounded-[24px] border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs flex items-center justify-between">
+              <div className="min-w-0">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#946E00]">Zawodnik Sezonu</p>
+                <h3 className={cn(display.className, "mt-1 text-lg font-bold text-slate-900 truncate")}>
+                  {seasonMvp ? seasonMvp.name : "Brak głosów"}
+                </h3>
+                <p className="mt-0.5 text-[11px] font-medium text-slate-400">
+                  {seasonMvp ? `${seasonMvp.count} ${seasonMvp.count === 1 ? "korona MVP" : "korony MVP"}` : "Zagłosujcie po meczu"}
+                </p>
+              </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFD23F]/15 text-[#946E00] border border-[#FFD23F]/30 shrink-0">
+                <Crown className="h-6 w-6" />
               </div>
             </div>
           </div>
