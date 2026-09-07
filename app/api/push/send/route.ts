@@ -3,23 +3,16 @@
  *
  * Co to jest: endpoint API (Next.js Route Handler) wysyłający prawdziwe powiadomienie systemowe
  * (Web Push, VAPID) do wszystkich zapisanych subskrypcji w tabeli `push_subscriptions`.
- * Eksportuje / robi: POST — czyta `title`/`body`/`url`/`excludePlayerId` z body, wysyła
- * powiadomienie przez `webpush.sendNotification` do każdej subskrypcji (poza subskrypcjami
- * wykluczonego gracza), a wygasłe/nieaktualne subskrypcje (404/410) czyści z bazy.
+ * Eksportuje / robi: POST — czyta `title`/`body`/`url`/`excludePlayerId` z body i deleguje
+ * faktyczną wysyłkę do `sendPushToAll` (lib/push-server.ts).
  * Używany przez: `lib/push.ts` (`notifyPush`) — wywoływane fire-and-forget po utworzeniu
- * meczu/ogłoszenia/wpłaty.
- * Uwagi: klucze VAPID (prywatny) muszą być ustawione w zmiennych środowiskowych; to jedyne
- * miejsce w apce, gdzie faktycznie wysyła się powiadomienie do przeglądarki/systemu użytkownika.
+ * meczu/ogłoszenia/wpłaty, z przeglądarki.
+ * Uwagi: to jedyny endpoint wywoływany bezpośrednio z klienta; cron (przypomnienia o
+ * meczu, app/api/cron/match-reminders/route.ts) woła `sendPushToAll` bezpośrednio,
+ * bez przechodzenia przez ten route.
  */
 import { NextResponse } from "next/server"
-import webpush from "web-push"
-import { supabase } from "@/lib/supabase"
-
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT!,
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-)
+import { sendPushToAll } from "@/lib/push-server"
 
 // Wywoływane przez appkę zaraz po utworzeniu meczu / ogłoszenia / wpłaty. Wysyła
 // prawdziwe powiadomienie systemowe do KAŻDEGO zapisanego urządzenia — poza tymi
@@ -36,37 +29,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Brak tytułu lub treści powiadomienia" }, { status: 400 })
   }
 
-  let query = supabase.from("push_subscriptions").select("*")
-  if (excludePlayerId) query = query.neq("player_id", excludePlayerId)
-  const { data: subscriptions, error } = await query
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  const payload = JSON.stringify({ title, body: message, url })
-  const expiredEndpoints: string[] = []
-
-  await Promise.all(
-    (subscriptions || []).map(async (sub) => {
-      try {
-        await webpush.sendNotification(
-          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-          payload
-        )
-      } catch (err: any) {
-        // 404/410 = przeglądarka odrzuciła/wycofała subskrypcję (np. odinstalowano appkę) —
-        // sprzątamy ją, żeby appka nie próbowała jej używać w kółko przy każdym kolejnym wysłaniu.
-        if (err?.statusCode === 404 || err?.statusCode === 410) {
-          expiredEndpoints.push(sub.endpoint)
-        }
-      }
-    })
-  )
-
-  if (expiredEndpoints.length > 0) {
-    await supabase.from("push_subscriptions").delete().in("endpoint", expiredEndpoints)
-  }
-
-  return NextResponse.json({ ok: true, sent: (subscriptions || []).length - expiredEndpoints.length })
+  const { sent } = await sendPushToAll({ title, body: message, url, excludePlayerId })
+  return NextResponse.json({ ok: true, sent })
 }
