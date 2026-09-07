@@ -173,7 +173,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
       .map((p: any, idx: number) => `${idx + 1}. ${p.full_name || p.name}`)
       .join("\n")
 
-    let fullMessage = `🏐 *Skład na mecz (${formatDatePL(match.date)} - ${match.location})*\n\n${listText}\n\n💰 Zebrano: ${totalCollectedSoFar} PLN`
+    let fullMessage = `🏐 *Skład na mecz (${formatDatePL(match.date)} - ${match.location})*\n\n${listText}\n\n💰 Zebrano: ${totalCollectedSoFar} zł`
 
     if (rawReserves.length > 0) {
       const reservesText = rawReserves
@@ -252,7 +252,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
 
       notifyPush({
         title: "Nowa wpłata w kasie",
-        body: `${newTx.title} (${freshCashToBook} PLN)`,
+        body: `${newTx.title} (${freshCashToBook} zł)`,
         url: "/finances",
         excludePlayerId: currentUser?.id
       })
@@ -262,7 +262,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     if (creditCoveredCount > 0) parts.push(`${creditCoveredCount} z depozytu`)
     if (unpaidRosterCount > 0) parts.push(`${unpaidRosterCount} nieopłaconych`)
     const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : ""
-    notify(`Pomyślnie rozliczono! +${freshCashToBook} PLN w Finansach${suffix}.`)
+    notify(`Pomyślnie rozliczono! +${freshCashToBook} zł w Finansach${suffix}.`)
 
     onChange(updatedMatch)
     setIsSaving(false)
@@ -393,7 +393,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
       onChange({ ...match, players: [...(match.players || []), newPlayerObj] })
       notify(
         useCredit
-          ? `Dołączyłeś do meczu — opłacone z depozytu (zostało ${(availableCredit - price).toFixed(2)} PLN).`
+          ? `Dołączyłeś do meczu — opłacone z depozytu (zostało ${(availableCredit - price).toFixed(2)} zł).`
           : "Dołączyłeś do listy na ten mecz!"
       )
     }
@@ -429,7 +429,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
             )}>
               {isSettled ? "Mecz Rozliczony" : isCancelled ? "Odwołany" : "Skład Meczowy"}
             </span>
-            <span className="text-xs text-slate-400 font-semibold">• Składka: {price} PLN / os.</span>
+            <span className="text-xs text-slate-400 font-semibold">• Składka: {price} zł / os.</span>
           </div>
 
           <h2 className={cn(display.className, "text-2xl font-bold text-white pr-10")}>
@@ -485,7 +485,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
               {paidRosterCount}/{rawRoster.length} opłaciło
             </span>
             <span className={cn(score.className, "text-slate-900 tabular-nums")}>
-              {totalCollectedSoFar} <span className="text-[10px] text-slate-400 font-bold">PLN zebrano</span>
+              {totalCollectedSoFar} <span className="text-[10px] text-slate-400 font-bold">zł zebrano</span>
             </span>
           </div>
         </div>
@@ -512,10 +512,10 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
               className="w-full rounded-2xl py-3 font-bold gap-2 bg-[#00C48C] hover:bg-[#00A876] text-white shadow-md shadow-[#00C48C]/25 cursor-pointer text-xs"
             >
               <Receipt className="h-4 w-4" />
-              {isSaving ? "Księgowanie w finansach..." : `Zatwierdź i rozlicz w Finansach (+${freshCashToBook} PLN)`}
+              {isSaving ? "Księgowanie w finansach..." : `Zatwierdź i rozlicz w Finansach (+${freshCashToBook} zł)`}
             </Button>
             {/* Widoczne tylko gdy część składu pokryła depozytem — bez tego różnica między
-                "300 PLN zebrano" w karcie statusu wyżej a kwotą na tym przycisku (świeża
+                "300 zł zebrano" w karcie statusu wyżej a kwotą na tym przycisku (świeża
                 gotówka minus depozyty, już wcześniej w kasie) wyglądałaby jak błąd. */}
             {creditCoveredCount > 0 && (
               <p className="text-center text-[10px] font-semibold text-slate-400">
@@ -620,7 +620,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
                           )}
                         >
                           {isPaid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Wallet className="h-3.5 w-3.5" />}
-                          {isPaid ? `${price} PLN` : "Nieopłacone"}
+                          {isPaid ? `${price} zł` : "Nieopłacone"}
                         </button>
                       ) : (
                         <span className={cn(
@@ -630,7 +630,7 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
                             : "bg-[#FFD23F]/10 text-[#946E00] border-[#FFD23F]/30"
                         )}>
                           {isPaid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Wallet className="h-3.5 w-3.5" />}
-                          {isPaid ? `${price} PLN` : "Nieopłacone"}
+                          {isPaid ? `${price} zł` : "Nieopłacone"}
                         </span>
                       )}
 

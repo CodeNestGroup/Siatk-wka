@@ -1249,7 +1249,7 @@ export default function DashboardPage() {
                       <span className="text-slate-600">•</span>
                       <span className="flex items-center gap-1.5 text-[#00E0A2] font-bold">
                         <Wallet className="h-4 w-4" />
-                        {nearestPrice} PLN / os.
+                        {nearestPrice} zł / os.
                       </span>
                     </div>
                   </div>
@@ -1364,7 +1364,7 @@ export default function DashboardPage() {
                 >
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Budżet sezonu</p>
-                    <h3 className={cn(score.className, "text-3xl font-semibold text-white mt-1.5 tabular-nums")}><CountUp value={totalSeasonCollected} /> <span className="text-sm text-slate-500">PLN</span></h3>
+                    <h3 className={cn(score.className, "text-3xl font-semibold text-white mt-1.5 tabular-nums")}><CountUp value={totalSeasonCollected} /> <span className="text-sm text-slate-500">zł</span></h3>
                     <p className="text-[11px] text-slate-500 font-medium mt-0.5">Suma składek</p>
                   </div>
                   <Wallet className="h-5 w-5 text-[#00E0A2] shrink-0 mt-0.5" />
@@ -1734,7 +1734,7 @@ export default function DashboardPage() {
                           {!isCancelled && (
                             <>
                               <span>•</span>
-                              <span className="font-bold text-slate-600">{price} PLN / os.</span>
+                              <span className="font-bold text-slate-600">{price} zł / os.</span>
                             </>
                           )}
                         </div>
@@ -2196,7 +2196,7 @@ export default function DashboardPage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Składka (PLN)</label>
+                    <label className="block font-bold text-slate-700 mb-1">Składka (zł)</label>
                     <input
                       type="number"
                       required
@@ -2236,7 +2236,7 @@ export default function DashboardPage() {
 
                 <div className="flex items-center justify-between rounded-xl bg-white/70 border border-[#00C48C]/20 px-3 py-2">
                   <span className="font-bold text-[#00513A]">Maks. budżet z meczu:</span>
-                  <span className={cn(score.className, "text-[#00875F] font-semibold tabular-nums")}>{modalMaxBudget} PLN</span>
+                  <span className={cn(score.className, "text-[#00875F] font-semibold tabular-nums")}>{modalMaxBudget} zł</span>
                 </div>
               </div>
 
@@ -2306,7 +2306,7 @@ export default function DashboardPage() {
                   <span className="flex items-center gap-1"><Calendar className="h-3 w-3 text-[#2C4BFF]" /> {newDate ? formatDatePL(newDate) : "—"}</span>
                   <span className="flex items-center gap-1"><Timer className="h-3 w-3 text-[#2C4BFF]" /> {newTimeStart} - {newTimeEnd}</span>
                   <span className="flex items-center gap-1"><MapPin className="h-3 w-3 text-[#2C4BFF]" /> {newLocation || "—"}</span>
-                  <span className="flex items-center gap-1"><Wallet className="h-3 w-3 text-[#2C4BFF]" /> {modalPriceNum} PLN</span>
+                  <span className="flex items-center gap-1"><Wallet className="h-3 w-3 text-[#2C4BFF]" /> {modalPriceNum} zł</span>
                   <span className="flex items-center gap-1"><UserCheck className="h-3 w-3 text-[#2C4BFF]" /> {selectedPlayerIds.length} powołanych</span>
                 </div>
                 <div className="flex justify-end gap-2">

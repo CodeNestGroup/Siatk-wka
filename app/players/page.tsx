@@ -941,7 +941,7 @@ export default function PlayersPage() {
   // link `<a download>` + URL.createObjectURL. Dostępny tylko dla admina.
   // ────────────────────────────────────────────────────────────────
   function exportPlayersCsv() {
-    const header = ["Imię i nazwisko", "E-mail", "Status konta", "Stały skład", "Rozegrane mecze", "Suma wpłat (PLN)"]
+    const header = ["Imię i nazwisko", "E-mail", "Status konta", "Stały skład", "Rozegrane mecze", "Suma wpłat (zł)"]
     const rows = players.map((p) => {
       const isActive = p.player_status_id === 1 || !p.player_status_id
       return [
@@ -1713,7 +1713,7 @@ export default function PlayersPage() {
                             </td>
 
                             <td className="px-6 py-4 font-bold text-slate-900">
-                              <span className="text-[#00875F]">{player.total_paid || 0} PLN</span>
+                              <span className="text-[#00875F]">{player.total_paid || 0} zł</span>
                             </td>
 
                             {isAdmin && !isSelectionMode && (
@@ -1856,7 +1856,7 @@ export default function PlayersPage() {
                             {player.matches_count || 0} {player.matches_count === 1 ? "mecz" : "meczy"}
                           </span>
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-[#00C48C]/10 text-[#00875F]">
-                            {player.total_paid || 0} PLN
+                            {player.total_paid || 0} zł
                           </span>
                         </div>
                       </div>
@@ -2167,7 +2167,7 @@ export default function PlayersPage() {
                         )}
                       >
                         {item.paid ? <CheckCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
-                        {item.paid ? `Opłacono (${item.fee} PLN)` : `Nieopłacone (${item.fee} PLN)`}
+                        {item.paid ? `Opłacono (${item.fee} zł)` : `Nieopłacone (${item.fee} zł)`}
                       </span>
                     </div>
                   </div>

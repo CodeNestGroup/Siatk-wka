@@ -296,7 +296,7 @@ export default function FinancesPage() {
 
     const esc = (val: string | number) => `"${String(val).replace(/"/g, '""')}"`
 
-    const headers = "Lp.,Data,Tytul,Kategoria,Osoba Zbierajaca,Kwota (PLN)\n"
+    const headers = "Lp.,Data,Tytul,Kategoria,Osoba Zbierajaca,Kwota (zł)\n"
     const rows = itemsToExport.map((t, i) => {
       const amountStr = t.type === "income" ? `+${t.amount}` : `-${t.amount}`
       return [itemsToExport.length - i, esc(t.date), esc(t.title), esc(t.category), esc(t.collected_by), esc(amountStr)].join(",")
@@ -411,10 +411,10 @@ export default function FinancesPage() {
     if (ledgerError) {
       notify("Wpłata zaksięgowana w kasie, ale zapis depozytu się nie powiódł.")
     } else {
-      notify(`Doładowano ${player?.full_name || "zawodnika"} na ${amountNum} PLN.`)
+      notify(`Doładowano ${player?.full_name || "zawodnika"} na ${amountNum} zł.`)
       notifyPush({
         title: "Doładowanie depozytu",
-        body: `${player?.full_name || "Zawodnik"} — ${amountNum} PLN`,
+        body: `${player?.full_name || "Zawodnik"} — ${amountNum} zł`,
         url: "/finances",
         excludePlayerId: user?.id
       })
@@ -500,7 +500,7 @@ export default function FinancesPage() {
         setTransactions([data[0], ...transactions])
         notifyPush({
           title: newType === "income" ? "Nowa wpłata w kasie" : "Nowy wydatek w kasie",
-          body: `${newTitle} (${amountNum} PLN)`,
+          body: `${newTitle} (${amountNum} zł)`,
           url: "/finances",
           excludePlayerId: user?.id
         })
@@ -683,7 +683,7 @@ export default function FinancesPage() {
                 <div>
                   <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Aktualny Stan Kasy</p>
                   <h2 className={cn(score.className, "text-4xl font-semibold mt-0.5 tabular-nums", currentCash < 0 ? "text-[#FF9296]" : "text-white")}>
-                    <CountUp value={currentCash} /> <span className="text-lg text-slate-400 font-medium">PLN</span>
+                    <CountUp value={currentCash} /> <span className="text-lg text-slate-400 font-medium">zł</span>
                   </h2>
                   <p className="text-xs text-slate-400 font-medium mt-0.5">Dostępny budżet zespołu</p>
                 </div>
@@ -711,7 +711,7 @@ export default function FinancesPage() {
             >
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#2C4BFF]">Suma Wpływów</p>
-                <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}>+<CountUp value={totalIncome} /> PLN</h3>
+                <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}>+<CountUp value={totalIncome} /> zł</h3>
                 <p className="mt-0.5 text-[11px] font-medium text-slate-400">Wszystkie przychody</p>
               </div>
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#2C4BFF]/10 text-[#2C4BFF] border border-[#2C4BFF]/20 shrink-0">
@@ -728,7 +728,7 @@ export default function FinancesPage() {
             >
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#FF5A5F]">Suma Wydatków</p>
-                <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}>-<CountUp value={totalExpense} /> PLN</h3>
+                <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}>-<CountUp value={totalExpense} /> zł</h3>
                 <p className="mt-0.5 text-[11px] font-medium text-slate-400">Wszystkie koszty</p>
               </div>
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FF5A5F]/10 text-[#FF5A5F] border border-[#FF5A5F]/20 shrink-0">
@@ -739,7 +739,7 @@ export default function FinancesPage() {
             <div className="rounded-[24px] border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#7A5CFF]">Nadpłaty Graczy</p>
-                <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}><CountUp value={totalOverpayments} /> PLN</h3>
+                <h3 className={cn(score.className, "mt-1 text-xl font-semibold text-slate-900 tabular-nums")}><CountUp value={totalOverpayments} /> zł</h3>
                 <p className="mt-0.5 text-[11px] font-medium text-slate-400">Zaliczki zawodników</p>
               </div>
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#7A5CFF]/10 text-[#7A5CFF] border border-[#7A5CFF]/20 shrink-0">
@@ -886,7 +886,7 @@ export default function FinancesPage() {
                                 "p-4 text-right font-black text-sm whitespace-nowrap",
                                 tx.type === "income" ? "text-[#00875F]" : "text-[#E0454A]"
                               )}>
-                                {tx.type === "income" ? "+" : "-"}{Number(tx.amount).toFixed(2)} PLN
+                                {tx.type === "income" ? "+" : "-"}{Number(tx.amount).toFixed(2)} zł
                               </td>
                               {isAdmin && (
                                 <td className="p-4 text-right">
@@ -927,7 +927,7 @@ export default function FinancesPage() {
                               "font-black text-sm whitespace-nowrap shrink-0",
                               tx.type === "income" ? "text-[#00875F]" : "text-[#E0454A]"
                             )}>
-                              {tx.type === "income" ? "+" : "-"}{Number(tx.amount).toFixed(2)} PLN
+                              {tx.type === "income" ? "+" : "-"}{Number(tx.amount).toFixed(2)} zł
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
@@ -993,7 +993,7 @@ export default function FinancesPage() {
                       >
                         <div className="mb-1.5 flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-slate-900">{cat.label}</span>
-                          <span className="text-xs font-black" style={{ color: cat.color }}>{cat.total.toFixed(2)} PLN</span>
+                          <span className="text-xs font-black" style={{ color: cat.color }}>{cat.total.toFixed(2)} zł</span>
                         </div>
                         <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
                           <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: cat.color }} />
@@ -1040,7 +1040,7 @@ export default function FinancesPage() {
                           ? "bg-[#7A5CFF]/10 text-[#4B2FB0] border-[#7A5CFF]/25"
                           : "bg-slate-100 text-slate-400 border-slate-200"
                       )}>
-                        +{Number(player.balance).toFixed(2)} PLN
+                        +{Number(player.balance).toFixed(2)} zł
                       </span>
                     </div>
                   ))
@@ -1133,7 +1133,7 @@ export default function FinancesPage() {
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Kwota (PLN)</label>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Kwota (zł)</label>
               <input
                 type="number"
                 step="0.01"
@@ -1208,7 +1208,7 @@ export default function FinancesPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">Kwota wpłaty (PLN)</label>
+            <label className="block text-xs font-bold text-slate-500 mb-1">Kwota wpłaty (zł)</label>
             <input
               type="number"
               required

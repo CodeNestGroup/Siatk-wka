@@ -142,7 +142,7 @@ export function buildGoogleCalendarUrl(m: MatchCalendarInfo): string {
     text: matchCalendarTitle(m),
     dates: `${toIcsUtc(start)}/${toIcsUtc(end)}`,
     location: m.location || "",
-    details: m.price ? `Składka: ${m.price} PLN / os.` : ""
+    details: m.price ? `Składka: ${m.price} zł / os.` : ""
   })
   return `https://calendar.google.com/calendar/render?${params.toString()}`
 }
@@ -163,7 +163,7 @@ export function downloadMatchIcs(m: MatchCalendarInfo) {
     `DTEND:${toIcsUtc(end)}`,
     `SUMMARY:${matchCalendarTitle(m).replace(/\r?\n/g, " ")}`,
     `LOCATION:${(m.location || "").replace(/\r?\n/g, " ")}`,
-    `DESCRIPTION:${m.price ? `Składka: ${m.price} PLN / os.` : ""}`,
+    `DESCRIPTION:${m.price ? `Składka: ${m.price} zł / os.` : ""}`,
     "END:VEVENT",
     "END:VCALENDAR"
   ].join("\r\n")

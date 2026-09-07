@@ -331,7 +331,7 @@ export default function SettingsPage() {
       return sum + (r.is_paid ? (priceMap[r.match_id] || 25) : 0)
     }, 0)
 
-    let csv = "Moje Imię,Rozegrane Mecze,Suma Wydanych Środków (PLN)\n"
+    let csv = "Moje Imię,Rozegrane Mecze,Suma Wydanych Środków (zł)\n"
     csv += `"${fullName}",${myMatchesCount},${totalSpent}\n`
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })

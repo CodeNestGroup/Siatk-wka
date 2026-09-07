@@ -111,7 +111,7 @@ export function NotificationsBell({
           id: key,
           dbId: String(t.id),
           title: t.type === "income" ? "Nowa wpłata" : "Nowy wydatek",
-          description: `${t.title} (${t.amount} PLN)`,
+          description: `${t.title} (${t.amount} zł)`,
           date: t.created_at ? new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Dzisiaj",
           type: "finance",
           read: false,
