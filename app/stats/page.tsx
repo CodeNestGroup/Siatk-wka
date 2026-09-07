@@ -567,7 +567,9 @@ export default function StatsPage() {
                       </div>
                       <div className="flex items-center justify-between pt-1.5 border-t border-slate-100">
                         <span>Lider frekwencji</span>
-                        <span className="text-slate-900 font-bold truncate max-w-[9rem]" style={{ color: col.accent }}>{col.stats.topPlayer.name}</span>
+                        <span className="text-slate-900 font-bold truncate max-w-[9rem]" style={{ color: col.accent }}>
+                          {col.stats.totalMatches > 0 ? col.stats.topPlayer.name : "Brak danych"}
+                        </span>
                       </div>
                     </div>
                   </div>
