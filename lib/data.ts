@@ -23,6 +23,9 @@ export type Player = {
   registeredAt: string
   paid: boolean
   fee: number
+  // Opłacone z depozytu (Nadpłaty Graczy) zamiast świeżą gotówką za ten konkretny mecz —
+  // patrz supabase/player-credit-ledger-migration.sql i handleJoinMatch w match-detail.tsx.
+  paid_from_credit?: boolean
 }
 
 export type MatchStatus = "upcoming" | "past"

@@ -19,9 +19,13 @@
  * `CountUp` (animowane podliczanie kwot, ten sam wzorzec co na innych stronach).
  * Dane z Supabase: tabela `transactions` (date, title, type: "income"|"expense", amount,
  * collected_by, category) — czytana przez `getTransactions()`, zapisywana bezpośrednio
- * przez `supabase.from('transactions')` (insert/update/delete); tabela/widok
- * `player_balances` (id, name, balance) — czytana przez `getPlayerBalances()`, wyłącznie
- * do odczytu (nadpłaty liczone są gdzie indziej, tu tylko prezentowane).
+ * przez `supabase.from('transactions')` (insert/update/delete); widok `player_balances`
+ * (id, name, balance) — czytany przez `getPlayerBalances()`, wyliczany z tabeli
+ * `player_credit_ledger` (SUM amount per gracz). Ta strona zapisuje do obu naraz przez
+ * "Doładuj zawodnika" (`handleSubmitTopup`) — gotówka wpłacona z góry trafia jako przychód
+ * do `transactions` ORAZ jako dodatni wpis w `player_credit_ledger`; zużycie depozytu przy
+ * zapisie na kolejne mecze dzieje się w components/dashboard/match-detail.tsx, nie tutaj.
+ * Patrz supabase/player-credit-ledger-migration.sql po pełny opis mechanizmu.
  * Uwagi: logowanie jest własne (localStorage["volley_user"], BEZ Supabase Auth), `isAdmin`
  * steruje widocznością przycisku dodawania i kolumny akcji w tabeli. Domyślnie lista
  * transakcji pokazuje tylko ostatnie 30 dni (`showFullHistory` rozwija pełną historię),
@@ -86,6 +90,7 @@ const CATEGORIES: { id: string; label: string; color: string }[] = [
   { id: "mecz", label: "Mecz", color: COBALT },
   { id: "sprzet", label: "Sprzęt", color: VIOLET },
   { id: "hala", label: "Hala", color: YELLOW },
+  { id: "doladowanie", label: "Doładowanie", color: VIOLET },
   { id: "inne", label: "Inne", color: "#94A3B8" },
 ]
 
@@ -198,6 +203,15 @@ export default function FinancesPage() {
 
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [playerBalances, setPlayerBalances] = useState<PlayerOverpayment[]>([])
+  const [allPlayers, setAllPlayers] = useState<{ id: string; full_name: string }[]>([])
+
+  // Stan modala doładowania depozytu zawodnika — osobny od "Dodaj wpłatę/wydatek", bo to
+  // inna operacja: wybór KONKRETNEGO gracza i zapis jednocześnie do dwóch miejsc (wpływ w
+  // `transactions` + zapis w `player_credit_ledger`), a nie tylko jeden wiersz w księdze.
+  const [showTopupModal, setShowTopupModal] = useState(false)
+  const [topupPlayerId, setTopupPlayerId] = useState("")
+  const [topupAmount, setTopupAmount] = useState("")
+  const [isSubmittingTopup, setIsSubmittingTopup] = useState(false)
 
   // Stan formularza modala dodawania/edycji operacji (wpłaty lub wydatku)
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null)
@@ -248,13 +262,15 @@ export default function FinancesPage() {
   // wywoływane zarówno przy starcie strony, jak i po nieudanym usunięciu (odświeżenie stanu)
   async function loadData() {
     setIsLoading(true)
-    const [txData, balancesData] = await Promise.all([
+    const [txData, balancesData, playersRes] = await Promise.all([
       getTransactions(),
-      getPlayerBalances()
+      getPlayerBalances(),
+      supabase.from("players").select("id, full_name").order("full_name", { ascending: true })
     ])
 
     setTransactions(txData)
     setPlayerBalances(balancesData)
+    setAllPlayers(playersRes.data || [])
     setIsLoading(false)
   }
 
@@ -338,6 +354,78 @@ export default function FinancesPage() {
   const totalOverpayments = useMemo(() => {
     return playerBalances.reduce((acc, p) => acc + (Number(p.balance) > 0 ? Number(p.balance) : 0), 0)
   }, [playerBalances])
+
+  // ────────────────────────────────────────────────────────────────
+  // MODAL DOŁADOWANIA DEPOZYTU — gracz płaci gotówką z góry za wiele przyszłych spotkań
+  // (np. "300 zł za 12 meczów"), zamiast płacić przy każdym z osobna. Zapis idzie w DWA
+  // miejsca naraz: `transactions` (gotówka fizycznie wpłynęła do kasy klubu TERAZ) i
+  // `player_credit_ledger` (depozyt na koncie gracza, zużywany automatycznie przy zapisach
+  // na kolejne mecze — patrz `handleJoinMatch` w components/dashboard/match-detail.tsx).
+  // ────────────────────────────────────────────────────────────────
+  function openTopupModal() {
+    setTopupPlayerId("")
+    setTopupAmount("")
+    setShowTopupModal(true)
+  }
+
+  function closeTopupModal() {
+    setShowTopupModal(false)
+  }
+
+  async function handleSubmitTopup(e: React.FormEvent) {
+    e.preventDefault()
+    if (!topupPlayerId || !topupAmount) return
+
+    const amountNum = parseFloat(topupAmount)
+    if (!(amountNum > 0)) return
+
+    setIsSubmittingTopup(true)
+    const player = allPlayers.find((p) => p.id === topupPlayerId)
+    const collectorName = user?.name || user?.full_name || "Administrator"
+
+    const { data: txData, error: txError } = await supabase
+      .from("transactions")
+      .insert([{
+        date: new Date().toISOString().split("T")[0],
+        title: `Doładowanie: ${player?.full_name || "Zawodnik"}`,
+        type: "income",
+        amount: amountNum,
+        collected_by: collectorName,
+        category: "doladowanie",
+      }])
+      .select()
+
+    if (txError) {
+      notify(`Błąd zapisu: ${txError.message}`)
+      setIsSubmittingTopup(false)
+      return
+    }
+
+    const { error: ledgerError } = await supabase.from("player_credit_ledger").insert([{
+      player_id: topupPlayerId,
+      amount: amountNum,
+      reason: "Doładowanie gotówką z góry",
+      created_by: user?.id,
+    }])
+
+    if (ledgerError) {
+      notify("Wpłata zaksięgowana w kasie, ale zapis depozytu się nie powiódł.")
+    } else {
+      notify(`Doładowano ${player?.full_name || "zawodnika"} na ${amountNum} PLN.`)
+      notifyPush({
+        title: "Doładowanie depozytu",
+        body: `${player?.full_name || "Zawodnik"} — ${amountNum} PLN`,
+        url: "/finances",
+        excludePlayerId: user?.id
+      })
+    }
+
+    if (txData && txData.length > 0) setTransactions((prev) => [txData[0], ...prev])
+    const freshBalances = await getPlayerBalances()
+    setPlayerBalances(freshBalances)
+    closeTopupModal()
+    setIsSubmittingTopup(false)
+  }
 
   // ────────────────────────────────────────────────────────────────
   // MODAL DODAWANIA / EDYCJI OPERACJI — otwieranie, wypełnianie formularza, zapis
@@ -557,14 +645,24 @@ export default function FinancesPage() {
             </div>
 
             {isAdmin && (
-              <button
-                onClick={openAddTransaction}
-                className="h-10 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 text-white cursor-pointer active:scale-[0.97] shadow-md transition-all"
-                style={{ background: COBALT, boxShadow: `0 4px 14px -4px ${COBALT}80` }}
-              >
-                <Plus className="h-4 w-4" />
-                Dodaj wpłatę / wydatek
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={openTopupModal}
+                  className="h-10 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 text-white cursor-pointer active:scale-[0.97] shadow-md transition-all"
+                  style={{ background: VIOLET, boxShadow: `0 4px 14px -4px ${VIOLET}80` }}
+                >
+                  <PiggyBank className="h-4 w-4" />
+                  Doładuj zawodnika
+                </button>
+                <button
+                  onClick={openAddTransaction}
+                  className="h-10 rounded-2xl font-bold text-xs flex items-center gap-2 px-4 text-white cursor-pointer active:scale-[0.97] shadow-md transition-all"
+                  style={{ background: COBALT, boxShadow: `0 4px 14px -4px ${COBALT}80` }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Dodaj wpłatę / wydatek
+                </button>
+              </div>
             )}
           </div>
 
@@ -1000,8 +1098,11 @@ export default function FinancesPage() {
 
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">Kategoria</label>
+            {/* "Doładowanie" celowo wyłączone z tego pickera — wybranie jej tutaj tylko
+                nadałoby transakcji etykietę, bez zapisu w player_credit_ledger. Do
+                doładowania depozytu służy dedykowany przycisk "Doładuj zawodnika". */}
             <div className="grid grid-cols-4 gap-1.5">
-              {CATEGORIES.map((cat) => (
+              {CATEGORIES.filter((cat) => cat.id !== "doladowanie").map((cat) => (
                 <button
                   key={cat.id}
                   type="button"
@@ -1063,6 +1164,69 @@ export default function FinancesPage() {
             </Button>
             <Button type="submit" disabled={isSubmitting} className="rounded-xl text-xs bg-[#2C4BFF] hover:bg-[#1D3AE8] text-white font-bold cursor-pointer shadow-md shadow-[#2C4BFF]/20">
               {isSubmitting ? "Zapisywanie..." : editingTransactionId ? "Zapisz zmiany" : "Zapisz operację"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL: Doładuj zawodnika — osobny od modala wpłat/wydatków, bo tworzy DWA zapisy
+          naraz (patrz handleSubmitTopup) */}
+      <Modal
+        open={showTopupModal}
+        onClose={closeTopupModal}
+        overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
+        cardClassName="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl space-y-4 text-slate-900"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <h2 className={cn(display.className, "text-base font-bold text-slate-900 flex items-center gap-2")}>
+            <PiggyBank className="h-4 w-4 text-[#7A5CFF]" />
+            Doładuj zawodnika
+          </h2>
+          <button onClick={closeTopupModal} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 cursor-pointer active:scale-90 transition-transform">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <p className="text-xs text-slate-500 -mt-2">
+          Gracz zapłacił gotówką z góry za wiele przyszłych spotkań. Kwota od razu trafia do kasy klubu, a zapisując się na kolejne mecze, gracz automatycznie pokryje je z tego depozytu.
+        </p>
+
+        <form onSubmit={handleSubmitTopup} className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">Zawodnik</label>
+            <select
+              required
+              value={topupPlayerId}
+              onChange={(e) => setTopupPlayerId(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-[#7A5CFF] focus:bg-white transition-all"
+            >
+              <option value="" disabled>— Wybierz zawodnika —</option>
+              {allPlayers.map((p) => (
+                <option key={p.id} value={p.id}>{p.full_name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">Kwota wpłaty (PLN)</label>
+            <input
+              type="number"
+              required
+              min="0.01"
+              step="0.01"
+              value={topupAmount}
+              onChange={(e) => setTopupAmount(e.target.value)}
+              placeholder="np. 300"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-[#7A5CFF] focus:bg-white transition-all"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <Button type="button" variant="ghost" onClick={closeTopupModal} className="rounded-xl text-xs font-bold cursor-pointer">
+              Anuluj
+            </Button>
+            <Button type="submit" disabled={isSubmittingTopup} className="rounded-xl text-xs bg-[#7A5CFF] hover:bg-[#6647E0] text-white font-bold cursor-pointer shadow-md shadow-[#7A5CFF]/20">
+              {isSubmittingTopup ? "Zapisywanie..." : "Zaksięguj doładowanie"}
             </Button>
           </div>
         </form>

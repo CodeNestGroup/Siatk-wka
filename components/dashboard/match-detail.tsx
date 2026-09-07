@@ -122,6 +122,14 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   const paidRosterCount = rawRoster.filter((p: any) => p.paid || p.is_paid).length
   const unpaidRosterCount = rawRoster.length - paidRosterCount
   const totalCollectedSoFar = paidRosterCount * price
+  // Ile z opłaconych miejsc pokryto z wcześniej wpłaconego depozytu (Nadpłaty Graczy w
+  // Finansach) zamiast świeżą gotówką za TEN konkretny mecz. Gotówka za depozyt wpłynęła do
+  // kasy klubu już w momencie doładowania — licząc ją jeszcze raz przy rozliczaniu TEGO meczu,
+  // zdublowalibyśmy wpływy w Finansach. `freshCashCount` to jedyna część, którą faktycznie
+  // trzeba dopiero zaksięgować.
+  const creditCoveredCount = rawRoster.filter((p: any) => (p.paid || p.is_paid) && p.paid_from_credit).length
+  const freshCashCount = paidRosterCount - creditCoveredCount
+  const freshCashToBook = freshCashCount * price
   const isSettled = !!match.is_settled
   // Mecz odwołany zamraża cały skład — zapisy, wypisy i płatności przestają mieć sens, skoro
   // wydarzenie się nie odbędzie. Wcześniej te akcje działały nadal (widać było tylko czerwony
@@ -220,35 +228,41 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     const hasCustomTitle = match.title && match.title !== match.date
     const matchTitle = hasCustomTitle ? match.title : `Zbiórka na hali (${formatDatePL(match.date)})`
 
-    const newTx = {
-      date: new Date().toISOString().split("T")[0],
-      title: `Zbiórka z meczu: ${matchTitle}`,
-      type: "income",
-      // Tylko realnie zebrana kwota (na podstawie faktycznych flag is_paid w momencie
-      // zatwierdzania) — nie liczba miejsc w składzie razy cena. Kasa klubu w Finansach ma
-      // pokazywać co naprawdę wpłynęło, a nie co powinno wpłynąć przy 100% frekwencji wpłat.
-      amount: totalCollectedSoFar,
-      collected_by: collectorName,
-      category: "mecz",
-    }
+    // Gracze opłaceni z depozytu (paid_from_credit) mają swoją gotówkę policzoną w kasie
+    // JUŻ przy doładowaniu — księgowanie ich jeszcze raz tutaj zdublowałoby wpływy klubu.
+    // Do Finansów trafia tylko `freshCashToBook`: świeża gotówka zebrana za TEN mecz.
+    if (freshCashToBook > 0) {
+      const newTx = {
+        date: new Date().toISOString().split("T")[0],
+        title: `Zbiórka z meczu: ${matchTitle}`,
+        type: "income",
+        amount: freshCashToBook,
+        collected_by: collectorName,
+        category: "mecz",
+      }
 
-    const { error: txErr } = await supabase.from("transactions").insert([newTx])
+      const { error: txErr } = await supabase.from("transactions").insert([newTx])
 
-    if (txErr) {
-      notify("Mecz zablokowany, ale wpis do księgi zgłosił błąd.")
-    } else {
+      if (txErr) {
+        notify("Mecz zablokowany, ale wpis do księgi zgłosił błąd.")
+        onChange(updatedMatch)
+        setIsSaving(false)
+        return
+      }
+
       notifyPush({
         title: "Nowa wpłata w kasie",
-        body: `${newTx.title} (${totalCollectedSoFar} PLN)`,
+        body: `${newTx.title} (${freshCashToBook} PLN)`,
         url: "/finances",
         excludePlayerId: currentUser?.id
       })
-      notify(
-        unpaidRosterCount > 0
-          ? `Pomyślnie rozliczono! +${totalCollectedSoFar} PLN w Finansach (bez ${unpaidRosterCount} nieopłaconych).`
-          : `Pomyślnie rozliczono! +${totalCollectedSoFar} PLN w Finansach.`
-      )
     }
+
+    const parts: string[] = []
+    if (creditCoveredCount > 0) parts.push(`${creditCoveredCount} z depozytu`)
+    if (unpaidRosterCount > 0) parts.push(`${unpaidRosterCount} nieopłaconych`)
+    const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : ""
+    notify(`Pomyślnie rozliczono! +${freshCashToBook} PLN w Finansach${suffix}.`)
 
     onChange(updatedMatch)
     setIsSaving(false)
@@ -295,6 +309,8 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
 
   async function performRemovePlayer(playerId: string) {
     setConfirmDialog(null)
+    const removedPlayer = (match.players || []).find((p: any) => p.id === playerId)
+
     const { error } = await supabase
       .from("match_registrations")
       .delete()
@@ -302,9 +318,22 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
       .eq("player_id", playerId)
 
     if (!error) {
+      // Zwrot do depozytu — jeśli to miejsce było opłacone z Nadpłat Graczy, wypisanie oddaje
+      // tę kwotę z powrotem na konto, zamiast bezpowrotnie "zjadać" depozyt za mecz, na który
+      // ostatecznie ktoś nie poszedł.
+      if (removedPlayer?.paid_from_credit) {
+        await supabase.from("player_credit_ledger").insert([{
+          player_id: playerId,
+          amount: price,
+          reason: `Zwrot depozytu — wypisano z meczu ${formatDatePL(match.date)}`,
+          match_id: match.id,
+          created_by: currentUser?.id
+        }])
+      }
+
       const updatedPlayers = (match.players || []).filter((p: any) => p.id !== playerId)
       onChange({ ...match, players: updatedPlayers })
-      notify("Wypisano zawodnika ze składu.")
+      notify(removedPlayer?.paid_from_credit ? "Wypisano zawodnika, zwrócono depozyt." : "Wypisano zawodnika ze składu.")
     }
   }
 
@@ -315,25 +344,58 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     if (!currentUser || isSettled || isCancelled || isJoining || isUserInMatch) return
     setIsJoining(true)
 
+    // Jeśli gracz ma wystarczający depozyt (Nadpłaty Graczy w Finansach), zapis od razu
+    // pokrywamy z niego zamiast wymagać kolejnej wpłaty gotówką na hali — po to właśnie
+    // opłaca się komuś zapłacić z góry za wiele spotkań naraz. Częściowe pokrycie (za mało
+    // depozytu na całą składkę) świadomie pomijamy — prościej niż rozliczanie ułamków.
+    const { data: balanceRow } = await supabase
+      .from("player_balances")
+      .select("balance")
+      .eq("id", currentUser.id)
+      .maybeSingle()
+
+    // Rezerwa nie zużywa depozytu — trafiając na listę rezerwową, gracz wcale nie ma
+    // pewności, że zagra (wchodzi tylko jeśli ktoś wypadnie ze składu głównego), więc
+    // ściąganie mu za to pieniędzy z góry byłoby nie fair.
+    const joiningAsReserve = rawRoster.length >= capacity
+    const availableCredit = Number(balanceRow?.balance || 0)
+    const useCredit = !joiningAsReserve && availableCredit >= price
+
     const { error } = await supabase.from("match_registrations").insert([
       {
         match_id: match.id,
         player_id: currentUser.id,
-        is_paid: true
+        is_paid: true,
+        paid_from_credit: useCredit
       }
     ])
 
     if (!error) {
+      if (useCredit) {
+        await supabase.from("player_credit_ledger").insert([{
+          player_id: currentUser.id,
+          amount: -price,
+          reason: `Wykorzystano depozyt — mecz ${formatDatePL(match.date)}`,
+          match_id: match.id,
+          created_by: currentUser.id
+        }])
+      }
+
       const newPlayerObj = {
         id: currentUser.id,
         name: currentUser.full_name || currentUser.name || "Zawodnik",
         full_name: currentUser.full_name || currentUser.name || "Zawodnik",
         email: currentUser.email || "",
         paid: true,
-        is_paid: true
+        is_paid: true,
+        paid_from_credit: useCredit
       }
       onChange({ ...match, players: [...(match.players || []), newPlayerObj] })
-      notify("Dołączyłeś do listy na ten mecz!")
+      notify(
+        useCredit
+          ? `Dołączyłeś do meczu — opłacone z depozytu (zostało ${(availableCredit - price).toFixed(2)} PLN).`
+          : "Dołączyłeś do listy na ten mecz!"
+      )
     }
     setIsJoining(false)
   }
@@ -443,14 +505,24 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
             Mecz został już rozliczony i zaksięgowany w finansach
           </div>
         ) : isAdmin && (
-          <Button
-            onClick={handleSettleAndSave}
-            disabled={isSaving || rawRoster.length === 0}
-            className="w-full rounded-2xl py-3 font-bold gap-2 bg-[#00C48C] hover:bg-[#00A876] text-white shadow-md shadow-[#00C48C]/25 cursor-pointer text-xs"
-          >
-            <Receipt className="h-4 w-4" />
-            {isSaving ? "Księgowanie w finansach..." : `Zatwierdź i rozlicz w Finansach (+${totalCollectedSoFar} PLN)`}
-          </Button>
+          <div className="space-y-1.5">
+            <Button
+              onClick={handleSettleAndSave}
+              disabled={isSaving || rawRoster.length === 0}
+              className="w-full rounded-2xl py-3 font-bold gap-2 bg-[#00C48C] hover:bg-[#00A876] text-white shadow-md shadow-[#00C48C]/25 cursor-pointer text-xs"
+            >
+              <Receipt className="h-4 w-4" />
+              {isSaving ? "Księgowanie w finansach..." : `Zatwierdź i rozlicz w Finansach (+${freshCashToBook} PLN)`}
+            </Button>
+            {/* Widoczne tylko gdy część składu pokryła depozytem — bez tego różnica między
+                "300 PLN zebrano" w karcie statusu wyżej a kwotą na tym przycisku (świeża
+                gotówka minus depozyty, już wcześniej w kasie) wyglądałaby jak błąd. */}
+            {creditCoveredCount > 0 && (
+              <p className="text-center text-[10px] font-semibold text-slate-400">
+                {creditCoveredCount} {creditCoveredCount === 1 ? "osoba opłaciła" : "osób opłaciło"} z depozytu — ta gotówka jest już w kasie
+              </p>
+            )}
+          </div>
         )}
 
         {/* LISTA ZAWODNIKÓW — nagłówek z akcją WhatsApp zostaje NA STAŁE widoczny nad listą,
@@ -526,6 +598,16 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {/* Opłacone z depozytu (Nadpłaty Graczy) zamiast świeżą gotówką za ten
+                          mecz — gotówka za to wpisowe wpłynęła do kasy już przy doładowaniu. */}
+                      {isPaid && player.paid_from_credit && (
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-bold border bg-[#7A5CFF]/10 text-[#4B2FB0] border-[#7A5CFF]/25"
+                          title="Opłacone z wcześniej wpłaconego depozytu"
+                        >
+                          z depozytu
+                        </span>
+                      )}
                       {canTogglePaid ? (
                         <button
                           onClick={() => handleTogglePaid(player.id, isPaid)}

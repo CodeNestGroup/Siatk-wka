@@ -532,6 +532,7 @@ export default function DashboardPage() {
           email: playerInfo?.email || "",
           paid: reg.is_paid,
           is_paid: reg.is_paid,
+          paid_from_credit: !!reg.paid_from_credit,
           is_core_roster: playerInfo?.is_core_roster,
           core_order: playerInfo?.core_order,
           core_added_at: playerInfo?.core_added_at
