@@ -79,7 +79,7 @@ import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/ui/modal"
 import { SupportModal } from "@/components/dashboard/support-modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
-import { type Match, mainRoster, waitlist, isMatchCancelled } from "@/lib/data"
+import { type Match, mainRoster, waitlist, isMatchCancelled, getActiveSeasonId } from "@/lib/data"
 import { cn, formatDatePL, normalizeSearchText, fuzzySearchMatch, addMatchToCalendar } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import { notifyPush } from "@/lib/push"
@@ -833,6 +833,11 @@ export default function DashboardPage() {
     setIsCreating(true)
     const todayStr = new Date().toISOString().split("T")[0]
     const datesToCreate = calculateGeneratedDates()
+    // Mecz trafia do aktualnie aktywnego sezonu automatycznie — bez tego nowe mecze utworzone
+    // po zamknięciu sezonu (patrz "Zakończ sezon" na /stats) wciąż liczyłyby się do starego,
+    // bo `season_id` domyślnie byłby pusty. `null`, gdy sezonów jeszcze nie ma (migracja
+    // nieuruchomiona) — mecz i tak się tworzy, po prostu bez przypisania do żadnego sezonu.
+    const activeSeasonId = await getActiveSeasonId()
 
     const matchesToInsert = datesToCreate.map((matchDateStr) => {
       const initialStatusId = matchDateStr < todayStr ? 3 : 1
@@ -848,7 +853,8 @@ export default function DashboardPage() {
         capacity: Number(newCapacity) || 12,
         max_players: Number(newCapacity) || 12,
         status_id: initialStatusId,
-        is_settled: false
+        is_settled: false,
+        season_id: activeSeasonId
       }
     })
 

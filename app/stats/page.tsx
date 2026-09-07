@@ -6,26 +6,35 @@
  * Co to jest: Strona z podsumowaniem sezonu — frekwencją, terminowością wpłat i rankingiem
  * aktywności zawodników, wyliczanym w całości po stronie klienta na podstawie surowych danych
  * z Supabase (bez osobnego widoku/RPC agregującego w bazie).
- * Renderuje: pasek sponsorów z marquee + dzwoneczek powiadomień -> hero "Lider Frekwencji
- * Sezonu" z podium TOP 3 (placeholder, jeśli sezon jeszcze się nie zaczął) -> karta "Twoja
- * frekwencja" (tylko gdy zalogowany zawodnik ma już jakieś statystyki) -> trzy kafelki
- * podsumowania (rozegrane sesje, średnia frekwencja, wpłacalność składek) -> tabela rankingu
- * (widok tabelaryczny od md w górę, karty na mobile z opcją "Pokaż cały ranking") z
- * wyszukiwarką odporną na literówki/polskie znaki.
- * Kluczowe zależności: `Sidebar`, `NotificationsBell`, `SupportModal` ("Postaw kawę"),
- * `fuzzySearchMatch`/`normalizeSearchText` z lib/utils (wyszukiwarka w tabeli graczy),
- * lokalny komponent `CountUp` (płynna animacja liczników liczb na kafelkach).
- * Dane z Supabase: `matches` (`*` — w tym `date`, `status_id`, `is_settled`, potrzebne do
- * ustalenia, czy mecz się już odbył), `players` (jawna lista kolumn bez `password` — patrz
- * supabase/harden-anon-access.sql), `match_registrations` (`match_id`, `player_id`,
- * `is_paid`/`paid` — kto grał i czy zapłacił za konkretny mecz). Zapis meczu z listą graczy
- * budowany jest ręcznie przez złączenie tych trzech zapytań w `loadStatsData` — tabela
- * `matches` sama w sobie nie ma kolumny `players`.
- * Uwagi: Definicja "mecz rozegrany" (`completedMatches`) MUSI być identyczna jak na stronie
- * głównej (app/page.tsx: `isMatchPast`) i w app/settings/page.tsx (`playedMatchesCount`) —
- * to nie `status_id === 3`/`is_settled`, tylko data w przeszłości LUB jedna z tych dwóch flag
- * (a mecz odwołany, `status_id === 4`, nigdy się nie liczy). Rozjazd tej definicji między
- * stronami objawiał się kiedyś jako "sezon się nie zaczął" mimo realnie odbytych meczów.
+ * Renderuje: pasek sponsorów z marquee + dzwoneczek powiadomień -> nagłówek z przełącznikiem
+ * sezonu (select + "Porównaj z..." + admin: "Zakończ sezon") -> pasek porównania sezonów
+ * (tylko gdy wybrano drugi sezon) -> hero "Lider Frekwencji Sezonu" z podium TOP 3
+ * (placeholder, jeśli sezon jeszcze się nie zaczął) -> karta "Twoja frekwencja" (tylko gdy
+ * zalogowany zawodnik ma już jakieś statystyki) -> trzy kafelki podsumowania (rozegrane
+ * sesje, średnia frekwencja, wpłacalność składek) -> tabela rankingu (widok tabelaryczny od
+ * md w górę, karty na mobile z opcją "Pokaż cały ranking") z wyszukiwarką odporną na
+ * literówki/polskie znaki -> modal "Zakończ sezon".
+ * Kluczowe zależności: `Sidebar`, `NotificationsBell`, `SupportModal` ("Postaw kawę"), `Modal`
+ * (modal "Zakończ sezon"), `fuzzySearchMatch`/`normalizeSearchText` z lib/utils (wyszukiwarka
+ * w tabeli graczy), lokalny komponent `CountUp` (animacja liczników) oraz `computeSeasonStats`
+ * (moduł-level, licząca statystyki dla JEDNEGO zestawu meczów — wywoływana dwa razy: dla
+ * wybranego sezonu i, opcjonalnie, dla porównywanego).
+ * Dane z Supabase: `matches` (`*` — w tym `date`, `status_id`, `is_settled`, `season_id`,
+ * potrzebne do ustalenia, czy mecz się już odbył i do którego sezonu należy), `players`
+ * (jawna lista kolumn bez `password` — patrz supabase/harden-anon-access.sql),
+ * `match_registrations` (`match_id`, `player_id`, `is_paid`/`paid` — kto grał i czy zapłacił
+ * za konkretny mecz), `seasons` (`id`, `name`, `started_at`, `closed_at` — patrz
+ * supabase/seasons-migration.sql; `closed_at is null` = sezon aktywny). Zapis meczu z listą
+ * graczy budowany jest ręcznie przez złączenie zapytań matches/players/match_registrations w
+ * `loadStatsData` — tabela `matches` sama w sobie nie ma kolumny `players`.
+ * Uwagi: Definicja "mecz rozegrany" (`completedMatches`, w `computeSeasonStats`) MUSI być
+ * identyczna jak na stronie głównej (app/page.tsx: `isMatchPast`) i w app/settings/page.tsx
+ * (`playedMatchesCount`) — to nie `status_id === 3`/`is_settled`, tylko data w przeszłości
+ * LUB jedna z tych dwóch flag (a mecz odwołany, `status_id === 4`, nigdy się nie liczy).
+ * Rozjazd tej definicji między stronami objawiał się kiedyś jako "sezon się nie zaczął" mimo
+ * realnie odbytych meczów. Dopóki migracja sezonów nie została uruchomiona (`seasons` puste),
+ * strona pokazuje WSZYSTKIE mecze naraz (jak przed tą funkcją) — przełącznik sezonu i
+ * porównanie po prostu się nie renderują, żadna migracja nie jest wymagana do działania.
  * Autoryzacja jest własna (bez Supabase Auth) — sesja w localStorage pod kluczem
  * `volley_user`; strona nie ma trybu dla niezalogowanych (`if (!user) return null`).
  */
@@ -43,12 +52,15 @@ import {
   X,
   Coffee,
   Medal,
-  ChevronDown
+  ChevronDown,
+  Flag,
+  ArrowLeftRight
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
 import { GlobalSearch } from "@/components/dashboard/global-search"
 import { SupportModal } from "@/components/dashboard/support-modal"
+import { Modal } from "@/components/ui/modal"
 import { supabase } from "@/lib/supabase"
 import { cn, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
 
@@ -123,6 +135,72 @@ function CountUp({ value, decimals = 0 }: { value: number; decimals?: number }) 
   return <>{displayValue.toFixed(decimals)}</>
 }
 
+// ────────────────────────────────────────────────────────────────
+// STATYSTYKI DLA JEDNEGO SEZONU — wydzielone z ciała komponentu, żeby to samo liczenie
+// (definicja "rozegrany", ranking graczy, średnia frekwencja, wpłacalność) dało się wywołać
+// DWA razy: raz dla wybranego sezonu, drugi raz dla sezonu porównywanego — bez duplikowania
+// logiki w dwóch miejscach, które łatwo byłoby przypadkiem rozjechać przy przyszłej zmianie.
+// ────────────────────────────────────────────────────────────────
+type PlayerStat = { name: string; matches: number; paidCount: number; unpaidCount: number }
+
+function computeSeasonStats(seasonMatches: any[], allPlayers: any[]) {
+  const todayStr = new Date().toISOString().split("T")[0]
+
+  // Ta sama definicja "mecz rozegrany" co na stronie głównej (isMatchPast) i w Ustawieniach
+  // (playedMatchesCount) — patrz uwaga w nagłówku pliku o tym, dlaczego rozjazd tej definicji
+  // między stronami jest bolesny do wyśledzenia.
+  const completedMatches = seasonMatches.filter((m) => {
+    if (m.status_id === 4) return false
+    return m.date < todayStr || m.status_id === 3 || m.is_settled === true
+  })
+  const totalMatches = completedMatches.length
+
+  const statsMap: Record<string, PlayerStat> = {}
+  allPlayers.forEach((p) => {
+    const pName = p.full_name || p.name
+    if (pName && !pName.toLowerCase().includes("główny admin")) {
+      statsMap[pName] = { name: pName, matches: 0, paidCount: 0, unpaidCount: 0 }
+    }
+  })
+
+  completedMatches.forEach((m) => {
+    if (Array.isArray(m.players)) {
+      m.players.forEach((p: any) => {
+        const pName = p.name || p.full_name
+        if (!pName || pName.toLowerCase().includes("główny admin")) return
+
+        if (!statsMap[pName]) {
+          statsMap[pName] = { name: pName, matches: 0, paidCount: 0, unpaidCount: 0 }
+        }
+
+        statsMap[pName].matches += 1
+        if (p.paid || p.is_paid) {
+          statsMap[pName].paidCount += 1
+        } else {
+          statsMap[pName].unpaidCount += 1
+        }
+      })
+    }
+  })
+
+  const playerStats = Object.values(statsMap).sort((a, b) => b.matches - a.matches)
+  const topPlayer = playerStats[0] || { name: "Brak danych", matches: 0, paidCount: 0, unpaidCount: 0 }
+  const podium = playerStats.slice(0, 3)
+
+  const totalRosterEntries = completedMatches.reduce((acc, m) => acc + (Array.isArray(m.players) ? m.players.length : 0), 0)
+  const avgAttendance = totalMatches > 0 ? totalRosterEntries / totalMatches : 0
+
+  const totalPaidEntries = completedMatches.reduce((acc, m) => {
+    if (Array.isArray(m.players)) {
+      return acc + m.players.filter((p: any) => p.paid || p.is_paid).length
+    }
+    return acc
+  }, 0)
+  const paymentRate = totalRosterEntries > 0 ? Math.round((totalPaidEntries / totalRosterEntries) * 100) : 0
+
+  return { completedMatches, totalMatches, playerStats, topPlayer, podium, avgAttendance, paymentRate }
+}
+
 export default function StatsPage() {
   // ────────────────────────────────────────────────────────────────
   // STAN PODSTAWOWY — sidebar, sesja użytkownika, wyszukiwarka rankingu, rozwinięcie pełnej
@@ -141,6 +219,18 @@ export default function StatsPage() {
 
   const [matches, setMatches] = useState<any[]>([])
   const [players, setPlayers] = useState<any[]>([])
+
+  // ────────────────────────────────────────────────────────────────
+  // SEZONY — `closed_at is null` oznacza sezon aktywny (patrz supabase/seasons-migration.sql).
+  // `selectedSeasonId` steruje, którego sezonu dotyczą WSZYSTKIE statystyki niżej na stronie;
+  // `compareSeasonId` (opcjonalny) dokłada drugi zestaw liczb obok, do porównania sezon-do-sezonu.
+  // ────────────────────────────────────────────────────────────────
+  const [seasons, setSeasons] = useState<{ id: string; name: string; started_at: string; closed_at: string | null }[]>([])
+  const [selectedSeasonId, setSelectedSeasonId] = useState<string | null>(null)
+  const [compareSeasonId, setCompareSeasonId] = useState<string | null>(null)
+  const [showEndSeasonModal, setShowEndSeasonModal] = useState(false)
+  const [newSeasonName, setNewSeasonName] = useState("")
+  const [isEndingSeason, setIsEndingSeason] = useState(false)
 
   // ────────────────────────────────────────────────────────────────
   // INICJALIZACJA — odczyt sesji z localStorage (bez tego brak `user` blokuje render na
@@ -167,11 +257,18 @@ export default function StatsPage() {
     setIsLoading(true)
 
     // Jawna lista kolumn dla graczy zamiast "*" — celowo pomija `password`. Patrz supabase/harden-anon-access.sql.
-    const [{ data: matchesData }, { data: playersData }, { data: registrationsData }] = await Promise.all([
+    const [{ data: matchesData }, { data: playersData }, { data: registrationsData }, { data: seasonsData }] = await Promise.all([
       supabase.from("matches").select("*"),
       supabase.from("players").select("id, full_name, email, phone, created_at, notif_announcements, notif_match_reminders, role_id, player_status_id, is_core_roster, core_order, core_added_at"),
-      supabase.from("match_registrations").select("*")
+      supabase.from("match_registrations").select("*"),
+      supabase.from("seasons").select("*").order("started_at", { ascending: false })
     ])
+
+    setSeasons(seasonsData || [])
+    // Domyślnie pokazujemy aktywny sezon (bez `closed_at`) — jeśli z jakiegoś powodu go nie ma
+    // (np. wszystkie zamknięte), wybieramy po prostu najnowszy. Funkcyjny update, żeby nie
+    // nadpisać wyboru użytkownika przy ewentualnym ponownym wywołaniu tej funkcji.
+    setSelectedSeasonId((prev) => prev || seasonsData?.find((s) => !s.closed_at)?.id || seasonsData?.[0]?.id || null)
 
     // Doklejamy zarejestrowanych graczy z nowej tabeli do każdego meczu, żeby statystyki widziały obecność i wpłaty
     const processedMatches = (matchesData || []).map((match: any) => {
@@ -210,69 +307,33 @@ export default function StatsPage() {
   }
 
   // ────────────────────────────────────────────────────────────────
-  // DEFINICJA MECZU ROZEGRANEGO — filtr `completedMatches` to fundament wszystkich statystyk
-  // na tej stronie (frekwencja, ranking, wpłacalność liczą się TYLKO z tego zbioru).
+  // ZAKRES SEZONU — które mecze w ogóle wchodzą do statystyk niżej. Dopóki migracja sezonów
+  // nie została uruchomiona (`seasons.length === 0`), zachowanie jest DOKŁADNIE takie jak
+  // przed tą funkcją — jedna ciągła pula wszystkich meczów — więc appka nie wymaga migracji,
+  // żeby dalej działać. Po jej uruchomieniu filtrujemy do wybranego sezonu.
   // ────────────────────────────────────────────────────────────────
-  // Zliczanie statystyk z meczów rozegranych — ta sama definicja "rozegrany" co na stronie
-  // głównej (app/page.tsx: isMatchPast). Samo `status_id === 3`/`is_settled` nie wystarczało:
-  // admin rzadko ręcznie oznacza mecz jako rozegrany/rozliczony, więc realnie o tym decyduje
-  // data. Bez tego Statystyki pokazywały "sezon się nie zaczął" mimo 11 realnie odbytych meczów
-  // widocznych na stronie głównej — dwie strony liczyły to samo pojęcie inaczej.
-  const todayStr = new Date().toISOString().split("T")[0]
-  const completedMatches = useMemo(() => {
-    return matches.filter(m => {
-      if (m.status_id === 4) return false // odwołany
-      return m.date < todayStr || m.status_id === 3 || m.is_settled === true
-    })
-  }, [matches, todayStr])
+  const primarySeasonMatches = useMemo(() => {
+    if (seasons.length === 0) return matches
+    return matches.filter((m) => m.season_id === selectedSeasonId)
+  }, [matches, selectedSeasonId, seasons.length])
 
-  const totalMatches = completedMatches.length
+  const compareSeasonMatches = useMemo(() => {
+    if (!compareSeasonId) return []
+    return matches.filter((m) => m.season_id === compareSeasonId)
+  }, [matches, compareSeasonId])
 
-  // ────────────────────────────────────────────────────────────────
-  // AGREGACJA STATYSTYK GRACZY — buduje ranking (liczba meczów, opłacone/nieopłacone) na
-  // podstawie składów z `completedMatches`. Gracze bez żadnego rozegranego meczu i tak
-  // trafiają do mapy (zainicjowani z listy `players`), żeby istnieli w rankingu z zerem.
-  // "Główny Admin" jest świadomie wykluczony z rankingu (to nie prawdziwy zawodnik).
-  // ────────────────────────────────────────────────────────────────
-  const playerStats = useMemo(() => {
-    const statsMap: Record<string, { name: string; matches: number; paidCount: number; unpaidCount: number }> = {}
+  // Ta sama definicja "mecz rozegrany" co na stronie głównej (app/page.tsx: isMatchPast) i w
+  // Ustawieniach (playedMatchesCount) — patrz uwaga w nagłówku pliku o tym, dlaczego rozjazd
+  // tej definicji między stronami jest bolesny do wyśledzenia. Liczenie samo w sobie żyje
+  // teraz w `computeSeasonStats` (u góry pliku), żeby dało się wywołać drugi raz dla
+  // sezonu porównywanego bez duplikowania logiki.
+  const primary = useMemo(() => computeSeasonStats(primarySeasonMatches, players), [primarySeasonMatches, players])
+  const compare = useMemo(
+    () => (compareSeasonId ? computeSeasonStats(compareSeasonMatches, players) : null),
+    [compareSeasonMatches, players, compareSeasonId]
+  )
 
-    players.forEach((p) => {
-      const pName = p.full_name || p.name
-      if (pName && !pName.toLowerCase().includes("główny admin")) {
-        statsMap[pName] = { name: pName, matches: 0, paidCount: 0, unpaidCount: 0 }
-      }
-    })
-
-    completedMatches.forEach((m) => {
-      if (Array.isArray(m.players)) {
-        m.players.forEach((p: any) => {
-          const pName = p.name || p.full_name
-          if (!pName || pName.toLowerCase().includes("główny admin")) return
-
-          if (!statsMap[pName]) {
-            statsMap[pName] = { name: pName, matches: 0, paidCount: 0, unpaidCount: 0 }
-          }
-
-          statsMap[pName].matches += 1
-          if (p.paid || p.is_paid) {
-            statsMap[pName].paidCount += 1
-          } else {
-            statsMap[pName].unpaidCount += 1
-          }
-        })
-      }
-    })
-
-    return Object.values(statsMap).sort((a, b) => b.matches - a.matches)
-  }, [completedMatches, players])
-
-  // ────────────────────────────────────────────────────────────────
-  // LIDER, PODIUM I WŁASNA POZYCJA — dane pod hero na górze strony (lider + TOP 3) oraz pod
-  // kartę "Twoja frekwencja" (pozycja i procent udziału zalogowanego zawodnika w rankingu).
-  // ────────────────────────────────────────────────────────────────
-  const topPlayer = playerStats[0] || { name: "Brak danych", matches: 0 }
-  const podium = playerStats.slice(0, 3)
+  const { completedMatches, totalMatches, playerStats, topPlayer, podium, avgAttendance, paymentRate } = primary
 
   // Własna karta zawodnika nad tabelą — bez niej jedyny sposób sprawdzenia "jak sobie radzę"
   // to szukanie siebie wzrokiem w rankingu. Ta sama reguła dopasowania co podświetlenie
@@ -291,21 +352,42 @@ export default function StatsPage() {
   const myRank = myStats ? playerStats.findIndex((p) => p.name === myStats.name) + 1 : null
   const myParticipationRate = myStats && totalMatches > 0 ? Math.round((myStats.matches / totalMatches) * 100) : 0
 
-  // ────────────────────────────────────────────────────────────────
-  // WSKAŹNIKI ZBIORCZE — średnia liczba graczy na mecz i procent opłaconych wpisów, oba
-  // liczone ze wszystkich wpisów do składu w `completedMatches` (nie tylko z rankingu graczy).
-  // Zasilają kafelki "Średnia Frekwencja" i "Wpłacalność Składek".
-  // ────────────────────────────────────────────────────────────────
-  const totalRosterEntries = completedMatches.reduce((acc, m) => acc + (Array.isArray(m.players) ? m.players.length : 0), 0)
-  const avgAttendance = totalMatches > 0 ? (totalRosterEntries / totalMatches) : 0
+  const isAdmin = user?.role === "admin" || user?.is_admin || user?.role_id === 1 || user?.email === "admin@admin.pl"
+  const activeSeason = seasons.find((s) => !s.closed_at) || null
+  const selectedSeason = seasons.find((s) => s.id === selectedSeasonId) || null
 
-  const totalPaidEntries = completedMatches.reduce((acc, m) => {
-    if (Array.isArray(m.players)) {
-      return acc + m.players.filter((p: any) => p.paid || p.is_paid).length
+  // ────────────────────────────────────────────────────────────────
+  // ZAKOŃCZENIE SEZONU — zamyka obecny aktywny sezon (`closed_at`) i od razu zakłada nowy,
+  // przełączając widok na niego. Od razu proponuje porównanie z tym, co się właśnie zamknęło —
+  // to i tak pierwsza rzecz, którą admin będzie chciał zobaczyć po zamknięciu sezonu.
+  // ────────────────────────────────────────────────────────────────
+  async function handleEndSeason() {
+    const trimmedName = newSeasonName.trim()
+    if (!trimmedName || isEndingSeason) return
+    setIsEndingSeason(true)
+
+    if (activeSeason) {
+      await supabase.from("seasons").update({ closed_at: new Date().toISOString() }).eq("id", activeSeason.id)
     }
-    return acc
-  }, 0)
-  const paymentRate = totalRosterEntries > 0 ? Math.round((totalPaidEntries / totalRosterEntries) * 100) : 0
+
+    const { data: newSeason, error } = await supabase
+      .from("seasons")
+      .insert([{ name: trimmedName, started_at: new Date().toISOString().split("T")[0] }])
+      .select()
+      .single()
+
+    if (!error && newSeason) {
+      setSeasons((prev) => [
+        newSeason,
+        ...prev.map((s) => (activeSeason && s.id === activeSeason.id ? { ...s, closed_at: newSeason.created_at } : s))
+      ])
+      setSelectedSeasonId(newSeason.id)
+      setCompareSeasonId(activeSeason?.id || null)
+      setShowEndSeasonModal(false)
+      setNewSeasonName("")
+    }
+    setIsEndingSeason(false)
+  }
 
   // ────────────────────────────────────────────────────────────────
   // WYSZUKIWARKA I SKRÓCONA LISTA NA MOBILE — filtrowanie rankingu odporne na literówki/
@@ -403,10 +485,96 @@ export default function StatsPage() {
               </div>
               <div>
                 <h1 className={cn(display.className, "text-xl font-bold text-slate-900 tracking-tight")}>Statystyki Zespołu</h1>
-                <p className="text-xs font-medium text-slate-500">Podsumowanie występów, frekwencji i terminowości wpłat w obecnym sezonie.</p>
+                <p className="text-xs font-medium text-slate-500">
+                  Podsumowanie występów, frekwencji i terminowości wpłat{selectedSeason ? ` — ${selectedSeason.name}` : " w obecnym sezonie"}.
+                </p>
               </div>
             </div>
+
+            {/* PRZEŁĄCZNIK SEZONU — niewidoczny, dopóki migracja sezonów nie została uruchomiona
+                (patrz supabase/seasons-migration.sql) — do tego czasu strona działa dokładnie
+                tak jak wcześniej, jedna ciągła pula wszystkich meczów. */}
+            {seasons.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={selectedSeasonId || ""}
+                  onChange={(e) => {
+                    setSelectedSeasonId(e.target.value)
+                    if (e.target.value === compareSeasonId) setCompareSeasonId(null)
+                  }}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#2C4BFF] cursor-pointer shadow-xs"
+                >
+                  {seasons.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}{!s.closed_at ? " (aktywny)" : ""}
+                    </option>
+                  ))}
+                </select>
+
+                {seasons.length > 1 && (
+                  <select
+                    value={compareSeasonId || ""}
+                    onChange={(e) => setCompareSeasonId(e.target.value || null)}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500 outline-none focus:border-[#7A5CFF] cursor-pointer shadow-xs"
+                  >
+                    <option value="">Porównaj z...</option>
+                    {seasons.filter((s) => s.id !== selectedSeasonId).map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                )}
+
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowEndSeasonModal(true)}
+                    className="flex items-center gap-1.5 rounded-xl border border-[#FF5A5F]/25 bg-[#FF5A5F]/10 px-3 py-2 text-xs font-bold text-[#E0454A] hover:bg-[#FF5A5F]/15 transition-colors cursor-pointer active:scale-[0.97]"
+                  >
+                    <Flag className="h-3.5 w-3.5" />
+                    Zakończ sezon
+                  </button>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* PORÓWNANIE SEZONÓW — pasek z kluczowymi liczbami obu sezonów obok siebie, widoczny
+              tylko gdy wybrano drugi sezon do porównania (patrz `compareSeasonId` wyżej). */}
+          {compare && (
+            <div className="rounded-[24px] border border-[#7A5CFF]/25 bg-[#7A5CFF]/[0.04] p-4 sm:p-5 space-y-3 animate-in fade-in slide-in-from-top-2 duration-300 fill-mode-both">
+              <p className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wide text-[#4B2FB0]">
+                <ArrowLeftRight className="h-3.5 w-3.5" />
+                Porównanie sezonów
+              </p>
+              <div className="grid grid-cols-2 gap-3 sm:gap-6">
+                {[
+                  { label: selectedSeason?.name || "Wybrany sezon", stats: primary, accent: COBALT },
+                  { label: seasons.find((s) => s.id === compareSeasonId)?.name || "Porównywany sezon", stats: compare, accent: VIOLET }
+                ].map((col, i) => (
+                  <div key={i} className="rounded-2xl bg-white border border-slate-200/80 p-3.5 space-y-2.5">
+                    <p className="text-[11px] font-black text-slate-800 truncate">{col.label}</p>
+                    <div className="space-y-1.5 text-[11px] font-semibold text-slate-500">
+                      <div className="flex items-center justify-between">
+                        <span>Rozegrane mecze</span>
+                        <span className={cn(score.className, "text-slate-900 tabular-nums")}>{col.stats.totalMatches}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Śr. frekwencja</span>
+                        <span className={cn(score.className, "text-slate-900 tabular-nums")}>{col.stats.avgAttendance.toFixed(1)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Wpłacalność</span>
+                        <span className={cn(score.className, "text-slate-900 tabular-nums")}>{col.stats.paymentRate}%</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-slate-100">
+                        <span>Lider frekwencji</span>
+                        <span className="text-slate-900 font-bold truncate max-w-[9rem]" style={{ color: col.accent }}>{col.stats.topPlayer.name}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* HERO — lider frekwencji + podium TOP 3, w stylu głównego dashboardu.
               Dopóki nie ma ani jednego rozegranego meczu, podium z samymi zerami wyglądało
@@ -730,6 +898,55 @@ export default function StatsPage() {
       </div>
 
       <SupportModal open={showSupportModal} onClose={() => setShowSupportModal(false)} />
+
+      {/* ZAKOŃCZ SEZON — zamyka obecny aktywny sezon i zakłada nowy o podanej nazwie (patrz
+          handleEndSeason wyżej). Dotychczasowe mecze zostają przy starym, zamkniętym sezonie —
+          to nowe mecze (app/page.tsx: handleCreateMatch) zaczną trafiać do tego nowego. */}
+      <Modal
+        open={showEndSeasonModal}
+        onClose={() => !isEndingSeason && setShowEndSeasonModal(false)}
+        overlayClassName="bg-[#0B1120]/70 backdrop-blur-sm"
+        cardClassName="w-full max-w-sm rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl space-y-4"
+      >
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FF5A5F]/10 text-[#FF5A5F]">
+          <Flag className="h-6 w-6" />
+        </div>
+        <div className="space-y-1.5">
+          <h2 className={cn(display.className, "text-base font-bold text-slate-900")}>Zakończyć sezon?</h2>
+          <p className="text-xs text-slate-500 font-medium leading-relaxed">
+            {activeSeason ? `„${activeSeason.name}” zostanie zamknięty` : "Obecny sezon zostanie zamknięty"}, a nowe mecze zaczną trafiać do
+            sezonu, który tu nazwiesz. Statystyki starego sezonu zostają nietknięte — będzie
+            można je porównać z nowym w każdej chwili.
+          </p>
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-500 mb-1">Nazwa nowego sezonu</label>
+          <input
+            type="text"
+            autoFocus
+            value={newSeasonName}
+            onChange={(e) => setNewSeasonName(e.target.value)}
+            placeholder="np. Sezon 2026/2027"
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-[#FF5A5F] focus:bg-white transition-all"
+          />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            onClick={() => setShowEndSeasonModal(false)}
+            disabled={isEndingSeason}
+            className="rounded-xl px-3.5 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            Anuluj
+          </button>
+          <button
+            onClick={handleEndSeason}
+            disabled={isEndingSeason || !newSeasonName.trim()}
+            className="rounded-xl bg-[#FF5A5F] hover:bg-[#E0454A] px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-[#FF5A5F]/30 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isEndingSeason ? "Zamykanie..." : "Zakończ sezon"}
+          </button>
+        </div>
+      </Modal>
     </div>
   )
 }

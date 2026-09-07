@@ -218,3 +218,20 @@ export async function getPlayerBalances() {
   }
   return data || []
 }
+
+// Sezon bez `closed_at` to ten obecnie trwający — dokładnie jeden taki na raz w normalnym
+// użyciu appki (patrz supabase/seasons-migration.sql). Nowe mecze (handleCreateMatch w
+// app/page.tsx) dostają jego id automatycznie, żeby trafiły do właściwego okresu bez
+// ręcznego wyboru sezonu przy każdym tworzeniu meczu. `null`, gdy sezonów jeszcze nie ma
+// (migracja nieuruchomiona) — wywołujący ma wtedy po prostu tworzyć mecz bez `season_id`.
+export async function getActiveSeasonId(): Promise<string | null> {
+  const { data } = await supabase
+    .from('seasons')
+    .select('id')
+    .is('closed_at', null)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  return data?.id || null
+}
