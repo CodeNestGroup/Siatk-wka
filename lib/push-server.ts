@@ -5,8 +5,8 @@
  * `web-push` do wszystkich zapisanych subskrypcji w `push_subscriptions`, czyszcząc
  * po drodze wygasłe subskrypcje (404/410).
  * Używany przez: app/api/push/send/route.ts (wywołanie z przeglądarki, fire-and-forget
- * po utworzeniu meczu/ogłoszenia/wpłaty) oraz app/api/cron/match-reminders/route.ts
- * (wywołanie z Vercel Cron, raz dziennie rano).
+ * po utworzeniu meczu/ogłoszenia/wpłaty) oraz cronowe endpointy w app/api/cron/*
+ * (match-reminders, settlement-reminders — wywoływane przez Vercel Cron raz dziennie).
  * Uwagi: wydzielone z app/api/push/send/route.ts, żeby cron mógł wysyłać powiadomienia
  * bez robienia HTTP-fetcha do samego siebie (nie ma tam żądania przeglądarki, więc nie
  * ma naturalnego "origin" do zbudowania pełnego URL-a) — to zwykła funkcja w procesie.
@@ -25,9 +25,11 @@ export async function sendPushToAll(payload: {
   body: string
   url?: string
   excludePlayerId?: string
+  onlyPlayerIds?: string[]
 }): Promise<{ sent: number }> {
   let query = supabase.from("push_subscriptions").select("*")
   if (payload.excludePlayerId) query = query.neq("player_id", payload.excludePlayerId)
+  if (payload.onlyPlayerIds) query = query.in("player_id", payload.onlyPlayerIds)
   const { data: subscriptions, error } = await query
 
   if (error || !subscriptions) return { sent: 0 }
