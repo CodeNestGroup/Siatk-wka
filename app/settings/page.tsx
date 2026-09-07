@@ -5,24 +5,29 @@
  *
  * Co to jest: Strona łącząca profil zawodnika (dawniej osobna strona /profile) z ustawieniami
  * konta w jedną zakładkę — edycja danych osobowych, zgody na powiadomienia push, zmiana hasła,
- * eksport własnych statystyk do CSV oraz (tylko dla admina) zablokowana na razie sekcja
- * rozliczeń/wpisowego.
+ * eksport własnych statystyk do CSV, podgląd własnego depozytu (Nadpłaty Graczy) oraz (tylko
+ * dla admina) zablokowana na razie sekcja rozliczeń/wpisowego.
  * Renderuje: header z dzwoneczkiem powiadomień i (na desktopie) przyciskiem "Postaw kawę" ->
  * karta profilowa w stylu "biletu" (inicjały, rola, e-mail) -> trzy kafelki szybkich statystyk
  * (status w zespole, rozegrane mecze, data dołączenia) -> formularz danych profilowych ->
- * sekcja powiadomień push -> (tylko admin) wyszarzona sekcja "Rozliczenia i Wpisowe" (Wkrótce)
- * -> formularz zmiany hasła -> informacje systemowe (UUID, rola) -> eksport CSV -> toast
- * potwierdzeń.
+ * sekcja powiadomień push -> "Mój Depozyt" (saldo + historia wpłat z góry) -> (tylko admin)
+ * wyszarzona sekcja "Rozliczenia i Wpisowe" (Wkrótce) -> formularz zmiany hasła -> informacje
+ * systemowe (UUID, rola) -> eksport CSV -> toast potwierdzeń.
  * Kluczowe zależności: `Sidebar`, `NotificationsBell`, `SupportModal` ("Postaw kawę"),
  * `lib/push` (`isPushSupported`, `getExistingPushSubscription`, `subscribeToPush`,
  * `unsubscribeFromPush` — rejestracja urządzenia w Web Push), `lib/supabase` (RPC
- * `set_player_password`, tabele `players`/`match_registrations`/`matches`).
+ * `set_player_password`, tabele `players`/`match_registrations`/`matches`/`player_balances`/
+ * `player_credit_ledger`).
  * Dane z Supabase: tabela `players` (`phone`, `created_at`, `player_status_id`, `full_name`,
  * `email` — odczyt i zapis przy edycji profilu), `match_registrations` (`match_id`,
  * `player_id`, `is_paid` — do liczenia rozegranych meczów i eksportu CSV), `matches` (`id`,
  * `date`, `status_id`, `is_settled`, `price_per_player` — do wyznaczenia, które mecze są
- * "rozegrane" i ile kosztowały), RPC `set_player_password(player_id, new_password)` (hasło
- * hashowane automatycznie triggerem w bazie, patrz supabase/password-hashing-migration.sql).
+ * "rozegrane" i ile kosztowały), widok `player_balances` (saldo depozytu bieżącego usera) i
+ * tabela `player_credit_ledger` (jego pełna historia wpłat/zużyć — WYŁĄCZNIE do odczytu, zapis
+ * do depozytu dzieje się w Finansach i w match-detail.tsx, patrz
+ * supabase/player-credit-ledger-migration.sql), RPC `set_player_password(player_id,
+ * new_password)` (hasło hashowane automatycznie triggerem w bazie, patrz
+ * supabase/password-hashing-migration.sql).
  * Uwagi: Autoryzacja jest własna (bez Supabase Auth) — sesja to obiekt w localStorage pod
  * kluczem `volley_user`. `isAdmin` sprawdza `email === "admin@admin.pl" || role === "admin" ||
  * is_admin || role_id === 1`. Dane do wpłat BLIK/konto bankowe w sekcji admina trzymane
@@ -52,14 +57,15 @@ import {
   Trophy,
   Calendar,
   Shield,
-  IdCard
+  IdCard,
+  PiggyBank
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
 import { SupportModal } from "@/components/dashboard/support-modal"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { cn, formatDatePL } from "@/lib/utils"
 import { isPushSupported, getExistingPushSubscription, subscribeToPush, unsubscribeFromPush } from "@/lib/push"
 
 // ────────────────────────────────────────────────────────────────
@@ -80,6 +86,15 @@ const netPattern: React.CSSProperties = {
 // Nominatiw, nie dopełniacz ("Sierpień 2026", nie "Sierpnia 2026") — miesiąc tu stoi sam,
 // bez dnia przed sobą, więc gramatycznie to inny przypadek niż w hero na stronie głównej.
 const MONTHS_NOMINATIVE_PL = ["Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"]
+
+// Data + godzina wpisu w historii depozytu — ten sam format "DD.MM.RRRR • GG:MM" co przy
+// ogłoszeniach/komentarzach (app/announcements/page.tsx), żeby wszędzie w appce wyglądało tak
+// samo. Godzina liczona przez Date (przelicza UTC z bazy na strefę przeglądarki użytkownika).
+function formatCreatedAtPL(createdAt: string): string {
+  const datePart = formatDatePL(createdAt.split("T")[0])
+  const timePart = new Date(createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  return `${datePart} • ${timePart}`
+}
 
 export default function SettingsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -145,6 +160,14 @@ export default function SettingsPage() {
   const [playedMatchesCount, setPlayedMatchesCount] = useState<number | null>(null)
 
   // ────────────────────────────────────────────────────────────────
+  // STAN MOJEGO DEPOZYTU — saldo (widok `player_balances`) i pełna historia wpłat/zużyć
+  // (tabela `player_credit_ledger`) własnego konta. Patrz sekcja "Mój Depozyt" niżej oraz
+  // supabase/player-credit-ledger-migration.sql po pełny opis mechanizmu depozytu.
+  // ────────────────────────────────────────────────────────────────
+  const [myBalance, setMyBalance] = useState(0)
+  const [myCreditHistory, setMyCreditHistory] = useState<{ id: string; amount: number; reason: string | null; created_at: string }[]>([])
+
+  // ────────────────────────────────────────────────────────────────
   // STAN BEZPIECZEŃSTWA — pola formularza zmiany hasła (handleChangePassword niżej).
   // ────────────────────────────────────────────────────────────────
   // Stany bezpieczeństwa
@@ -191,11 +214,16 @@ export default function SettingsPage() {
         // localStorage trzyma to, co było w chwili logowania — jeśli admin zmienił numer
         // od tego czasu wprost w bazie, pobieramy świeższą wartość zamiast bazować na cache'u.
         if (activeUser.id) {
-          const [{ data: playerRow }, { data: regs }, { data: matches }] = await Promise.all([
+          const [{ data: playerRow }, { data: regs }, { data: matches }, { data: balanceRow }, { data: ledgerRows }] = await Promise.all([
             supabase.from("players").select("phone, created_at, player_status_id").eq("id", activeUser.id).maybeSingle(),
             supabase.from("match_registrations").select("match_id").eq("player_id", activeUser.id),
-            supabase.from("matches").select("id, date, status_id, is_settled")
+            supabase.from("matches").select("id, date, status_id, is_settled"),
+            supabase.from("player_balances").select("balance").eq("id", activeUser.id).maybeSingle(),
+            supabase.from("player_credit_ledger").select("id, amount, reason, created_at").eq("player_id", activeUser.id).order("created_at", { ascending: false })
           ])
+
+          setMyBalance(Number(balanceRow?.balance || 0))
+          setMyCreditHistory(ledgerRows || [])
 
           setPhone(playerRow?.phone ?? activeUser.phone ?? "")
           setJoinedAt(playerRow?.created_at ?? null)
@@ -592,6 +620,63 @@ export default function SettingsPage() {
                   {pushStatus === "enabled" ? <BellOff className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
                   {isTogglingPush ? "Chwila…" : pushStatus === "enabled" ? "Wyłącz powiadomienia" : "Włącz powiadomienia"}
                 </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Mój Depozyt — saldo i historia wpłat z góry (Nadpłaty Graczy). Widoczne dla każdego,
+              nie tylko admina: to jest odpowiedź na pytanie "ile mam jeszcze z tego, co wpłaciłem
+              z góry", którego wcześniej gracz nie miał gdzie sprawdzić (widziała to tylko strona
+              Finanse, dostępna admina). Puste, gdy gracz nigdy nie doładował depozytu — sekcja
+              i tak się wtedy pokazuje, żeby dało się dowiedzieć że taka opcja w ogóle istnieje. */}
+          <div className="rounded-[28px] border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-400 delay-100 fill-mode-both">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#7A5CFF]/10 text-[#7A5CFF] border border-[#7A5CFF]/20">
+                <PiggyBank className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className={cn(display.className, "text-sm font-bold text-slate-900")}>Mój Depozyt</h2>
+                <p className="text-xs text-slate-400 font-medium">Saldo wpłat z góry na poczet przyszłych meczów</p>
+              </div>
+            </div>
+
+            <div className={cn(
+              "rounded-2xl border p-4 flex items-center justify-between",
+              myBalance > 0 ? "bg-[#7A5CFF]/[0.06] border-[#7A5CFF]/25" : "bg-slate-50/70 border-slate-200"
+            )}>
+              <div>
+                <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Dostępne saldo</p>
+                <p className={cn("text-2xl font-bold tabular-nums mt-0.5", myBalance > 0 ? "text-[#4B2FB0]" : "text-slate-400")}>
+                  {myBalance.toFixed(2)} zł
+                </p>
+              </div>
+              {myBalance > 0 && (
+                <p className="text-[11px] text-slate-500 font-medium max-w-[45%] text-right">
+                  Zapisując się na kolejny mecz, opłata pokryje się z tego salda automatycznie.
+                </p>
+              )}
+            </div>
+
+            {myCreditHistory.length === 0 ? (
+              <p className="text-xs font-semibold text-slate-400 text-center py-4">
+                Nie masz jeszcze żadnych wpłat z góry. Jeśli chcesz zapłacić za wiele meczów naraz, powiedz o tym osobie prowadzącej zbiórki.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {myCreditHistory.map((entry) => (
+                  <div key={entry.id} className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-slate-50/70 border border-slate-100">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-700 truncate">{entry.reason || "Zmiana depozytu"}</p>
+                      <p className="text-[10px] text-slate-400 font-medium mt-0.5">{formatCreatedAtPL(entry.created_at)}</p>
+                    </div>
+                    <span className={cn(
+                      "shrink-0 text-xs font-black tabular-nums",
+                      Number(entry.amount) > 0 ? "text-[#00875F]" : "text-[#E0454A]"
+                    )}>
+                      {Number(entry.amount) > 0 ? "+" : ""}{Number(entry.amount).toFixed(2)} zł
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
