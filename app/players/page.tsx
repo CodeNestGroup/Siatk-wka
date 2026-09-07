@@ -34,6 +34,7 @@ import {
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
+import { GlobalSearch } from "@/components/dashboard/global-search"
 import { SupportModal } from "@/components/dashboard/support-modal"
 import { Modal } from "@/components/ui/modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
@@ -234,6 +235,31 @@ export default function PlayersPage() {
     setShowAllPlayers(false)
     setShowAllNonCore(false)
   }, [statusFilter, searchQuery])
+
+  // ────────────────────────────────────────────────────────────────
+  // GLOBALNA WYSZUKIWARKA — wynik z components/dashboard/global-search.tsx po prostu
+  // wpisuje imię/nazwisko w to samo pole wyszukiwania, które i tak jest już na tej
+  // stronie. Gdy już tu jesteśmy, zdarzenie `window` działa od razu; z innej strony —
+  // parametr `?q=` w URL-u, odczytany raz przy montowaniu.
+  // ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    function handleOpenPlayer(e: Event) {
+      const q = (e as CustomEvent).detail?.q
+      if (!q) return
+      setSearchQuery(q)
+      setStatusFilter("all") // "core" (domyślna zakładka) ukrywa nieaktywnych — "all" gwarantuje, że znaleziony gracz się pokaże
+    }
+    window.addEventListener("global-search-player", handleOpenPlayer)
+    return () => window.removeEventListener("global-search-player", handleOpenPlayer)
+  }, [])
+
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q")
+    if (!q) return
+    setSearchQuery(q)
+    setStatusFilter("all")
+    window.history.replaceState(null, "", window.location.pathname)
+  }, [])
 
   // Suwak pod aktywną zakładką filtra — ten sam mechanizm co na stronie głównej
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0, top: 0, height: 0 })
@@ -1100,6 +1126,7 @@ export default function PlayersPage() {
           )}
 
           <div className="flex items-center gap-3 shrink-0 ml-auto pl-4">
+            <GlobalSearch />
             <NotificationsBell playerId={user?.id} onNotificationClick={(notif: NotificationItem) => {}} />
           </div>
         </header>

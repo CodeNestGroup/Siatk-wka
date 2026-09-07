@@ -53,6 +53,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
+import { GlobalSearch } from "@/components/dashboard/global-search"
 import { SupportModal } from "@/components/dashboard/support-modal"
 import { Modal } from "@/components/ui/modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
@@ -168,6 +169,32 @@ export default function AnnouncementsPage() {
   useEffect(() => {
     setShowAllAnnouncements(false)
   }, [selectedCategory, search])
+
+  // ────────────────────────────────────────────────────────────────
+  // GLOBALNA WYSZUKIWARKA — wynik z components/dashboard/global-search.tsx wpisuje tytuł
+  // ogłoszenia w to samo pole wyszukiwania, które już jest na tej stronie (i resetuje filtr
+  // kategorii na "wszystkie", inaczej ogłoszenie z innej kategorii by się nie pokazało).
+  // Gdy już tu jesteśmy, zdarzenie `window` działa od razu; z innej strony — parametr `?q=`
+  // w URL-u, odczytany raz przy montowaniu.
+  // ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    function handleOpenAnnouncement(e: Event) {
+      const q = (e as CustomEvent).detail?.q
+      if (!q) return
+      setSearch(q)
+      setSelectedCategory("all")
+    }
+    window.addEventListener("global-search-announcement", handleOpenAnnouncement)
+    return () => window.removeEventListener("global-search-announcement", handleOpenAnnouncement)
+  }, [])
+
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q")
+    if (!q) return
+    setSearch(q)
+    setSelectedCategory("all")
+    window.history.replaceState(null, "", window.location.pathname)
+  }, [])
   const [user, setUser] = useState<any>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [showSupportModal, setShowSupportModal] = useState(false)
@@ -703,6 +730,7 @@ export default function AnnouncementsPage() {
             >
               <Coffee className="h-4 w-4" />
             </button>
+            <GlobalSearch />
             <NotificationsBell playerId={user?.id} onNotificationClick={(notif: NotificationItem) => {}} />
           </div>
         </header>

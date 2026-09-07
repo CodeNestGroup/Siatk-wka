@@ -12,10 +12,16 @@
  * swój JSX w <Modal>.
  * Uwagi: komponent celowo NIE znika natychmiast po `open=false` — najpierw odtwarza animację
  * wyjścia (patrz komentarze niżej), więc rodzic może bezpiecznie zerować dane w tym samym
- * momencie, w którym zamyka modal.
+ * momencie, w którym zamyka modal. Renderowany przez portal do `document.body` — inaczej
+ * `position: fixed` łapie się na CSS-owej pułapce: jeśli KTOKOLWIEK po drodze (np. nagłówek
+ * z `backdrop-blur-*`) ma `filter`/`backdrop-filter`/`transform`/`will-change`, ten element
+ * staje się "containing block" dla fixed, i modal kurczy się do jego rozmiaru zamiast pokryć
+ * cały ekran (dokładnie to się stało, gdy GlobalSearch trafił do nagłówka z `backdrop-blur-md`).
+ * Portal omija ten problem raz na zawsze, niezależnie gdzie w drzewie ktoś wywoła `<Modal>`.
  */
 
 import { useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
 
 type ModalProps = {
@@ -39,6 +45,11 @@ export function Modal({ open, children, overlayClassName, cardClassName, onClose
   const [rendered, setRendered] = useState(open)
   const [closing, setClosing] = useState(false)
   const lastChildren = useRef(children)
+
+  // Portal montuje się dopiero po stronie klienta (`document` nie istnieje przy SSR) —
+  // ten sam znany wzorzec co przy każdym portalu w Next.js App Router.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
 
   if (open) lastChildren.current = children
 
@@ -68,9 +79,9 @@ export function Modal({ open, children, overlayClassName, cardClassName, onClose
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [open, onClose])
 
-  if (!rendered) return null
+  if (!rendered || !mounted) return null
 
-  return (
+  return createPortal(
     // Zewnętrzna warstwa NIE steruje już wyrównaniem — tylko pozycją/tłem/scrollem. Z samym
     // `items-end` na kontenerze `fixed` treść wyższa niż ekran (np. pełny skład meczu) miała
     // swój górny fragment (łącznie z X) renderowany POZA widocznym obszarem i NIE dało się
@@ -112,6 +123,7 @@ export function Modal({ open, children, overlayClassName, cardClassName, onClose
           {open ? children : lastChildren.current}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

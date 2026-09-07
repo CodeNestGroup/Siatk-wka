@@ -47,6 +47,7 @@ import {
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
+import { GlobalSearch } from "@/components/dashboard/global-search"
 import { SupportModal } from "@/components/dashboard/support-modal"
 import { supabase } from "@/lib/supabase"
 import { cn, normalizeSearchText, fuzzySearchMatch } from "@/lib/utils"
@@ -385,6 +386,7 @@ export default function StatsPage() {
             >
               <Coffee className="h-4 w-4" />
             </button>
+            <GlobalSearch />
             <NotificationsBell
               playerId={user?.id}
               onNotificationClick={(notif: NotificationItem) => {}}

@@ -74,6 +74,7 @@ import Link from "next/link"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { MatchDetail } from "@/components/dashboard/match-detail"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
+import { GlobalSearch } from "@/components/dashboard/global-search"
 import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/ui/modal"
 import { SupportModal } from "@/components/dashboard/support-modal"
@@ -563,6 +564,31 @@ export default function DashboardPage() {
       localStorage.setItem("volley_read_notifications", JSON.stringify(updated))
     }
   }
+
+  // ────────────────────────────────────────────────────────────────
+  // GLOBALNA WYSZUKIWARKA — otwarcie konkretnego meczu z wyniku (components/dashboard/
+  // global-search.tsx). Gdy już jesteśmy na tej stronie, wynik wysyła zdarzenie `window`
+  // (działa natychmiast); gdy przyszliśmy tu z innej strony, wynik nawigował z parametrem
+  // `?match=<id>` w URL-u, który odczytujemy raz, gdy lista meczów jest już wczytana.
+  // ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    function handleOpenMatch(e: Event) {
+      const id = (e as CustomEvent).detail?.id
+      const found = matches.find((m) => m.id === id)
+      if (found) handleSelectMatch(found)
+    }
+    window.addEventListener("global-search-match", handleOpenMatch)
+    return () => window.removeEventListener("global-search-match", handleOpenMatch)
+  }, [matches])
+
+  useEffect(() => {
+    if (matches.length === 0) return
+    const matchId = new URLSearchParams(window.location.search).get("match")
+    if (!matchId) return
+    const found = matches.find((m) => m.id === matchId)
+    if (found) handleSelectMatch(found)
+    window.history.replaceState(null, "", window.location.pathname)
+  }, [matches])
 
   // ────────────────────────────────────────────────────────────────
   // HANDLERY — odwoływanie i usuwanie pojedynczego meczu (Admin)
@@ -1156,6 +1182,7 @@ export default function DashboardPage() {
           )}
 
           <div className="flex items-center gap-3 shrink-0 ml-auto pl-4">
+            <GlobalSearch />
             <NotificationsBell
               playerId={user?.id}
               onNotificationClick={(notif: NotificationItem) => {

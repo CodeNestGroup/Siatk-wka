@@ -56,6 +56,7 @@ import {
 } from "lucide-react"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { NotificationsBell, type NotificationItem } from "@/components/dashboard/notifications-bell"
+import { GlobalSearch } from "@/components/dashboard/global-search"
 import { SupportModal } from "@/components/dashboard/support-modal"
 import { Modal } from "@/components/ui/modal"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
@@ -623,6 +624,7 @@ export default function FinancesPage() {
             >
               <Coffee className="h-4 w-4" />
             </button>
+            <GlobalSearch />
             <NotificationsBell
               playerId={user?.id}
               onNotificationClick={(notif: NotificationItem) => {}}
