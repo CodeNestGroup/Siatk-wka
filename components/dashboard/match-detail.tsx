@@ -12,7 +12,8 @@
  * kalendarza" -> karta statusu (skład/opłacono/zebrano) -> blok blokady dla meczu
  * odwołanego lub rozliczonego, albo przycisk "Zatwierdź i rozlicz w Finansach" dla admina
  * -> lista głównego składu (numer, status płatności, usuwanie) -> lista rezerwowa ->
- * przycisk dołącz/wypisz się -> toast + ConfirmDialog na potwierdzenia.
+ * karta głosowania na MVP (tylko po zakończeniu meczu) -> przycisk dołącz/wypisz się ->
+ * toast + ConfirmDialog na potwierdzenia.
  * Props / kluczowe zależności: `match` (typ `Match` z `lib/data.ts`, rozszerzony o
  * `is_settled`), `onChange` (aktualizuje mecz w widoku nadrzędnym — `app/page.tsx`),
  * `onClose`, `currentUser` (obiekt sesji z localStorage). Współpracuje z `mainRoster`/
@@ -22,17 +23,22 @@
  * `ConfirmDialog` (potwierdzenia przed wypisaniem gracza).
  * Dane z Supabase: `matches` (update `is_settled`), `match_registrations` (`is_paid`
  * toggle, insert przy dołączeniu, delete przy wypisaniu — klucz `match_id` + `player_id`),
- * `transactions` (insert wpisu przychodu przy rozliczeniu meczu).
+ * `transactions` (insert wpisu przychodu przy rozliczeniu meczu), `match_mvp_votes`
+ * (select przy otwarciu, upsert po `match_id`+`voter_id` przy głosowaniu — patrz
+ * supabase/match-mvp-votes-migration.sql).
  * Uwagi: Renderowany przez `app/page.tsx` wewnątrz komponentu `Modal` po kliknięciu w
  * mecz — to NIE jest samodzielna trasa. `isAdmin` liczony lokalnie, tymi samymi regułami
  * co wszędzie indziej (`role === "admin" || is_admin || role_id === 1 || email ===
  * "admin@admin.pl"`). Zatwierdzenie w Finansach księguje TYLKO realnie opłaconą kwotę
  * (na podstawie `is_paid`), nie pełną wartość składu — patrz komentarz przy
  * `handleSettleAndSave`. Wypisanie samego siebie jest zablokowane <2h przed startem meczu
- * (admin może wypisać kogoś innego zawsze).
+ * (admin może wypisać kogoś innego zawsze). Głosowanie na MVP odblokowuje się po godzinie
+ * końca meczu (`time_end`), NIEZALEŻNIE od `is_settled` — rozliczenie w Finansach to osobna,
+ * często spóźniona czynność admina (patrz app/api/cron/settlement-reminders), więc granie
+ * tego na `isSettled` odsuwałoby głosowanie o dzień lub więcej.
  */
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Space_Grotesk, Oswald } from "next/font/google"
 import {
   X,
@@ -48,7 +54,9 @@ import {
   Clock,
   MessageCircle,
   CalendarPlus,
-  Ban
+  Ban,
+  Trophy,
+  Crown
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog, type ConfirmDialogState } from "@/components/ui/confirm-dialog"
@@ -147,6 +155,12 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   const msUntilMatch = matchStartAt.getTime() - Date.now()
   const canLeaveMatch = msUntilMatch >= TWO_HOURS_MS
 
+  // Głosowanie na MVP ma sens dopiero PO meczu — niezależnie od tego, czy admin zdążył już
+  // kliknąć "Zatwierdź i rozlicz" (to często dzieje się dopiero następnego dnia, patrz
+  // app/api/cron/settlement-reminders), więc nie warunkujemy tego `isSettled`.
+  const matchEndAt = new Date(`${match.date}T${(match.time_end || "21:00:00").slice(0, 8)}`)
+  const hasMatchEnded = Date.now() >= matchEndAt.getTime()
+
   // ────────────────────────────────────────────────────────────────
   // STAN KOMPONENTU — toast, flagi zapisu/dołączania w toku oraz stan modala potwierdzenia
   // ────────────────────────────────────────────────────────────────
@@ -154,8 +168,34 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
   const [isSaving, setIsSaving] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null)
+  const [mvpVotes, setMvpVotes] = useState<{ voter_id: string; voted_for_id: string }[]>([])
+  const [isVoting, setIsVoting] = useState(false)
+
+  // Głosy pobierane osobno (nie przychodzą z `match` w props) — tylko gdy mecz faktycznie
+  // się skończył, bo wcześniej i tak nie ma czego pokazywać.
+  useEffect(() => {
+    if (!hasMatchEnded) return
+    let cancelled = false
+    supabase
+      .from("match_mvp_votes")
+      .select("voter_id, voted_for_id")
+      .eq("match_id", match.id)
+      .then(({ data }) => {
+        if (!cancelled) setMvpVotes(data || [])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [match.id, hasMatchEnded])
 
   const isUserInMatch = match.players?.some(
+    (p: any) => p.id === currentUser?.id || p.email === currentUser?.email
+  )
+
+  // Głosować na MVP może tylko ten, kto REALNIE grał — `isUserInMatch` wyżej liczy się też dla
+  // rezerwy (potrzebne np. do przycisku "wypisz się"), a rezerwowy, który nie wszedł na boisko,
+  // nie powinien oceniać meczu, w którym nie grał.
+  const wasInPlayingRoster = rawRoster.some(
     (p: any) => p.id === currentUser?.id || p.email === currentUser?.email
   )
 
@@ -399,6 +439,42 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
     }
     setIsJoining(false)
   }
+
+  // ────────────────────────────────────────────────────────────────
+  // GŁOSOWANIE NA MVP — jeden głos na osobę na mecz, UPSERT pozwala zmienić zdanie
+  // (nadpisuje własny poprzedni głos zamiast dodawać drugi wiersz)
+  // ────────────────────────────────────────────────────────────────
+  async function handleVoteMvp(votedForId: string) {
+    if (!currentUser || !hasMatchEnded || !wasInPlayingRoster || votedForId === currentUser.id || isVoting) return
+    setIsVoting(true)
+
+    const { error } = await supabase
+      .from("match_mvp_votes")
+      .upsert(
+        { match_id: match.id, voter_id: currentUser.id, voted_for_id: votedForId },
+        { onConflict: "match_id,voter_id" }
+      )
+
+    if (!error) {
+      setMvpVotes((prev) => [
+        ...prev.filter((v) => v.voter_id !== currentUser.id),
+        { voter_id: currentUser.id, voted_for_id: votedForId }
+      ])
+      const votedPlayer: any = rawRoster.find((p: any) => p.id === votedForId)
+      notify(`Zagłosowano na ${votedPlayer?.full_name || votedPlayer?.name || "zawodnika"}!`)
+    }
+    setIsVoting(false)
+  }
+
+  const mvpVoteCounts: Record<string, number> = {}
+  mvpVotes.forEach((v) => {
+    mvpVoteCounts[v.voted_for_id] = (mvpVoteCounts[v.voted_for_id] || 0) + 1
+  })
+  const mvpRanking = rawRoster
+    .map((p: any) => ({ player: p, count: mvpVoteCounts[p.id] || 0 }))
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.count - a.count)
+  const myMvpVote = mvpVotes.find((v) => v.voter_id === currentUser?.id)?.voted_for_id || null
 
   return (
     <div className="w-full overflow-hidden rounded-[28px] bg-white shadow-2xl relative my-8 text-slate-900">
@@ -702,6 +778,71 @@ export function MatchDetail({ match, onChange, onClose, currentUser }: MatchDeta
           )}
           </div>
         </div>
+
+        {/* MVP MECZU — widoczne dopiero PO zakończeniu spotkania (patrz `hasMatchEnded`),
+            niezależnie od tego czy admin już kliknął "Zatwierdź i rozlicz". Głosować może
+            tylko ten, kto realnie był w składzie tego meczu — na kogokolwiek poza sobą.
+            Wyniki widoczne od razu każdemu, głos można zmienić w dowolnym momencie. */}
+        {hasMatchEnded && !isCancelled && rawRoster.length > 0 && (
+          <div className="rounded-2xl border border-[#FFD23F]/30 bg-[#FFD23F]/[0.06] p-3.5 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-[#946E00]">
+                <Trophy className="h-4 w-4" />
+                MVP Meczu
+              </span>
+              {mvpVotes.length > 0 && (
+                <span className="text-[10px] font-semibold text-slate-400">
+                  {mvpVotes.length} {mvpVotes.length === 1 ? "głos" : "głosów"}
+                </span>
+              )}
+            </div>
+
+            {mvpRanking.length > 0 ? (
+              <div className="space-y-1.5">
+                {mvpRanking.map(({ player, count }, idx) => (
+                  <div key={player.id} className="flex items-center justify-between rounded-xl bg-white/70 px-3 py-2">
+                    <span className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                      {idx === 0 && <Crown className="h-3.5 w-3.5 text-[#FFD23F] shrink-0" />}
+                      {player.full_name || player.name}
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-500 tabular-nums shrink-0">
+                      {count} {count === 1 ? "głos" : "głosów"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] font-medium text-slate-500">Nikt jeszcze nie zagłosował — bądź pierwszy!</p>
+            )}
+
+            {wasInPlayingRoster && (
+              <div className="pt-2.5 border-t border-[#FFD23F]/20 space-y-1.5">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                  {myMvpVote ? "Zmień swój głos:" : "Zagłosuj:"}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {rawRoster
+                    .filter((p: any) => p.id !== currentUser?.id)
+                    .map((p: any) => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleVoteMvp(p.id)}
+                        disabled={isVoting}
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-[11px] font-bold border transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
+                          myMvpVote === p.id
+                            ? "bg-[#FFD23F] text-[#5C4400] border-[#FFD23F]"
+                            : "bg-white text-slate-600 border-slate-200 hover:border-[#FFD23F]/50 hover:bg-[#FFD23F]/10"
+                        )}
+                      >
+                        {p.full_name || p.name}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* DOLNE PRZYCISKI: DOŁĄCZ / WYPISZ SIĘ — samo zamknięcie robi już X w nagłówku
             (plus klik w tło / Escape), więc tu zostaje tylko realna akcja (dołącz/wypisz),

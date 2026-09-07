@@ -42,6 +42,14 @@ export type Match = {
   rating: number
   players: Player[]
   registrations?: any[]
+  // Pola surowego wiersza Supabase (snake_case) — obok mapowanych camelCase wyżej. app/page.tsx
+  // i match-detail.tsx pracują bezpośrednio na wyniku `.select("*")`, nie na obiekcie z
+  // getMatches() poniżej, więc oba kształty współistnieją w tym samym typie.
+  title?: string
+  time_start?: string
+  time_end?: string
+  max_players?: number
+  price_per_player?: number
 }
 
 // ------------------------------------------------------------------
