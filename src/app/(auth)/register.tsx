@@ -19,7 +19,7 @@ import CustomAlert from '@/components/CustomAlert';
 import Card from '@/components/ui/Card';
 import PressableScale from '@/components/ui/PressableScale';
 import PrimaryButton from '@/components/ui/PrimaryButton';
-import TurnstileWidget from '@/components/TurnstileWidget';
+import SliderCaptcha from '@/components/SliderCaptcha';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -288,7 +288,7 @@ export default function RegisterScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Zabezpieczenie przed botami</Text>
-              <TurnstileWidget key={human.widgetResetKey} c={c} onToken={human.setTurnstileToken} />
+              <SliderCaptcha key={human.widgetResetKey} c={c} onVerified={human.setSliderVerified} />
             </View>
 
             <PrimaryButton

@@ -2,7 +2,7 @@
   "expo": {
     "name": "ESCO VolleyManager",
     "slug": "escovolleymanager",
-    "version": "1.1.2",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "escovolleymanager",
@@ -19,7 +19,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.bartoszbrudny.escovolleymanager",
-      "versionCode": 5
+      "versionCode": 7
     },
     "web": {
       "output": "static",

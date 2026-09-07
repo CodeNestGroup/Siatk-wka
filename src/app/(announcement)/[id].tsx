@@ -105,7 +105,7 @@ type AlertState = {
 const EMPTY_ALERT: AlertState = { visible: false, title: '', message: '', onConfirm: () => {} };
 
 export default function AnnouncementDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, fromMatch } = useLocalSearchParams<{ id: string; fromMatch?: string }>();
   const router = useRouter();
   const { isDark, c } = useAppTheme();
   const styles = useMemo(() => getStyles(c), [c]);
@@ -428,7 +428,18 @@ export default function AnnouncementDetailScreen() {
 
             {linkedMatch && (
               <>
-                <PressableScale onPress={() => router.push(`/(match)/${linkedMatch.id}?from=ogloszenie`)}>
+                <PressableScale
+                  onPress={() => {
+                    // Ten sam zabieg co w MatchView.renderAnnouncement, w drugą stronę: jeśli to
+                    // mecz, z którego przyszliśmy do tego ogłoszenia, wracamy zamiast pchać nowy
+                    // ekran — zapobiega pętli mecz↔ogłoszenie rosnącej w nieskończoność na stosie.
+                    if (fromMatch && linkedMatch.id === fromMatch) {
+                      router.back();
+                    } else {
+                      router.push(`/(match)/${linkedMatch.id}?from=ogloszenie&fromId=${id}`);
+                    }
+                  }}
+                >
                   <Ticket style={styles.miniTicketWrap}>
                     <View style={styles.miniTicketRow}>
                       <DateChip date={linkedMatch.date} width={46} height={50} c={darkPalette} />

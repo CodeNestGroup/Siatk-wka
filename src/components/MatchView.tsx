@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Dimensions, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Dimensions, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -112,9 +112,16 @@ type Props = {
   matchId?: string;
   showBack?: boolean;
   backLabel?: string;
+  // Id ogłoszenia, z którego otwarto ten ekran (jeśli dotyczy) — patrz komentarz w renderAnnouncement.
+  originAnnouncementId?: string;
 };
 
-export default function MatchView({ matchId, showBack = false, backLabel = 'TERMINARZ' }: Props) {
+export default function MatchView({
+  matchId,
+  showBack = false,
+  backLabel = 'TERMINARZ',
+  originAnnouncementId,
+}: Props) {
   const router = useRouter();
   const { isDark, c } = useAppTheme();
   const styles = useMemo(() => getStyles(c, isDark), [c, isDark]);
@@ -132,6 +139,9 @@ export default function MatchView({ matchId, showBack = false, backLabel = 'TERM
   const [activeTab, setActiveTab] = useState<'participants' | 'notifications'>('participants');
   const horizontalScrollRef = useRef<ScrollView>(null);
   const [footerHeight, setFooterHeight] = useState(0);
+  // Pełnoekranowy podgląd listy zawodników — przydatny przy komplecie/rezerwie, gdy skład nie
+  // mieści się wygodnie pod biletem i zakładkami.
+  const [rosterModalVisible, setRosterModalVisible] = useState(false);
 
   const matchBadges = useItemBadges('matches');
   useEffect(() => {
@@ -416,7 +426,7 @@ export default function MatchView({ matchId, showBack = false, backLabel = 'TERM
             <Pill
               c={c}
               variant={item.is_paid ? 'green' : 'amber'}
-              label={item.is_paid ? `✓ ${Number(match.price_per_player)} PLN` : 'NIE OPŁACONE'}
+              label={item.is_paid ? `✓ ${Number(match.price_per_player)} PLN` : 'NIEOPŁACONE'}
             />
           </View>
         </View>
@@ -433,7 +443,18 @@ export default function MatchView({ matchId, showBack = false, backLabel = 'TERM
         layout={LinearTransition.springify()}
         style={styles.notifCardWrap}
       >
-        <PressableScale onPress={() => router.push(`/(announcement)/${item.id}`)}>
+        <PressableScale
+          onPress={() => {
+            // Jeśli to ogłoszenie, z którego właśnie przyszliśmy na ten mecz, wracamy zamiast
+            // pchać nowy ekran na stos — inaczej odbijanie się mecz↔ogłoszenie tworzy nieskończenie
+            // rosnący stos i wyjście wymaga wielokrotnego cofania.
+            if (originAnnouncementId && item.id === originAnnouncementId) {
+              router.back();
+            } else {
+              router.push(`/(announcement)/${item.id}?fromMatch=${matchId ?? match.id}`);
+            }
+          }}
+        >
           <Card c={c} isDark={isDark} accent="blue">
             <View style={styles.notifTopRow}>
               <Text style={styles.notifTitle} numberOfLines={1}>
@@ -464,6 +485,7 @@ export default function MatchView({ matchId, showBack = false, backLabel = 'TERM
   };
 
   return (
+    <>
     <SafeAreaView
       style={styles.safeArea}
       edges={showBack ? ['top', 'bottom', 'left', 'right'] : ['top', 'left', 'right']}
@@ -549,15 +571,24 @@ export default function MatchView({ matchId, showBack = false, backLabel = 'TERM
         </View>
 
         <View style={styles.segmentWrap}>
-          <SegmentButtons
-            c={c}
-            activeKey={activeTab}
-            onChange={switchTab}
-            options={[
-              { key: 'participants', label: `Uczestnicy (${registrations.length}/${capacity})` },
-              { key: 'notifications', label: `Powiadomienia (${announcements.length})` },
-            ]}
-          />
+          <View style={styles.segmentRow}>
+            <View style={styles.segmentFlex}>
+              <SegmentButtons
+                c={c}
+                activeKey={activeTab}
+                onChange={switchTab}
+                options={[
+                  { key: 'participants', label: `Uczestnicy (${registrations.length}/${capacity})` },
+                  { key: 'notifications', label: `Powiadomienia (${announcements.length})` },
+                ]}
+              />
+            </View>
+            {activeTab === 'participants' && (
+              <PressableScale onPress={() => setRosterModalVisible(true)} style={styles.expandBtn}>
+                <Ionicons name="expand-outline" size={18} color={c.ink} />
+              </PressableScale>
+            )}
+          </View>
         </View>
 
         <ScrollView
@@ -635,6 +666,48 @@ export default function MatchView({ matchId, showBack = false, backLabel = 'TERM
         <ToastHost c={c} isDark={isDark} bottom={(footerHeight || 0) + 10} />
       </Animated.View>
     </SafeAreaView>
+
+    <Modal
+      visible={rosterModalVisible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => setRosterModalVisible(false)}
+    >
+      <SafeAreaView style={styles.rosterModalSafeArea} edges={['top', 'bottom', 'left', 'right']}>
+        <View style={styles.rosterModalHeader}>
+          <Text style={styles.rosterModalTitle}>Uczestnicy</Text>
+          <PressableScale onPress={() => setRosterModalVisible(false)} style={styles.backBtn}>
+            <Ionicons name="close" size={20} color={c.ink} />
+          </PressableScale>
+        </View>
+        <ScrollView contentContainerStyle={styles.rosterModalContent} showsVerticalScrollIndicator={false}>
+          <Text style={styles.sectionHeading}>
+            Skład Główny ({mainList.length}/{capacity})
+          </Text>
+          {hasCoreRosterMembers && (
+            <View style={styles.legendRow}>
+              <View style={styles.coreRosterDotLegend} />
+              <Text style={styles.legendText}>stały skład</Text>
+            </View>
+          )}
+          {mainList.length === 0 ? (
+            <Text style={styles.emptySubText}>Brak zapisanych graczy.</Text>
+          ) : (
+            mainList.map((item, index) => renderParticipant(item, index))
+          )}
+
+          <Text style={[styles.sectionHeading, styles.sectionHeadingSpaced]}>
+            Lista Rezerwowa ({waitlist.length})
+          </Text>
+          {waitlist.length === 0 ? (
+            <Text style={styles.emptySubText}>Brak osób na rezerwie.</Text>
+          ) : (
+            waitlist.map((item, index) => renderParticipant(item, index))
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+    </>
   );
 }
 
@@ -709,6 +782,18 @@ const getStyles = (c: Palette, isDark: boolean) =>
     cancelledBannerText: { flex: 1, fontSize: 12, fontWeight: '800', color: darkPalette.redInk },
 
     segmentWrap: { paddingHorizontal: space.screen, marginTop: 14, marginBottom: 12 },
+    segmentRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    segmentFlex: { flex: 1 },
+    expandBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.sm,
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.line,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
     pagerScroll: { flex: 1 },
     page: { width: SCREEN_WIDTH, flex: 1 },
@@ -783,4 +868,16 @@ const getStyles = (c: Palette, isDark: boolean) =>
       shadowOffset: { width: 0, height: -8 },
     },
     lockedText: { fontSize: 13, color: c.ink2, fontStyle: 'italic', textAlign: 'center', fontWeight: '700' },
+
+    rosterModalSafeArea: { flex: 1, backgroundColor: c.bg },
+    rosterModalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: space.screen,
+      paddingTop: 6,
+      paddingBottom: 10,
+    },
+    rosterModalTitle: { fontSize: 18, fontWeight: '800', color: c.ink },
+    rosterModalContent: { paddingHorizontal: space.screen, paddingBottom: 24 },
   });

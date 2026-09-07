@@ -62,7 +62,7 @@ const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
 const PAYMENT_FILTER_OPTIONS: { key: PaymentFilter; label: string }[] = [
   { key: 'all', label: 'Wszystkie' },
   { key: 'paid', label: 'Opłacone' },
-  { key: 'unpaid', label: 'Nie opłacone' },
+  { key: 'unpaid', label: 'Nieopłacone' },
 ];
 
 function RegistrationCard({
@@ -135,7 +135,7 @@ function RegistrationCard({
               {!isCancelled && (
                 <Pill c={c} variant={isWaitlist ? 'amber' : 'green'} label={isWaitlist ? 'REZERWA' : 'SKŁAD GŁÓWNY'} />
               )}
-              <Pill c={c} variant={reg.is_paid ? 'green' : 'amber'} label={reg.is_paid ? 'OPŁACONE' : 'NIE OPŁACONE'} />
+              <Pill c={c} variant={reg.is_paid ? 'green' : 'amber'} label={reg.is_paid ? 'OPŁACONE' : 'NIEOPŁACONE'} />
             </View>
           </View>
         </View>
